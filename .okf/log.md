@@ -14,6 +14,17 @@ deliberate. Anything else appended to the bottom is a mistake: five
 entries, including both 2026-09-15 sections, were found there on
 2026-09-15 and moved back up.
 
+## 2026-10-29 -- field_equals holds where it is checked
+
+[analysis/fixtures-support.md](analysis/fixtures-support.md): the
+ConstantFolder's `known` must also hold when the entry paragraph returns
+(mockymock checks `EXPECT` there), a main-line GO TO sets
+`_WalkState.jumped`, IF/EVALUATE branches are decided when the walk knows
+their outcome (`_decide`, `dismissed_sites`), and a group-record WRITE
+observes every named field under it, never a FILLER (`_site_fields`).
+[generators/fixtures.md](generators/fixtures.md) Tier 2 says so too.
+[tests.md](tests.md): test count refreshed (~15,610).
+
 ## 2026-10-29 -- docs cleanup
 
 `scripts/okf_check.py`'s `EXTRA_FILES` now also covers `README.md`,

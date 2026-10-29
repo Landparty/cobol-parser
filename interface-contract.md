@@ -307,6 +307,17 @@ scenarios and a lower `targeted` count than it did before. That is the
 corrected number, not a regression — the previous count included arms nothing
 reached.
 
+**No bump for the 2026-10-29 `field_equals` change, and why.** A
+`field_equals` is now offered only when the field still holds its value when
+the entry paragraph returns, and the fold now follows IF/EVALUATE branches
+the scenario's data decides and observes every field of a written group
+record. No key was added, removed or retyped. The meaning of `value` gained
+a condition that makes it true for the way mocky-mock uses it: mocky-mock
+renders a `field_equals` as an `EXPECT`, which runs after the PERFORM of the
+entry paragraph, so a field shown as 1 and then set to 2 used to produce an
+`EXPECT` that failed on its first run. A consumer gated on
+`bundle_version == 1` parses these bundles exactly as before.
+
 **No bump for the `PIC N`/`PIC G` byte-width fix, and why.** `PIC N(n)`/`PIC
 G(n)` items now size at 2 bytes per character instead of 1 — correct for IBM
 Enterprise COBOL's national/DBCS storage, where each `N`/`G` position is one

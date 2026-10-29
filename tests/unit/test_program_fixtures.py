@@ -1137,12 +1137,29 @@ class TestFieldEqualsAfterARunEndingArm:
 """
 
     @pytest.mark.parametrize("ender", ["STOP RUN", "GOBACK"])
-    def test_no_scenario_asserts_the_display_after_the_if(self, ender):
+    def test_only_a_scenario_that_skips_the_arm_asserts_the_display(self, ender):
+        # The scenario's own ACCEPT value decides the IF: the one taking the
+        # arm ends the run before the DISPLAY and asserts nothing; one that
+        # skips it shows 'PROCESSED'.
         bundle = _bundle_for(self._SOURCE.format(ender=ender))
         names = [scenario.name for scenario in bundle.scenarios]
         assert any("THEN" in name for name in names), names
+        asserted = []
         for scenario in bundle.scenarios:
-            assert not any(e.kind == "field_equals" for e in scenario.expectations)
+            equals = [e for e in scenario.expectations if e.kind == "field_equals"]
+            accepted = [
+                row.get("WS-CODE")
+                for fixture in scenario.fixtures
+                for row in fixture.sequence
+            ]
+            if "Q" in accepted:
+                assert equals == [], scenario.name
+            elif equals:
+                assert [(e.ref, e.value) for e in equals] == [
+                    ("WS-MSG", "PROCESSED")
+                ], scenario.name
+                asserted.append(scenario.name)
+        assert asserted, names
 
     _STATUS_SOURCE = """\
        IDENTIFICATION DIVISION.
@@ -1976,7 +1993,7 @@ class TestKeyedReadReturnsTheKeyAskedFor:
     def test_unknown_key_is_generated_and_noted(self):
         procedure = """\
            ACCEPT WS-IN
-           IF WS-IN = 'Y'
+           IF WS-IN > 'M'
               MOVE 'K001' TO VS-KEY
            ELSE
               MOVE 'K002' TO VS-KEY

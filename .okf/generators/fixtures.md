@@ -470,8 +470,12 @@ carries the exact same expectations.
   no single representative value — keyed by `spec.qualified_name` from
   `fixture.layout`/`fixture.sequence[0]`, then folds the program's entry
   paragraph chain seeded with those values, turning every field still
-  knowable at a `DISPLAY`/`WRITE` into `Expectation(kind="field_equals",
-  ref=qualified_name, value=folded_value)`. The fold (and `_pin_read_keys`'
+  knowable at a `DISPLAY`/`WRITE` (and still holding that value when the
+  entry paragraph returns, where mockymock's `EXPECT` checks it) into
+  `Expectation(kind="field_equals", ref=qualified_name,
+  value=folded_value)`. The seeds also decide IF/EVALUATE branches the
+  scenario's own data settles (see the fold's rules in
+  [analysis/fixtures-support.md](../analysis/fixtures-support.md)). The fold (and `_pin_read_keys`'
   folds) get the Tier 1 counter's `InvocationCounts.success_skipped`, so a
   STOP RUN / GOBACK in a status check's failure arm does not blank the
   happy path's expectations while one in any other arm does (#591).

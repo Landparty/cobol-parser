@@ -118,6 +118,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+* **`gen-fixtures`: a `field_equals` no longer asserts a value the field has
+  lost by the time it is checked.** The fold reported what a DISPLAY/WRITE
+  showed, but mocky-mock runs the matching `EXPECT` after the PERFORM of the
+  entry paragraph, so `MOVE 1 TO N. DISPLAY N. MOVE 2 TO N.` produced
+  `EXPECT N TO BE 1`, which failed on its first run. A field is now offered
+  only when it still holds the value when the entry paragraph returns; a
+  main-line GO TO out of it leaves that point unknown, so nothing is
+  offered. The same change lets the fold follow an IF/EVALUATE whose
+  outcome the scenario's own data decides (numbers, alphanumeric equality,
+  sign tests, level-88s with literal VALUEs, one-subject EVALUATEs) instead
+  of poisoning both arms, and makes a WRITE of a group record observe every
+  field under it.
+
 * **`#` and `@` in DB2 names inside EXEC SQL.** `SELECT ACCT# ... FROM
   T#TAB` failed the whole parse with `Invalid character: #`; the characters
   are now glued into the name they abut inside an EXEC block (`$` too, so

@@ -21,10 +21,15 @@ than guessing:
   times, so nothing inside it is knowable at fold time -- every field its
   body could write is poisoned, and the walk continues *after* the loop (it
   still executes; the walk just cannot see inside it).
-* An ``IF``/``EVALUATE`` branches on data this walk does not evaluate, so
-  every field either arm could write is poisoned the same way -- this is a
-  conjunctive walk, not per-scenario branch evaluation (Phase 5's
-  `ScenarioPlanner` already owns targeting a specific arm).
+* An ``IF``/``EVALUATE`` whose condition the walk can decide from values it
+  already knows (see ``_decide``) runs only the arm it selects: that arm is
+  walked like the main line and the others never run. Anything it cannot
+  decide -- an operand the walk does not know, an ordering comparison
+  between alphanumeric values (its answer depends on the collating
+  sequence, EBCDIC on the mainframe and ASCII under GnuCOBOL), a THRU range
+  on text, a subscripted operand -- leaves the statement undecided, and
+  every field either arm could write is poisoned the same way a loop body
+  is.
 * A conditional handler body (``AT END``/``INVALID KEY``/``ON SIZE ERROR``/
   ``ON OVERFLOW``/``ON EXCEPTION``/``AT EOP`` and their ``NOT`` variants) may
   or may not fire, so every field it could write is poisoned the same way an
@@ -48,11 +53,15 @@ than guessing:
   DECLARATIVES, dead code) vetoes the field at the end. A GO TO / EXIT
   PARAGRAPH / NEXT SENTENCE the walk cannot follow puts it in "uncertain"
   mode, where every later write poisons instead of folding.
-* Only a bare ``DISPLAY``/``WRITE`` operand that resolves directly to an
-  elementary field is an observation point -- a whole-record WRITE's
-  individual member fields are not (yet) walked, so some real
-  ``field_equals`` opportunities are silently not offered. Never wrong,
-  sometimes just quieter than it could be.
+* A ``DISPLAY`` operand is an observation point when it resolves directly
+  to an elementary field; a ``WRITE`` of a group record observes every
+  elementary field under it.
+* A reported field must also still hold its value when the entry paragraph
+  returns: a test harness PERFORMs the entry paragraph and checks fields
+  there (mockymock's ``EXPECT`` runs after the PERFORM, wherever it is
+  written). A field the entry paragraph changes after showing it is not
+  reported, and neither is anything when a main-line GO TO leaves the entry
+  paragraph for code the walk does not follow.
 """
 
 from __future__ import annotations
@@ -77,7 +86,13 @@ from ..models.statements.arithmetic import (
     MultiplyStatement,
     SubtractStatement,
 )
-from ..models.statements.base import ArithmeticExpression, CobolExpression, FunctionCall
+from ..models.statements.base import (
+    ArithmeticExpression,
+    CobolExpression,
+    ConditionalExpression,
+    FunctionCall,
+    LogicalExpression,
+)
 from ..models.statements.call import CallStatement
 from ..models.statements.control import (
     EvaluateStatement,
@@ -110,7 +125,7 @@ if TYPE_CHECKING:
 # FieldCategory has no such cycle (generators/data/layout.py has zero
 # dependency back into cobolparser.analysis) -- domains.py already imports it
 # the same way, unguarded.
-from ..generators.data.layout import FieldCategory
+from ..generators.data.layout import FieldCategory, all_literal_operand
 
 _NUMERIC_LITERAL_RE = re.compile(r"^[+-]?\d+(\.\d+)?$")
 _QUOTED_LITERAL_RE = re.compile(r'^(["\'])(.*)\1$', re.DOTALL)
@@ -590,7 +605,8 @@ def _drop_under(
 @dataclass
 class ConstantFoldResult:
     """Fields whose value at every DISPLAY/WRITE site that observed them was
-    the same known value -- what the program emitted there."""
+    the same known value -- what the program emitted there -- and still is
+    when the entry paragraph returns."""
 
     known: dict[str, str] = field(default_factory=dict)
     #: Every keyed READ of an INDEXED file (see :func:`keyed_read_key`),
@@ -664,9 +680,12 @@ class ConstantFolder:
         # source order: control falls through a paragraph's end into the
         # next one, so a walk that stopped at the entry paragraph's last
         # statement missed every write and observation after it.
+        entry_env: dict[str, Decimal | str] | None = None
         for paragraph in _fall_through_chain(entry, ordered_names, by_name):
             if state.stopped:
                 break
+            if paragraph is not entry and entry_env is None:
+                entry_env = dict(state.env)
             _walk_statements(
                 paragraph.statements,
                 index,
@@ -693,22 +712,28 @@ class ConstantFolder:
         # "every site that observed it" must be every site, not just the
         # walked ones.
         for site in _observation_sites(ast):
-            if id(site) in state.visited_sites:
+            if id(site) in state.visited_sites or id(site) in state.dismissed_sites:
                 continue
-            for operand in _site_operands(site):
-                resolved = _safe_resolve(index, operand)
-                if resolved is not None:
-                    state.observed.setdefault(resolved.spec.qualified_name, []).append(
-                        None
-                    )
+            for qname in _site_fields(site, index):
+                state.observed.setdefault(qname, []).append(None)
+
+        # A test harness PERFORMs the entry paragraph and checks fields when
+        # it returns: at its end, or where a STOP RUN / GOBACK ended the
+        # walk inside it. A main-line GO TO out of it went somewhere the
+        # walk did not follow, so that point is unknown.
+        if entry_env is None and not state.jumped:
+            entry_env = dict(state.env)
 
         # A field is reported only when every DISPLAY/WRITE site that
         # observed it saw the same known value -- the value the program
-        # actually emitted there, not whatever it held when the walk ended.
+        # actually emitted there -- and the field still holds it when the
+        # run ends, where a test harness checks it.
         known: dict[str, str] = {}
         for qname, values in state.observed.items():
             first = values[0]
             if first is None or any(value != first for value in values[1:]):
+                continue
+            if entry_env is None or entry_env.get(qname) != first:
                 continue
             resolved = _safe_resolve(index, qname)
             if resolved is None:
@@ -872,6 +897,28 @@ def _site_operands(stmt: Any) -> list[str]:
     return []
 
 
+def _site_fields(stmt: Any, index: ProgramLayoutIndex) -> list[str]:
+    """Qualified names of the elementary fields a DISPLAY/WRITE shows: each
+    operand that resolves to one, and for a WRITE of a group record every
+    named elementary field under it (a FILLER has no name a test could
+    check)."""
+    fields: list[str] = []
+    for operand in _site_operands(stmt):
+        resolved = _safe_resolve(index, operand)
+        if resolved is not None:
+            fields.append(resolved.spec.qualified_name)
+        elif isinstance(stmt, IOWriteStatement):
+            base, has_suffix = _base_name(operand)
+            if not has_suffix:
+                for qpath in _group_paths(index, base):
+                    fields.extend(
+                        leaf
+                        for leaf in _facts(index).leaves_under(qpath)
+                        if leaf.rsplit(".", 1)[-1].upper() != "FILLER"
+                    )
+    return fields
+
+
 def _transfer_kind(stmt: Any) -> str | None:
     """``"jump"`` for a GO TO (control goes to code this walk does not
     follow), ``"skip"`` for a transfer that only skips forward inside the
@@ -917,6 +964,8 @@ class _WalkState:
         "uncertain",
         "read_keys",
         "success_skipped",
+        "dismissed_sites",
+        "jumped",
     )
 
     def __init__(
@@ -960,6 +1009,14 @@ class _WalkState:
         #: (`InvocationCounts.success_skipped`): a run ender in one does not
         #: make the walk uncertain for a scenario supplying success (#591).
         self.success_skipped: frozenset[int] | set[int] = frozenset()
+        #: ``id()`` of every DISPLAY/WRITE in an IF/EVALUATE arm the walk
+        #: decided does not run: such a site never shows anything, so it
+        #: does not veto the fields it names the way an unreached one does.
+        self.dismissed_sites: set[int] = set()
+        #: Set when a main-line GO TO stopped the walk: control went on
+        #: somewhere the walk did not follow, so where the entry paragraph
+        #: returns is unseen.
+        self.jumped = False
 
 
 # -- entry point / paragraph ordering -----------------------------------------
@@ -1173,8 +1230,8 @@ def _dispatch_one(
                 state.env,
                 source_width=_text_width(stmt.from_clause, index),
             )
-        if stmt.record_name:
-            _mark_observed(stmt.record_name, index, state)
+        for qname in _site_fields(stmt, index):
+            state.observed.setdefault(qname, []).append(state.env.get(qname))
     elif isinstance(stmt, IOReadStatement):
         _fold_read(stmt, index, state)
     elif isinstance(stmt, IOAcceptStatement):
@@ -1182,6 +1239,9 @@ def _dispatch_one(
     elif isinstance(stmt, PerformStatement):
         return _walk_perform(stmt, index, by_name, ordered_names, state)
     elif isinstance(stmt, IfStatement):
+        arm = _decided_if_arm(stmt, index, state)
+        if arm is not None:
+            return (None, arm)
         _poison_written_names(
             stmt.then_statements, index, state.env, by_name, ordered_names, state=state
         )
@@ -1189,6 +1249,9 @@ def _dispatch_one(
             stmt.else_statements, index, state.env, by_name, ordered_names, state=state
         )
     elif isinstance(stmt, EvaluateStatement):
+        arm = _decided_evaluate_arm(stmt, index, state)
+        if arm is not None:
+            return (None, arm)
         for wc in stmt.when_clauses:
             _poison_written_names(
                 wc.statements, index, state.env, by_name, ordered_names, state=state
@@ -1202,7 +1265,9 @@ def _dispatch_one(
                 ordered_names,
                 state=state,
             )
-    elif isinstance(stmt, (GoStatement, StopStatement, GobackStatement)):
+    elif isinstance(stmt, GoStatement):
+        state.stopped = state.jumped = True
+    elif isinstance(stmt, (StopStatement, GobackStatement)):
         state.stopped = True
     elif isinstance(stmt, ExitStatement) and stmt.exit_type == "PROGRAM":
         state.stopped = True
@@ -1650,12 +1715,8 @@ def _poison_written_names(
                 # A site inside a block that may run zero, one or many times:
                 # what it shows is not knowable, so it vetoes the field.
                 state.visited_sites.add(id(stmt))
-                for operand in _site_operands(stmt):
-                    resolved = _safe_resolve(index, operand)
-                    if resolved is not None:
-                        state.observed.setdefault(
-                            resolved.spec.qualified_name, []
-                        ).append(None)
+                for qname in _site_fields(stmt, index):
+                    state.observed.setdefault(qname, []).append(None)
             transfer = _transfer_kind(stmt)
             if transfer is not None or (_ends_run(stmt) and not success_skipped):
                 # The block may leave the straight line: later statements may
@@ -1689,6 +1750,326 @@ def _poison_written_names(
                 state=state,
                 success_skipped=success_skipped,
             )
+
+
+# -- IF / EVALUATE decisions ---------------------------------------------------
+
+#: The relational operators `_conditions.py` resolves a comparison to.
+_RELATIONS = {
+    "EQUAL": lambda a, b: a == b,
+    "NOT_EQUAL": lambda a, b: a != b,
+    "GREATER": lambda a, b: a > b,
+    "LESS": lambda a, b: a < b,
+    "GREATER_OR_EQUAL": lambda a, b: a >= b,
+    "LESS_OR_EQUAL": lambda a, b: a <= b,
+}
+#: Sign conditions on a numeric value (``IS [NOT] POSITIVE`` and so on).
+_SIGNS = {
+    "POSITIVE": lambda v: v > 0,
+    "NEGATIVE": lambda v: v < 0,
+    "ZERO": lambda v: v == 0,
+    "ZEROS": lambda v: v == 0,
+    "ZEROES": lambda v: v == 0,
+}
+_SPACE_FIGURATIVES = frozenset({"SPACE", "SPACES"})
+#: Words a level-88 VALUE entry may hold as a figurative constant.
+_FIGURATIVE_WORDS = frozenset(
+    {
+        "SPACE",
+        "SPACES",
+        "ZERO",
+        "ZEROS",
+        "ZEROES",
+        "HIGH-VALUE",
+        "HIGH-VALUES",
+        "LOW-VALUE",
+        "LOW-VALUES",
+        "QUOTE",
+        "QUOTES",
+        "NULL",
+        "NULLS",
+    }
+)
+
+#: A condition operand the walk knows: ``("num", Decimal)`` for a numeric
+#: value (a numeric literal, ZERO, or a numeric field the walk holds), or
+#: ``("text", str)`` for an alphanumeric one (a quoted literal, SPACES as
+#: ``""``, or a text field the walk holds, unpadded).
+_Known = tuple[str, Decimal | str]
+
+
+def _decided_if_arm(
+    stmt: IfStatement, index: ProgramLayoutIndex, state: _WalkState
+) -> list[Any] | None:
+    """The arm an IF runs when the walk can decide its condition, else None.
+    The other arm's DISPLAY/WRITE sites are recorded as never shown."""
+    if state.uncertain or stmt.condition is None:
+        return None
+    verdict = _decide(stmt.condition, index, state.env)
+    if verdict is None:
+        return None
+    taken, skipped = (
+        (stmt.then_statements, stmt.else_statements)
+        if verdict
+        else (stmt.else_statements, stmt.then_statements)
+    )
+    _dismiss_sites(skipped, state)
+    return list(taken)
+
+
+def _decided_evaluate_arm(
+    stmt: EvaluateStatement, index: ProgramLayoutIndex, state: _WalkState
+) -> list[Any] | None:
+    """The arm an EVALUATE runs when the walk can decide every WHEN up to the
+    one that matches, else None. One subject only (no ALSO); a WHEN that
+    holds a condition as text is never decided."""
+    if state.uncertain or len(stmt.subjects or []) != 1:
+        return None
+    subject = str(stmt.subjects[0]).strip()
+    arms: list[tuple[list[Any], list[Any]]] = []
+    pending: list[Any] = []
+    for clause in stmt.when_clauses:
+        pending.extend(clause.selectors)
+        if getattr(clause, "stacked", False) and not clause.statements:
+            continue  # a stacked WHEN shares the next clause's statements
+        arms.append((pending, clause.statements))
+        pending = []
+    if pending:
+        return None
+    chosen: list[Any] | None = None
+    for selectors, statements in arms:
+        verdicts = [
+            _selector_matches(subject, sel, index, state.env) for sel in selectors
+        ]
+        if True in verdicts:
+            chosen = statements
+            break
+        if None in verdicts or not verdicts:
+            return None
+    if chosen is None:
+        chosen = stmt.default_when.statements if stmt.default_when else []
+    for _, statements in arms:
+        if statements is not chosen:
+            _dismiss_sites(statements, state)
+    if stmt.default_when and stmt.default_when.statements is not chosen:
+        _dismiss_sites(stmt.default_when.statements, state)
+    return list(chosen)
+
+
+def _selector_matches(
+    subject: str,
+    selector: Any,
+    index: ProgramLayoutIndex,
+    env: dict[str, Decimal | str],
+) -> bool | None:
+    if not isinstance(selector, dict):
+        return None
+    kind = selector.get("type")
+    if subject.upper() == "TRUE":
+        if (
+            kind == "Literal"
+            and selector.get("identifier")
+            and set(selector)
+            <= {
+                "type",
+                "value",
+                "identifier",
+            }
+        ):
+            return _decide_condition_name(str(selector["value"]), index, env)
+        return None
+    left = _condition_operand(subject, index, env)
+    if left is None:
+        return None
+    if kind == "Literal" and set(selector) <= {"type", "value", "identifier"}:
+        right = _condition_operand(str(selector["value"]), index, env)
+        return None if right is None else _compare_known("EQUAL", left, right)
+    if kind == "Range" and set(selector) == {"type", "start", "end"}:
+        start = _condition_operand(str(selector["start"]), index, env)
+        end = _condition_operand(str(selector["end"]), index, env)
+        if left[0] != "num" or start is None or end is None:
+            return None
+        low = _compare_known("GREATER_OR_EQUAL", left, start)
+        high = _compare_known("LESS_OR_EQUAL", left, end)
+        if low is None or high is None:
+            return None
+        return low and high
+    return None
+
+
+def _dismiss_sites(statements: list[Any], state: _WalkState) -> None:
+    """Record every DISPLAY/WRITE nested in an arm that does not run. Sites
+    in paragraphs the arm PERFORMs are not included: those paragraphs may
+    run from elsewhere."""
+    pending = [statements]
+    while pending:
+        for stmt in pending.pop():
+            if isinstance(stmt, (DisplayStatement, IOWriteStatement)):
+                state.dismissed_sites.add(id(stmt))
+            pending.extend(_nested_statement_lists(stmt))
+
+
+def _decide(
+    expr: Any, index: ProgramLayoutIndex, env: dict[str, Decimal | str]
+) -> bool | None:
+    """True or False when the condition's value follows from what the walk
+    knows; None when it does not."""
+    if isinstance(expr, LogicalExpression):
+        operator = (expr.operator or "").upper()
+        left = (
+            _decide(expr.left_condition, index, env)
+            if expr.left_condition is not None
+            else None
+        )
+        if operator == "NOT":
+            return None if left is None else not left
+        right = (
+            _decide(expr.right_condition, index, env)
+            if expr.right_condition is not None
+            else None
+        )
+        if operator == "AND":
+            if left is False or right is False:
+                return False
+            return True if left and right else None
+        if operator == "OR":
+            if left is True or right is True:
+                return True
+            return False if left is False and right is False else None
+        return None
+    if not isinstance(expr, ConditionalExpression):
+        return None
+    operator = (expr.operator or "").upper()
+    if not isinstance(expr.left_operand, str):
+        return None
+    if operator == "CONDITION_NAME":
+        return _decide_condition_name(expr.left_operand, index, env)
+    if operator in _RELATIONS:
+        if not isinstance(expr.right_operand, str):
+            return None
+        left_value = _condition_operand(expr.left_operand, index, env)
+        right_value = _condition_operand(expr.right_operand, index, env)
+        if left_value is None or right_value is None:
+            return None
+        return _compare_known(operator, left_value, right_value)
+    negated = operator.startswith("IS NOT ")
+    word = operator.removeprefix("IS NOT ").removeprefix("IS ")
+    if word in _SIGNS:
+        known = _condition_operand(expr.left_operand, index, env)
+        if known is None or known[0] != "num" or not isinstance(known[1], Decimal):
+            return None
+        verdict = bool(_SIGNS[word](known[1]))
+        return not verdict if negated else verdict
+    return None
+
+
+def _decide_condition_name(
+    name: str, index: ProgramLayoutIndex, env: dict[str, Decimal | str]
+) -> bool | None:
+    """A level-88 test, decided only when every VALUE is a plain literal (or
+    a numeric THRU range) the parent field's known value can be compared
+    with."""
+    base, has_suffix = _base_name(name)
+    if has_suffix:
+        return None
+    raw_values = index.condition_raw_values(base)
+    resolved = _safe_resolve(index, base)
+    if not raw_values or resolved is None:
+        return None
+    current = _condition_operand(resolved.spec.qualified_name, index, env)
+    if current is None:
+        return None
+    verdicts: list[bool | None] = []
+    position = 0
+    while position < len(raw_values):
+        start = _condition_value(raw_values[position], current[0])
+        position += 1
+        if start is None:
+            return None
+        if position < len(raw_values) and raw_values[position].upper().startswith(
+            "THROUGH:"
+        ):
+            end = _condition_value(raw_values[position][len("THROUGH:") :], "num")
+            position += 1
+            if current[0] != "num" or end is None:
+                return None
+            low = _compare_known("GREATER_OR_EQUAL", current, start)
+            high = _compare_known("LESS_OR_EQUAL", current, end)
+            verdicts.append(None if low is None or high is None else low and high)
+        else:
+            verdicts.append(_compare_known("EQUAL", current, start))
+    if True in verdicts:
+        return True
+    return None if None in verdicts else False
+
+
+def _condition_value(raw: str, kind: str) -> _Known | None:
+    """One VALUE entry of a level-88 item, as the index records it: a text
+    literal without its quotes, a numeric literal, or a figurative word. A
+    word that could be either a figurative constant or a quoted literal
+    spelling it is not decided."""
+    text = raw.strip()
+    upper = text.upper()
+    if upper.startswith("THROUGH:") or upper == "ALL" or all_literal_operand(text):
+        return None
+    if kind == "num":
+        if upper in _ZERO_FIGURATIVES:
+            return ("num", Decimal(0))
+        if not _NUMERIC_LITERAL_RE.match(text):
+            return None
+        try:
+            return ("num", Decimal(text))
+        except InvalidOperation:
+            return None
+    if upper in _FIGURATIVE_WORDS:
+        return None
+    if _QUOTED_LITERAL_RE.match(text):
+        return ("text", unquote_literal(text))
+    return ("text", raw)
+
+
+def _condition_operand(
+    token: str, index: ProgramLayoutIndex, env: dict[str, Decimal | str]
+) -> _Known | None:
+    text = token.strip()
+    if _NUMERIC_LITERAL_RE.match(text):
+        try:
+            return ("num", Decimal(text))
+        except InvalidOperation:
+            return None
+    if _QUOTED_LITERAL_RE.match(text):
+        return ("text", unquote_literal(text))
+    upper = text.upper()
+    if upper in _ZERO_FIGURATIVES:
+        return ("num", Decimal(0))
+    if upper in _SPACE_FIGURATIVES:
+        return ("text", "")
+    base, has_suffix = _base_name(text)
+    if has_suffix:
+        return None
+    resolved = _safe_resolve(index, base)
+    if resolved is None:
+        return None
+    value = env.get(resolved.spec.qualified_name)
+    if resolved.spec.category is FieldCategory.NUMERIC and isinstance(value, Decimal):
+        return ("num", value)
+    if resolved.spec.category in _TEXT_CATEGORIES and isinstance(value, str):
+        return ("text", value)
+    return None
+
+
+def _compare_known(operator: str, left: _Known, right: _Known) -> bool | None:
+    """A relation between two known operands, when its answer does not
+    depend on the collating sequence: any relation between numbers, and
+    equality between alphanumeric values (the shorter padded with spaces).
+    ZERO against an alphanumeric value, and a number against text, are not
+    decided."""
+    if left[0] == "num" and right[0] == "num":
+        return bool(_RELATIONS[operator](left[1], right[1]))
+    if left[0] == "text" and right[0] == "text" and operator in ("EQUAL", "NOT_EQUAL"):
+        equal = str(left[1]).rstrip(" ") == str(right[1]).rstrip(" ")
+        return equal if operator == "EQUAL" else not equal
+    return None
 
 
 # -- MOVE ----------------------------------------------------------------------
