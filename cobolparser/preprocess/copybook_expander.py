@@ -890,6 +890,7 @@ def _looks_fixed_format(text: str) -> bool:
     """
     from .source_format import (
         _has_tagged_line_anchor,
+        _is_numbered_blank_line,
         _sequence_area_is_fixed_like,
         detect_fixed_format,
     )
@@ -900,6 +901,8 @@ def _looks_fixed_format(text: str) -> bool:
     if len(non_blank) >= 3:
         return detect_fixed_format(text)
     for line in non_blank:
+        if _is_numbered_blank_line(line):
+            continue
         if len(line) < 7:
             return False
         indicator = line[6]

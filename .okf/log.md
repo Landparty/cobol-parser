@@ -14,6 +14,15 @@ deliberate. Anything else appended to the bottom is a mistake: five
 entries, including both 2026-09-15 sections, were found there on
 2026-09-15 and moved back up.
 
+## 2026-10-29 -- numbered blank lines; all-digit procedure names
+
+[preprocessing.md](preprocessing.md): a line holding only its sequence
+number (`000300`) now counts as fixed-format evidence; a copybook with a
+few of them in its banner was judged free-form and a `#` in one of its
+comment lines failed the parse. [lexer.md](lexer.md): new post-pass
+`_merge_numeric_procedure_names()` reads `1000-0` as one word outside EXEC
+blocks, so all-digit paragraph names parse.
+
 ## 2026-10-29 -- field_equals holds where it is checked
 
 [analysis/fixtures-support.md](analysis/fixtures-support.md): the

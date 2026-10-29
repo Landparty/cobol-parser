@@ -2205,6 +2205,7 @@ class _CobolLexerPure:
         path returns the same list object).
         """
         self._merge_concatenated_literals()
+        self._merge_numeric_procedure_names()
         self._merge_exec_name_chars()
         self._flag_stray_sql_chars()
         self._retype_operator_currency_symbols()
@@ -2513,6 +2514,88 @@ class _CobolLexerPure:
             TokenType.CURRENCY,
         }
     )
+
+    #: Tokens that may abut an all-digit procedure name and still end it.
+    _NUMERIC_NAME_ENDS = frozenset(
+        {
+            TokenType.PERIOD,
+            TokenType.COMMA,
+            TokenType.SEMICOLON,
+            TokenType.NEWLINE,
+            TokenType.EOF,
+        }
+    )
+
+    def _merge_numeric_procedure_names(self) -> None:
+        """Outside ``EXEC ... END-EXEC``, join digit runs glued by hyphens
+        (``1000-0``, ``0100-0200``) into one IDENTIFIER.
+
+        A procedure name may consist of digits alone, hyphens included
+        (``1000-0.`` as a paragraph header, ``PERFORM 1000-0``), and an
+        arithmetic minus needs a space on both sides, so such a run with no
+        space in it is one word. It used to lex as ``1000`` ``-`` ``0``: the
+        header and every PERFORM / GO TO naming it were dropped as unparsed
+        tokens. A run that a word, number or literal abuts (``1000-0.5``,
+        ``1000-0E1``) is left alone, and so is SQL text, where ``10-5`` is
+        arithmetic.
+        """
+        tokens = self.tokens
+        if not any(t.type == TokenType.MINUS for t in tokens):
+            return
+        merged: list[Token] = []
+        in_exec = False
+        index = 0
+        count = len(tokens)
+        while index < count:
+            token = tokens[index]
+            if token.type == TokenType.EXEC:
+                in_exec = True
+            elif token.type == TokenType.END_EXEC:
+                in_exec = False
+            end = index if in_exec else self._numeric_name_end(tokens, index)
+            if end == index:
+                merged.append(token)
+                index += 1
+                continue
+            value = "".join(t.value for t in tokens[index : end + 1])
+            merged.append(Token(TokenType.IDENTIFIER, value, token.location))
+            index = end + 1
+        tokens[:] = merged
+
+    def _numeric_name_end(self, tokens: list[Token], index: int) -> int:
+        """The index of the last token of an all-digit hyphenated name that
+        starts at *index*, or *index* itself when none does."""
+
+        def digits(position: int) -> bool:
+            if position >= len(tokens):
+                return False
+            token = tokens[position]
+            return (
+                token.type in (TokenType.NUMERIC_LITERAL, TokenType.LEVEL_NUMBER)
+                and token.value.isdigit()
+            )
+
+        if not digits(index):
+            return index
+        end = index
+        while (
+            end + 2 < len(tokens)
+            and tokens[end + 1].type == TokenType.MINUS
+            and self._abuts(tokens[end], tokens[end + 1])
+            and digits(end + 2)
+            and self._abuts(tokens[end + 1], tokens[end + 2])
+        ):
+            end += 2
+        if end == index:
+            return index
+        following = tokens[end + 1] if end + 1 < len(tokens) else None
+        if (
+            following is not None
+            and following.type not in self._NUMERIC_NAME_ENDS
+            and self._abuts(tokens[end], following)
+        ):
+            return index
+        return end
 
     #: '#' / '@' and '$' (CURRENCY), the non-letters of a DB2 name.
     _NAME_CHAR_TYPES = frozenset({TokenType.SQL_NAME_CHAR, TokenType.CURRENCY})

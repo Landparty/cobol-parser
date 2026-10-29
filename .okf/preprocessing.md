@@ -406,7 +406,13 @@ hatch is in [cli.md](cli.md).
   numbers fixed, so an opening `>>SOURCE FREE` works in any column. Only the
   opening line decides; a later column-1 directive does not.
 * **Rule 1 (strict):** columns 1-6 blank or all digits. Decides on its own;
-  rule 2 only ever *adds* detections.
+  rule 2 only ever *adds* detections. A *numbered blank line* (`000300` and
+  nothing else, as an export that strips trailing blanks leaves every empty
+  record; `_is_numbered_blank_line`) counts as a strict hit too, here and in
+  `_looks_fixed_format()`'s short-member path. Before 2026-10-29 such a line
+  was skipped but still counted in the sample, so a copybook with a few in
+  its banner was judged free-form and its comment lines reached the lexer
+  (`Invalid character: #`, `tests/regression/test_numbered_blank_copybook_lines.py`).
 * **Rule 2 (change tags `SAPR24`, `28486`, `JSINT` in columns 1-6):** a
   tag-like sequence area (`_sequence_area_is_fixed_like`, `_CHANGE_TAG_RE`:
   one unbroken `[A-Za-z0-9#@$][A-Za-z0-9_/#@$.-]*` token -- no internal

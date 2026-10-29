@@ -91,6 +91,20 @@ def _sequence_area_is_fixed_like(seq_area: str) -> tuple[bool, bool]:
     return False, False
 
 
+def _is_numbered_blank_line(line: str) -> bool:
+    """A blank fixed-format record that kept only its sequence number.
+
+    A mainframe export that strips trailing blanks turns every empty line of
+    a numbered member into ``000300``: six digits (or fewer, right-trimmed)
+    and nothing else. Such a line is fixed-format evidence like any other
+    numbered record. Skipping it but still counting it in the sample used to
+    drag a copybook with a few blank lines in its banner under the 60% bar,
+    so the member was judged free-form, its column-7 comment lines were
+    spliced in raw, and a ``#`` in one failed the parse.
+    """
+    return len(line) <= 6 and line.strip().isdigit()
+
+
 def _has_area_a_division_header(non_empty_lines: list[str]) -> bool:
     """True when a division/PROGRAM-ID header starts in the code area.
 
@@ -234,6 +248,9 @@ def detect_fixed_format(source: str) -> bool:
 
     for line in non_empty_lines[:sample_size]:
         if len(line) < 7:
+            if _is_numbered_blank_line(line):
+                strict_hits += 1
+                relaxed_hits += 1
             continue
 
         seq_area = line[:6]
