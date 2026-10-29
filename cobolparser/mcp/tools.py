@@ -433,6 +433,12 @@ class CobolTools:
             answer["unreachable_procedures"] = (
                 list(flow.unreachable_nodes) if reach is None else reach.unreachable
             )
+            if reach is not None and reach.unreachable:
+                answer["unreachable_reasons"] = response.cap(
+                    _unreachable_reasons(flow, reach, parsed, response),
+                    cap,
+                    "unreachable_reasons",
+                )
             answer["perform_cycles"] = len(flow.cycles)
 
         signature = _attempt(
@@ -1047,6 +1053,9 @@ class CobolTools:
                         "via": row.get("via"),
                         "location": site.get("location"),
                     }
+                    copied = _copied_at(index, unit.file, site.get("location"))
+                    if copied is not None:
+                        caller["copied_at"] = copied
                     if unit.language != "COBOL":
                         caller["language"] = unit.language
                     if reaches_nested:
@@ -2637,6 +2646,102 @@ def _reachability(
         "reachability",
         lambda: parsed.report("reachability", unit, build),
     )
+
+
+def _copied_at(
+    index: Any, file: str, location: dict[str, Any] | None
+) -> dict[str, Any] | None:
+    """Where *file* COPYs the copybook a call site at *location* sits in:
+    the line in the program that brings the CALL in. None for a site in
+    the program itself, or one copied in through another member."""
+    if not location or location.get("file") in (None, file):
+        return None
+    member = Path(str(location["file"])).stem.upper()
+    for site in index.copy_sites.get(member, []):
+        if site["file"] == file:
+            return {"file": site["file"], "line": site["line"]}
+    return None
+
+
+def _unreachable_reasons(
+    flow: Any, reach: _Reachability, parsed: ParsedProgram, response: Response
+) -> list[dict[str, Any]]:
+    """Why each unreachable procedure is: what names it (nothing, or only
+    unreachable code) and why control does not fall into it from the one
+    before. So "why is this dead" is answered, not left to be argued from
+    the source."""
+    dead = {name.upper() for name in reach.unreachable}
+    nodes = list(flow.nodes)
+    order = {node.key.upper(): i for i, node in enumerate(nodes)}
+    into: dict[str, list[Any]] = {}
+    for edge in flow.edges:
+        kind = edge.edge_type.value
+        if kind not in _CONTROL_EDGES:
+            continue
+        targets = {edge.target.upper(), *(m.upper() for m in edge.range_members)}
+        for target in targets:
+            into.setdefault(target, []).append(edge)
+
+    def where(edge: Any) -> str:
+        located = parsed.locate(edge.location.line, edge.location.column, response)
+        return f"{located['file']}:{located['line']}" if located else ""
+
+    rows = []
+    for name in reach.unreachable:
+        key = name.upper()
+        position = order.get(key)
+        node = nodes[position] if position is not None else None
+        named = [
+            e
+            for e in into.get(key, [])
+            if not e.edge_type.value.endswith("_THRU")
+            and e.edge_type.value != "FALL_THROUGH"
+        ]
+        if not named:
+            why = ["no PERFORM, GO TO or other statement names it"]
+        else:
+            sources = sorted(
+                {f"{e.edge_type.value} from {e.source} at {where(e)}" for e in named}
+            )
+            why = ["named only from unreachable code: " + "; ".join(sources[:3])]
+        if position:
+            before = nodes[position - 1]
+            bkey = before.key.upper()
+            if (bkey, key) in reach.fall_throughs:
+                pass
+            elif bkey in dead:
+                why.append(f"the procedure before it, {before.key}, is unreachable too")
+            elif any(e.edge_type.value.endswith("_THRU") for e in into.get(bkey, [])):
+                why.append(
+                    f"the procedure before it, {before.key}, is reached only as "
+                    "the end of a PERFORM ... THRU range, whose end returns to "
+                    "the PERFORM"
+                )
+            elif before.exit_statement_kind:
+                ends = before.exit_statement_location
+                line = ""
+                if ends is not None:
+                    located = parsed.locate(ends.line, ends.column, response)
+                    line = f" ({located['file']}:{located['line']})" if located else ""
+                why.append(
+                    f"the procedure before it, {before.key}, ends with "
+                    f"{before.exit_statement_kind}{line}, so control never "
+                    "falls into it"
+                )
+            elif into.get(bkey):
+                why.append(
+                    f"the procedure before it, {before.key}, is only PERFORMed, "
+                    "so its end returns to the PERFORM"
+                )
+            else:
+                why.append(f"control does not fall into it from {before.key}")
+        row: dict[str, Any] = {"procedure": name, "reason": "; ".join(why)}
+        if node is not None:
+            row["location"] = parsed.locate(
+                node.location.line, node.location.column, response
+            )
+        rows.append(row)
+    return rows
 
 
 def _signature(parsed: ParsedProgram, unit: CobolProgram) -> Any:

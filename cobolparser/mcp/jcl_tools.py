@@ -486,6 +486,65 @@ def _dd_row(
     return row
 
 
+#: ``COND=(code,op)``: the step is bypassed when ``code op RC`` holds, i.e.
+#: when the return code stands in this relation to *code* ...
+_COND_BYPASS = {
+    "GT": "is less than",
+    "GE": "is less than or equal to",
+    "EQ": "is",
+    "NE": "is not",
+    "LT": "is greater than",
+    "LE": "is greater than or equal to",
+}
+#: ... and so the step runs only when it stands in this one.
+_COND_RUNS = {
+    "GT": "is at least",
+    "GE": "is greater than",
+    "EQ": "is not",
+    "NE": "is",
+    "LT": "is at most",
+    "LE": "is less than",
+}
+_COND_TEST = re.compile(r"(\d+)\s*,\s*(GT|GE|EQ|NE|LT|LE)(?:\s*,\s*([A-Z0-9@#$.]+))?")
+
+
+def explain_condition(condition: str) -> str | None:
+    """``COND=`` in plain words, since its sense is the reverse of how it
+    reads: ``(0,NE)`` bypasses the step when 0 is not equal to a return
+    code, so the step runs only if every earlier step returned 0. None for
+    a form this does not read."""
+    text = condition.strip().upper()
+    if text.startswith("(") and text.endswith(")"):
+        text = text[1:-1]
+    parts: list[str] = []
+    runs: list[str] = []
+    special = None
+    for word in ("EVEN", "ONLY"):
+        if re.search(rf"(^|,)\s*{word}\s*(,|$)", text):
+            special = word
+    tests = _COND_TEST.findall(text)
+    if not tests and special is None:
+        return None
+    for code, op, step in tests:
+        whose = (
+            f"step {step}'s return code" if step else "any earlier step's return code"
+        )
+        every = (
+            f"step {step}'s return code" if step else "every earlier step's return code"
+        )
+        parts.append(f"{whose} {_COND_BYPASS[op]} {code}")
+        runs.append(f"{every} {_COND_RUNS[op]} {code}")
+    words = []
+    if parts:
+        words.append("bypassed if " + ", or if ".join(parts))
+        words.append("so it runs only if " + " and ".join(runs))
+    if special == "EVEN":
+        words.append("it runs even after an earlier step abends")
+    elif special == "ONLY":
+        words.append("it runs only after an earlier step abends")
+    return "; ".join(words)
+
+
 def _step_row(
     step: JobStep, locator: _Locator, *, instream: bool = False
 ) -> dict[str, Any]:
@@ -503,6 +562,9 @@ def _step_row(
         row["parm"] = step.parm
     if step.condition:
         row["condition"] = step.condition
+        meaning = explain_condition(step.condition)
+        if meaning:
+            row["condition_means"] = meaning
     row["dds"] = [
         _dd_row(dd, step, locator, instream=instream) for dd in step.dd_statements
     ]
@@ -1042,6 +1104,9 @@ def _job_flow(
             row[key] = step.procedure
         if step.condition:
             row["condition"] = step.condition
+            meaning = explain_condition(step.condition)
+            if meaning:
+                row["condition_means"] = meaning
         if id(step) in running:
             row["runs_the_program"] = True
         reads: list[str] = []
@@ -1098,6 +1163,13 @@ def _job_flow(
                         fed_by[dataset] = written_by[base]
                 if access in _WRITES:
                     written_by[base] = step.name or ""
+        for named, access, command in _idcams_named(step):
+            label = f"{command} {named}"
+            if access == "read":
+                reads.append(label)
+            else:
+                writes.append(f"{label} ({access})")
+                written_by[_base(named).upper()] = step.name or ""
         if reads:
             row["reads"] = reads
         if writes:
@@ -1477,6 +1549,56 @@ def _utility_uses(step: JobStep) -> dict[str, str] | None:
     return None
 
 
+_DSN = r"'?([A-Z0-9@#$&][A-Z0-9@#$&.\-]*(?:\([+-]?[A-Z0-9@#$]+\))?)'?"
+#: IDCAMS commands that name a dataset in SYSIN rather than through a DD:
+#: (regex, access, command). DEFINE ... NAME(X) is the cluster / index /
+#: GDG base itself, never its DATA or INDEX component.
+_IDCAMS_NAMED = (
+    (re.compile(rf"\bDELETE\s+\(?\s*{_DSN}"), "delete", "DELETE"),
+    (
+        re.compile(
+            rf"\bDEFINE\s+(?:CLUSTER|AIX|ALTERNATEINDEX|GDG|GENERATIONDATAGROUP|"
+            rf"NONVSAM|PATH)\s*\(\s*NAME\s*\(\s*{_DSN}"
+        ),
+        "define",
+        "DEFINE",
+    ),
+    (re.compile(rf"\bRELATE\s*\(\s*{_DSN}"), "read", "DEFINE AIX RELATE"),
+    (
+        re.compile(
+            rf"\b(?:REPRO|BLDINDEX|PRINT)\b[^;]*?\b(?:INDATASET|IDS)\s*\(\s*{_DSN}"
+        ),
+        "read",
+        "REPRO/BLDINDEX INDATASET",
+    ),
+    (
+        re.compile(rf"\b(?:REPRO|BLDINDEX)\b[^;]*?\b(?:OUTDATASET|ODS)\s*\(\s*{_DSN}"),
+        "write",
+        "REPRO/BLDINDEX OUTDATASET",
+    ),
+)
+
+
+def _idcams_named(step: JobStep) -> list[tuple[str, str, str]]:
+    """``(dataset, access, command)`` for every dataset an IDCAMS step's
+    in-stream SYSIN names directly: DELETE, DEFINE, a REPRO or BLDINDEX
+    INDATASET / OUTDATASET, an AIX's RELATE. A DD-named file is not here
+    (``_utility_uses`` has those)."""
+    if (step.program or "").upper() != "IDCAMS":
+        return []
+    text = re.sub(r"/\*.*?\*/", " ", _instream(step, "SYSIN"), flags=re.DOTALL)
+    # One IDCAMS command per statement: continuations (a trailing - or +)
+    # joined, a new command at each line that does not continue.
+    text = re.sub(r"[-+][ \t]*\n", " ", text).replace("\n", ";")
+    found: list[tuple[str, str, str]] = []
+    for regex, access, command in _IDCAMS_NAMED:
+        for match in regex.finditer(text):
+            entry = (match.group(1), access, command)
+            if entry not in found:
+                found.append(entry)
+    return found
+
+
 def _combine(use: str, disposition_access: str) -> str:
     """A program's *use* of a file, said with what DISP adds: a written
     dataset DISP=NEW is created; DISP=MOD with OUTPUT or EXTEND extends."""
@@ -1604,6 +1726,26 @@ def dataset_users(
                 row["temporary"] = True
             found.append(row)
 
+        for job in jfile.result.jobs:
+            for step in job.steps:
+                for named, access, command in _idcams_named(step):
+                    if not matches(named.upper()):
+                        continue
+                    found.append(
+                        {
+                            "dataset": named,
+                            "file": jfile.display,
+                            "job": job.name,
+                            "step": step.name,
+                            "programs": ["IDCAMS"],
+                            "ddname": None,
+                            "command": command,
+                            "access": access,
+                            "access_from": "idcams command",
+                            "location": locator.step(step),
+                        }
+                    )
+
     wanted = dataset.strip().strip("'").upper()
     _carry_index(
         index,
@@ -1627,8 +1769,10 @@ def dataset_users(
         "access_legend": "access_from program: the COBOL program's OPEN mode "
         "for the DD (read, write, update, extend; create when DISP=NEW); "
         "utility: what SORT, IEBGENER, IDCAMS REPRO or ICETOOL do with the "
-        "DD; disp: only DISP= was known (SHR/OLD say nothing about reading "
-        "or writing)",
+        "DD; idcams command: an IDCAMS DELETE, DEFINE, REPRO / BLDINDEX "
+        "INDATASET / OUTDATASET or AIX RELATE in SYSIN names the dataset "
+        "itself; disp: only DISP= was known (SHR/OLD say nothing about "
+        "reading or writing)",
     }
     if not found:
         answer["note"] = "no DD under the root names this dataset" + (
