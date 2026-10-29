@@ -1363,9 +1363,11 @@ class CobolTools:
 
         sites_by_file: dict[str, list[dict[str, Any]]] = {}
         for site in index.copy_sites.get(member, []):
-            sites_by_file.setdefault(site["file"], []).append(
-                {"file": site["file"], "line": site["line"]}
-            )
+            row = {"file": site["file"], "line": site["line"]}
+            how = _include_statement(self.workspace, site["file"], site["line"])
+            if how is not None:
+                row["statement"] = how
+            sites_by_file.setdefault(site["file"], []).append(row)
         direct = []
         for program_id in report.direct_programs:
             declared_in = declared(program_id)
@@ -1413,6 +1415,7 @@ class CobolTools:
                 "resolved_to": [self.workspace.display(p) for p in report.paths],
                 "program_count": report.program_count,
                 "copied_by": response.cap(direct, cap, "copied_by"),
+                **_statement_counts(direct),
                 "copied_through_other_members": response.cap(
                     nested, cap, "copied_through_other_members"
                 ),
@@ -2646,6 +2649,49 @@ def _reachability(
         "reachability",
         lambda: parsed.report("reachability", unit, build),
     )
+
+
+_INCLUDE_WORD = re.compile(r"(?<![\w-])(COPY|INCLUDE|\+\+INCLUDE|-INC)(?![\w-])", re.I)
+
+
+def _include_statement(workspace: Workspace, file: str, line: int) -> str | None:
+    """How the program at *file*:*line* brings a member in: ``COPY``, or
+    ``EXEC SQL INCLUDE`` (which the DB2 precompiler expands, not the
+    compiler). None when the line cannot be read."""
+    try:
+        lines = split_source_lines(Workspace.read_text(workspace.resolve(file)))
+    except (ToolError, OSError):
+        return None
+    if not 0 < line <= len(lines):
+        return None
+    # The site is the statement's first line: EXEC SQL may stand alone
+    # with INCLUDE on the next.
+    text = " ".join(lines[line - 1 : line + 2])
+    found = _INCLUDE_WORD.search(text)
+    if found is None:
+        return None
+    word = found.group(1).upper()
+    if word != "INCLUDE":
+        return word
+    before = " ".join(lines[max(0, line - 3) : line - 1]) + " " + text[: found.start()]
+    return "EXEC SQL INCLUDE" if re.search(r"\bSQL\b", before, re.I) else word
+
+
+def _statement_counts(direct: list[dict[str, Any]]) -> dict[str, Any]:
+    """``brought_in_by``: programs per statement kind, when the member is
+    both COPYed and EXEC SQL INCLUDEd (only the INCLUDEs need the DB2
+    precompile)."""
+    by: dict[str, list[str]] = {}
+    for row in direct:
+        for site in row["copy_sites"]:
+            kind = site.get("statement")
+            if kind and row["program"] not in by.setdefault(kind, []):
+                by[kind].append(row["program"])
+    if len(by) < 2:
+        return {}
+    return {
+        "brought_in_by": {k: {"count": len(v), "programs": v} for k, v in by.items()}
+    }
 
 
 def _copied_at(
