@@ -99,7 +99,7 @@ COBOL source (.cbl/.cob)
 | Package | What it holds | OKF |
 |---|---|---|
 | `cobolparser/preprocess/` | fixed-format normalization, `expand_copybooks`, source map, conditional compilation, REPLACE, secure path resolution | `.okf/preprocessing.md` |
-| `cobolparser/lexer.py` | `CobolLexer`, `TokenType` (<!-- okf:gen tokentype-count -->244<!-- /okf:gen --> members) | `.okf/lexer.md` |
+| `cobolparser/lexer.py` | `CobolLexer`, `TokenType` (<!-- okf:gen tokentype-count -->245<!-- /okf:gen --> members) | `.okf/lexer.md` |
 | `cobolparser/parser.py`, `core/`, `parsers/` | `CobolParser`, `TokenStream`, `DivisionParserFactory`, <!-- okf:gen statement-parser-file-count -->33<!-- /okf:gen --> statement parser files | `.okf/parser.md` |
 | `cobolparser/models/` | `CobolProgram` and every AST node | `.okf/ast-models.md` |
 | `cobolparser/dialects/` | IBM Enterprise dialect, EXEC SQL/CICS/IMS, LE and intrinsic signatures | `.okf/dialects.md` |
