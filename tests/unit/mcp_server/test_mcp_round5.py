@@ -235,6 +235,7 @@ class TestOtherLanguages:
             "called_by": "BATCH",
             "via": "CALL",
             "depth": 1,
+            "at": "bank/cbl/BATCH.cbl:9",
             "language": "assembler",
             "file": "bank/assembler/DATERTN.asm",
         }

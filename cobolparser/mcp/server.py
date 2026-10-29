@@ -80,8 +80,11 @@ misses copybook code.
 Across programs: codebase_overview for the whole workspace, callers_of with a
 program name for every CALL/LINK/XCTL to it, impact_of_change for what a
 change to a copybook or a field reaches, and where_from for where a field's
-value comes from. codebase_overview takes language and path to list only
-the PL/I, assembler or COBOL programs, or one application's. The root is
+value comes from. codebase_overview takes language and path to look at only
+the PL/I, assembler or COBOL programs, or one application's folder: pass
+path when the question names an application, since the whole root is large.
+program_brief with follow_calls gives every program a transaction runs,
+each with the files and SQL tables it reads and writes. The root is
 indexed in the background at start; later calls reuse the index until a file
 changes. PL/I and assembler programs (with the [pl1] / [hlasm] extras) are in
 the call graph, callers_of and program_brief too; the other tools read COBOL
@@ -97,7 +100,9 @@ CALL, SQL and CICS boundary a program touches, scenario by scenario.
 How programs are run (needs the [jcl] extra; without it these tools answer
 with the install command): jobs_running for every JCL step that runs a
 program, with each of its SELECT files bound to a DD and a dataset (with
-follow_calls, also every program it CALLs in turn and its language);
+follow_calls, also every program it CALLs in turn and its language) and
+each of those jobs step by step: the datasets every step reads and writes,
+its SORT / IDCAMS control cards, and which earlier step fed what it reads;
 dataset_users for every job, step and program that reads or writes a
 dataset; jcl_job to read one JCL file's jobs, steps and DD statements.
 program_brief names the steps that run a program under run_by.
@@ -407,14 +412,25 @@ def build_server(
         )
 
     async def program_brief(
-        file: File, program: Program = None, limit: Limit = None
+        file: File,
+        program: Program = None,
+        limit: Limit = None,
+        follow_calls: Annotated[
+            bool,
+            Field(
+                description="Also every program it runs through CALL / LINK / "
+                "XCTL, each with the files and SQL tables it uses"
+            ),
+        ] = False,
     ) -> dict[str, Any]:
         """A program on one page: interface, files and their C/R/U/D use,
         SQL tables, calls, CICS/DL/I, unreachable paragraphs, health, worst
-        lint findings; a PL/I or assembler file: its calls and includes.
-        Start here."""
+        lint findings, the JCL steps that run it; a PL/I or assembler file:
+        its calls and includes. Start here; follow_calls for what a whole
+        transaction or job step touches."""
         return await off_loop(
-            "program_brief", lambda: tools.program_brief(file, program, limit)
+            "program_brief",
+            lambda: tools.program_brief(file, program, limit, follow_calls),
         )
 
     async def callers_of(
@@ -508,7 +524,8 @@ def build_server(
     ) -> dict[str, Any]:
         """The whole workspace on one page: programs (COBOL, PL/I, assembler)
         and health grades, call graph, missing programs and copybooks,
-        duplicated code. language / path narrow the programs list."""
+        duplicated code. language / path narrow every section to those
+        programs (path: an application's folder, or a glob)."""
         return await off_loop(
             "codebase_overview",
             lambda: tools.codebase_overview(limit, language, path),
@@ -707,7 +724,9 @@ def build_server(
         ] = False,
     ) -> dict[str, Any]:
         """Every JCL step that runs a program, each SELECT file bound to its
-        DD and dataset, and DDs the step does not code; with follow_calls,
+        DD and dataset, DDs the step does not code, and each job step by
+        step (datasets read and written, SORT / IDCAMS control cards, which
+        step feeds which); with follow_calls,
         the COBOL, PL/I and assembler code the step runs through CALLs."""
         return await off_loop(
             "jobs_running",
