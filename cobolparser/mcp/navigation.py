@@ -218,7 +218,7 @@ def statements_index(workspace: Workspace) -> StatementsIndex:
         survey = _Survey()
         stamps = workspace.tree_stamps()
         index = StatementsIndex()
-        for facts in surveyed(workspace, survey, stamps):
+        for facts in surveyed(workspace, survey, stamps, heavy=True):
             index.rows.extend(facts.statements)
         index.files = survey.files
         index.failed = survey.failed

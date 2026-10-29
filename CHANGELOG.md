@@ -36,7 +36,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 * Lineage reports carry optional `picture` / `usage` / `redefines` on
   items and a top-level `overlays` list (group-level byte transfers between
   records). Additive: `lineage_version` stays "2"; the MCP server's
-  `FACTS_VERSION` moves to "6" so cached facts are recomputed.
+  `FACTS_VERSION` moves to "7" so cached facts are recomputed.
 * **SARIF 2.1.0 output** for `lint`, `scan` and `call-check`
   (`--format sarif`; `cobolparser/analysis/sarif.py`), for GitHub code
   scanning and IDE problem panes. Findings inside an expanded copybook

@@ -98,7 +98,7 @@ with both operands' qualified names and lengths, stamped by
 `apply_source_map` (`origin`). Items also carry optional `picture`, `usage`
 and `redefines` (the redefined name, last of the chain) -- what
 `field_widening` sizes receivers with. All additive: `LINEAGE_VERSION` stays
-"2", `mcp/facts.py`'s `FACTS_VERSION` moved to "6".
+"2", `mcp/facts.py`'s `FACTS_VERSION` moved to "7".
 
 **Operands** (`_refs`) go through one path for MOVE, arithmetic, STRING,
 CALL arguments, DISPLAY/ACCEPT, READ INTO / WRITE FROM: xref's

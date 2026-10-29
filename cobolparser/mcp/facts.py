@@ -35,6 +35,7 @@ fraction of a second.
 from __future__ import annotations
 
 import contextlib
+import dataclasses
 import functools
 import hashlib
 import os
@@ -54,7 +55,14 @@ from .workspace import ParsedProgram, Stamp, Workspace, _stamp
 
 #: Bumped whenever :class:`FileFacts` or anything it holds changes shape:
 #: facts on disk from another version are never read.
-FACTS_VERSION = "6"
+FACTS_VERSION = "7"
+
+#: The fields only the lineage and statement indexes read. They are most of
+#: the bytes of a file's facts (a field-flow report per unit), so on disk they
+#: are kept apart, one shard per file, and read back only when one of those
+#: indexes is built: a restarted server answers a call-graph or JCL question
+#: without unpickling every program's lineage first.
+HEAVY_FIELDS = ("lineage", "lineage_problems", "statements")
 
 #: Below this many files to compute, a pool costs more than it saves.
 PARALLEL_THRESHOLD = 12
@@ -96,6 +104,8 @@ class FileFacts:
     #: (unit name, depth, redundancy fingerprints) per unit.
     fingerprints: list[tuple[str, int, dict[str, Any]]] = field(default_factory=list)
     statements: list[Any] = field(default_factory=list)  # navigation.StatementRow
+    #: False while the :data:`HEAVY_FIELDS` are on disk, not in memory.
+    heavy: bool = True
 
     def current(self) -> bool:
         return all(_stamp(name) == stamp for name, stamp in self.stamps.items())
@@ -317,6 +327,8 @@ class FactsStore:
         self.cache_dir = Path(cache_dir) if cache_dir else None
         self.lock = threading.Lock()
         self._facts: dict[str, FileFacts] = {}
+        #: Files whose heavy fields were computed since the last save.
+        self._heavy_dirty: set[str] = set()
         self._key: str | None = None
         self._loaded = False
         #: Set while a pool computes facts outside :attr:`Workspace.lock`.
@@ -371,37 +383,111 @@ class FactsStore:
             if isinstance(facts, dict):
                 self._facts = facts
 
+    def _shard_file(self, path: str) -> Path | None:
+        cache = self._cache_file()
+        if cache is None:
+            return None
+        name = hashlib.sha256(path.encode()).hexdigest()[:24]
+        return cache.with_suffix(".d") / f"{name}.pickle"
+
+    def _load_heavy(self, facts: FileFacts) -> bool:
+        """Put *facts*' heavy fields back from its shard; False when the
+        shard is missing or was written for other stamps or settings."""
+        shard = self._shard_file(facts.path)
+        if shard is None or not shard.is_file():
+            return False
+        try:
+            with shard.open("rb") as handle:
+                held = pickle.load(handle)  # noqa: S301 -- our own cache dir
+        except Exception:  # noqa: BLE001 -- a bad shard is no shard
+            return False
+        if (
+            not isinstance(held, dict)
+            or held.get("key") != self._key
+            or held.get("stamps") != facts.stamps
+        ):
+            return False
+        for name in HEAVY_FIELDS:
+            setattr(facts, name, held.get(name) or [])
+        facts.heavy = True
+        return True
+
     def _save(self) -> None:
         cache = self._cache_file()
         if cache is None:
             return
         try:
             cache.parent.mkdir(parents=True, exist_ok=True)
-            with tempfile.NamedTemporaryFile(
-                "wb", dir=cache.parent, delete=False, suffix=".tmp"
-            ) as handle:
-                pickle.dump(
-                    {"key": self._key, "facts": self._facts},
-                    handle,
-                    protocol=pickle.HIGHEST_PROTOCOL,
+            for path in sorted(self._heavy_dirty):
+                facts = self._facts.get(path)
+                shard = self._shard_file(path)
+                if facts is None or not facts.heavy or shard is None:
+                    continue
+                shard.parent.mkdir(parents=True, exist_ok=True)
+                held = {"key": self._key, "stamps": facts.stamps}
+                held.update({name: getattr(facts, name) for name in HEAVY_FIELDS})
+                _write_atomic(shard, held)
+            self._heavy_dirty.clear()
+            core = {
+                path: dataclasses.replace(
+                    facts, lineage=[], lineage_problems=[], statements=[], heavy=False
                 )
-            os.replace(handle.name, cache)
+                for path, facts in self._facts.items()
+            }
+            _write_atomic(cache, {"key": self._key, "facts": core})
         except Exception:  # noqa: BLE001 -- a cache that cannot be written is
             # a slower next start, never a failed call.
-            with contextlib.suppress(OSError, UnboundLocalError):
-                os.unlink(handle.name)
+            pass
+
+    def load_extra(self, name: str) -> Any:
+        """What :meth:`save_extra` last kept as *name* under the current
+        settings, or None."""
+        cache = self._cache_file()
+        if cache is None:
+            return None
+        target = cache.with_name(f"{cache.stem}-{name}.pickle")
+        if not target.is_file():
+            return None
+        try:
+            with target.open("rb") as handle:
+                held = pickle.load(handle)  # noqa: S301 -- our own cache dir
+        except Exception:  # noqa: BLE001 -- a bad cache is no cache
+            return None
+        if isinstance(held, dict) and held.get("key") == self._config_key():
+            return held.get("value")
+        return None
+
+    def save_extra(self, name: str, value: Any) -> None:
+        """Keep *value* on disk as *name* (beside the facts) for the next
+        start; best-effort, like the facts themselves."""
+        cache = self._cache_file()
+        if cache is None:
+            return
+        try:
+            cache.parent.mkdir(parents=True, exist_ok=True)
+            _write_atomic(
+                cache.with_name(f"{cache.stem}-{name}.pickle"),
+                {"key": self._config_key(), "value": value},
+            )
+        except Exception:  # noqa: BLE001
+            pass
 
     # -- facts ----------------------------------------------------------------
 
-    def facts(self, paths: list[Path] | None = None) -> list[FileFacts]:
-        """Current facts of every program file (or of *paths*), in order."""
+    def facts(
+        self, paths: list[Path] | None = None, *, heavy: bool = False
+    ) -> list[FileFacts]:
+        """Current facts of every program file (or of *paths*), in order;
+        with *heavy*, their :data:`HEAVY_FIELDS` too."""
         # A warm-up running in a pool finishes first: computing the same
         # files again here would only double the work.
         self._busy.wait()
         with self.lock:
-            return self._facts_locked(paths)
+            return self._facts_locked(paths, heavy=heavy)
 
-    def _facts_locked(self, paths: list[Path] | None) -> list[FileFacts]:
+    def _facts_locked(
+        self, paths: list[Path] | None, *, heavy: bool = False
+    ) -> list[FileFacts]:
         key = self._config_key()
         if key != self._key:
             if self._key is not None:
@@ -416,6 +502,15 @@ class FactsStore:
         stale = [
             p for p in wanted if p not in self._facts or not self._facts[p].current()
         ]
+        if heavy:
+            stale_set = set(stale)
+            stale += [
+                p
+                for p in wanted
+                if p not in stale_set
+                and not self._facts[p].heavy
+                and not self._load_heavy(self._facts[p])
+            ]
         if stale:
             self._compute(stale)
         changed = bool(stale)
@@ -442,6 +537,7 @@ class FactsStore:
         if self.workers > 1 and total >= PARALLEL_THRESHOLD:
             for facts in self._in_pool(stale):
                 self._facts[facts.path] = facts
+                self._heavy_dirty.add(facts.path)
                 done += 1
                 progress(facts.display)
         else:
@@ -457,6 +553,7 @@ class FactsStore:
                 with stdout_to_stderr():
                     facts = compute_facts(self.workspace, Path(path), builder)
                 self._facts[path] = facts
+                self._heavy_dirty.add(path)
                 done += 1
         self.last_compute = (time.monotonic() - started, total)
 
@@ -546,6 +643,21 @@ class FactsStore:
         return thread
 
 
+def _write_atomic(target: Path, value: Any) -> None:
+    """Pickle *value* to *target* through a temporary file in its folder."""
+    handle = tempfile.NamedTemporaryFile(
+        "wb", dir=target.parent, delete=False, suffix=".tmp"
+    )
+    try:
+        with handle:
+            pickle.dump(value, handle, protocol=pickle.HIGHEST_PROTOCOL)
+        os.replace(handle.name, target)
+    except BaseException:
+        with contextlib.suppress(OSError):
+            os.unlink(handle.name)
+        raise
+
+
 def store_for(workspace: Workspace) -> FactsStore:
     """The workspace's facts store, made with its defaults on first use."""
     store = getattr(workspace, "facts_store", None)
@@ -556,11 +668,16 @@ def store_for(workspace: Workspace) -> FactsStore:
 
 
 def surveyed(
-    workspace: Workspace, survey: Any, stamps: dict[str, Stamp]
+    workspace: Workspace,
+    survey: Any,
+    stamps: dict[str, Stamp],
+    *,
+    heavy: bool = False,
 ) -> list[FileFacts]:
     """Every program file's facts, recorded in *survey* (files, failures,
-    caveats) and *stamps* as the walk used to record them."""
-    all_facts = store_for(workspace).facts()
+    caveats) and *stamps* as the walk used to record them; with *heavy*,
+    their lineage and statements too."""
+    all_facts = store_for(workspace).facts(heavy=heavy)
     for facts in all_facts:
         survey.files.append(facts.display)
         stamps.update(facts.stamps)
