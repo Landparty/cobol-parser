@@ -270,7 +270,9 @@ report is a caveat and no start. Finding kinds:
   is carried along the path (`Capacity.through` at every item hop), so a cut
   is reported where it happens, once. `Capacity` is integer / decimal digits
   (+ sign) for numeric and numeric-edited items, characters for the rest
-  (a group: its bytes); `losses()` follows MOVE alignment. Severity: `info`
+  (a group: its bytes, `group=True`); `losses()` follows MOVE alignment. A
+  signed numeric MOVEd to an elementary alphanumeric item loses its sign
+  (#765); a group receiver copies the bytes, sign included. Severity: `info`
   when the old value lost the same things (`pre_existing`), `warning` when
   only decimal places are new, the path is derived (arithmetic) or not
   `exact`, else `error`. A derived pre-existing loss is dropped (a rate, a

@@ -23,6 +23,14 @@ comment lines failed the parse. [lexer.md](lexer.md): new post-pass
 `_merge_numeric_procedure_names()` reads `1000-0` as one word outside EXEC
 blocks, so all-digit paragraph names parse.
 
+## 2026-10-29 -- issues #754, #765, #770
+
+[parser/statements-io.md](parser/statements-io.md): `_SQL_TABLE_NAME`
+accepts `#@$` (#770). [analysis/lineage.md](analysis/lineage.md):
+`Capacity.group`, sign loss into an alphanumeric receiver (#765).
+[mcp.md](mcp.md): dynamic-call `candidates` stripped by `_call_targets()`
+(#754), `FACTS_VERSION` 8.
+
 ## 2026-10-29 -- field_equals holds where it is checked
 
 [analysis/fixtures-support.md](analysis/fixtures-support.md): the

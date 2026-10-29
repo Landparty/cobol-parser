@@ -117,6 +117,28 @@ def _jcllib_names(text: str) -> list[str]:
 #: a TSO step's ``RUN PROGRAM``); the count is always given.
 MAX_INSTREAM_LINES = 20
 
+#: Jobs ``jobs_running`` lays out step by step (``jobs``); ``steps`` lists
+#: every step that runs the program whatever this says.
+JOB_FLOWS_SHOWN = 5
+
+#: Steps of one job ``jobs_running`` lays out in its ``jobs`` flow.
+JOB_FLOW_STEPS = 40
+
+#: Control-card lines a job flow shows per DD (SYSIN, SYMNAMES, ...).
+FLOW_CONTROL_LINES = 12
+
+#: Suffixes of a control-card member a SYSIN ``DD DSN=LIB(MEMBER)`` may name
+#: under the root (a PDS member downloaded as ``ctl/MEMBER.ctl``).
+CONTROL_SUFFIXES: frozenset[str] = frozenset(
+    {"", ".ctl", ".cntl", ".ctlcard", ".card", ".sysin", ".srt", ".sort", ".txt"}
+)
+
+#: DD names a job flow leaves out: libraries and print, not data.
+_FLOW_SKIPPED_DDS = frozenset({"STEPLIB", "JOBLIB", "SYSLIB", "SYSUDUMP", "SYSABEND"})
+
+#: What counts as writing a dataset in a job flow.
+_WRITES = frozenset({"create", "write", "extend", "update", "exclusive"})
+
 INSTALL_HINT = (
     "the JCL tools read JCL through jcl-parser, which is not installed: "
     "pip install 'cobol-parser[jcl]'"
@@ -464,6 +486,65 @@ def _dd_row(
     return row
 
 
+#: ``COND=(code,op)``: the step is bypassed when ``code op RC`` holds, i.e.
+#: when the return code stands in this relation to *code* ...
+_COND_BYPASS = {
+    "GT": "is less than",
+    "GE": "is less than or equal to",
+    "EQ": "is",
+    "NE": "is not",
+    "LT": "is greater than",
+    "LE": "is greater than or equal to",
+}
+#: ... and so the step runs only when it stands in this one.
+_COND_RUNS = {
+    "GT": "is at least",
+    "GE": "is greater than",
+    "EQ": "is not",
+    "NE": "is",
+    "LT": "is at most",
+    "LE": "is less than",
+}
+_COND_TEST = re.compile(r"(\d+)\s*,\s*(GT|GE|EQ|NE|LT|LE)(?:\s*,\s*([A-Z0-9@#$.]+))?")
+
+
+def explain_condition(condition: str) -> str | None:
+    """``COND=`` in plain words, since its sense is the reverse of how it
+    reads: ``(0,NE)`` bypasses the step when 0 is not equal to a return
+    code, so the step runs only if every earlier step returned 0. None for
+    a form this does not read."""
+    text = condition.strip().upper()
+    if text.startswith("(") and text.endswith(")"):
+        text = text[1:-1]
+    parts: list[str] = []
+    runs: list[str] = []
+    special = None
+    for word in ("EVEN", "ONLY"):
+        if re.search(rf"(^|,)\s*{word}\s*(,|$)", text):
+            special = word
+    tests = _COND_TEST.findall(text)
+    if not tests and special is None:
+        return None
+    for code, op, step in tests:
+        whose = (
+            f"step {step}'s return code" if step else "any earlier step's return code"
+        )
+        every = (
+            f"step {step}'s return code" if step else "every earlier step's return code"
+        )
+        parts.append(f"{whose} {_COND_BYPASS[op]} {code}")
+        runs.append(f"{every} {_COND_RUNS[op]} {code}")
+    words = []
+    if parts:
+        words.append("bypassed if " + ", or if ".join(parts))
+        words.append("so it runs only if " + " and ".join(runs))
+    if special == "EVEN":
+        words.append("it runs even after an earlier step abends")
+    elif special == "ONLY":
+        words.append("it runs only after an earlier step abends")
+    return "; ".join(words)
+
+
 def _step_row(
     step: JobStep, locator: _Locator, *, instream: bool = False
 ) -> dict[str, Any]:
@@ -481,6 +562,9 @@ def _step_row(
         row["parm"] = step.parm
     if step.condition:
         row["condition"] = step.condition
+        meaning = explain_condition(step.condition)
+        if meaning:
+            row["condition_means"] = meaning
     row["dds"] = [
         _dd_row(dd, step, locator, instream=instream) for dd in step.dd_statements
     ]
@@ -888,6 +972,35 @@ def jobs_running(
                 "its DDs are not bound to the files it opens; dataset access "
                 "comes from DISP alone",
             )
+    jobs: dict[tuple[str, str], tuple[JclFile, JclJob, set[int]]] = {}
+    for jfile, job, step in matches:
+        held = jobs.setdefault((jfile.display, job.name or ""), (jfile, job, set()))
+        held[2].add(id(step))
+    flows = response.cap(
+        list(jobs.values()), min(clamp_limit(limit), JOB_FLOWS_SHOWN), "jobs"
+    )
+    if flows:
+        # A utility's jobs (SORT runs in hundreds) are laid out from DISP
+        # and the utilities' own DD roles: no COBOL program is parsed for
+        # them, as for the rest of this answer.
+        programs = (
+            _ProgramUses(workspace, response)
+            if selects is not None
+            else _NoProgramUses(workspace, response)
+        )
+        members = _ControlMembers(workspace)
+        answer["jobs"] = [
+            _job_flow(
+                jfile,
+                job,
+                locators.setdefault(jfile.path, _Locator(jfile, workspace)),
+                programs,
+                members,
+                running,
+                response,
+            )
+            for jfile, job, running in flows
+        ]
     _also_named(workspace, name, answer, response)
     if follow_calls:
         _follow_calls(workspace, name, answer, response, clamp_limit(limit))
@@ -899,6 +1012,183 @@ def jobs_running(
             "by CICS or IMS, or run by JCL that is not under the root"
         )
     return response.build(answer)
+
+
+class _ControlMembers:
+    """Control-card members under the root by name (``ctl/REPROCT.ctl`` for
+    ``DSN=AWS.CNTL(REPROCT)``), walked once per call when first needed."""
+
+    def __init__(self, workspace: Workspace) -> None:
+        self.workspace = workspace
+        self._by_name: dict[str, list[Path]] | None = None
+
+    def find(self, member: str, near: str) -> Path | None:
+        if self._by_name is None:
+            self._by_name = {}
+            for directory, names in self.workspace._walk():
+                for entry in names:
+                    path = Path(directory, entry)
+                    if path.suffix.lower() not in CONTROL_SUFFIXES:
+                        continue
+                    try:
+                        path = path.resolve()
+                    except (OSError, RuntimeError):
+                        continue
+                    if not self.workspace._within(path):
+                        continue
+                    self._by_name.setdefault(path.stem.upper(), []).append(path)
+        found = self._by_name.get(member.upper(), [])
+        if not found:
+            return None
+        # The member nearest the job wins (the most leading folders in
+        # common, then the shallowest): two applications under one root may
+        # each have a REPROCT.
+        here = near.split("/")[:-1]
+
+        def distance(path: Path) -> tuple[int, int, str]:
+            parts = self.workspace.display(path).split("/")
+            shared = 0
+            for mine, theirs in zip(here, parts[:-1], strict=False):
+                if mine != theirs:
+                    break
+                shared += 1
+            return (-shared, len(parts), str(path))
+
+        found = sorted(found, key=distance)
+        return found[0]
+
+
+#: ``LIB(MEMBER)``: a PDS member, not a GDG generation such as ``(+1)``.
+_MEMBER_RE = re.compile(r"\(([A-Z@#$][A-Z0-9@#$]{0,7})\)$", re.IGNORECASE)
+
+
+def _control_lines(text: str) -> list[str]:
+    """The control statements of a SYSIN member: blank lines and ``/* */``
+    comment lines dropped, the sequence area (73-80) cut."""
+    out = []
+    for line in split_source_lines(text):
+        card = line[:72].rstrip()
+        stripped = card.strip()
+        if not stripped or stripped.startswith("/*") or stripped.startswith("*"):
+            continue
+        out.append(stripped)
+    return out
+
+
+def _job_flow(
+    jfile: JclFile,
+    job: JclJob,
+    locator: _Locator,
+    programs: _ProgramUses,
+    members: _ControlMembers,
+    running: set[int],
+    response: Response,
+) -> dict[str, Any]:
+    """One job, step by step: what each step runs, the datasets it reads and
+    writes (by what the program or utility does with each DD, else DISP),
+    the control cards it is given (in-stream, or the SYSIN member under the
+    root), and ``fed_by``: the earlier step that wrote what this one reads.
+    So "where does this report's data come from" is one answer, not a read
+    of the JCL and every procedure it expands."""
+    written_by: dict[str, str] = {}
+    steps: list[dict[str, Any]] = []
+    for step in job.steps[:JOB_FLOW_STEPS]:
+        row: dict[str, Any] = {"step": step.name}
+        if step.program:
+            row["program"] = step.program
+            runs = step.effective_programs()
+            if runs != [step.program.upper()]:
+                row["runs"] = runs
+        if step.procedure:
+            key = "from_procedure" if "." in (step.name or "") else "invokes_procedure"
+            row[key] = step.procedure
+        if step.condition:
+            row["condition"] = step.condition
+            meaning = explain_condition(step.condition)
+            if meaning:
+                row["condition_means"] = meaning
+        if id(step) in running:
+            row["runs_the_program"] = True
+        reads: list[str] = []
+        writes: list[str] = []
+        fed_by: dict[str, str] = {}
+        control: list[dict[str, Any]] = []
+        for dd in step.dd_statements:
+            ddname = (dd.name or "").upper()
+            if ddname in _FLOW_SKIPPED_DDS:
+                continue
+            if dd.is_instream:
+                lines = [ln.strip() for ln in dd.instream_lines if ln.strip()]
+                if lines:
+                    entry: dict[str, Any] = {
+                        "dd": dd.name,
+                        "lines": lines[:FLOW_CONTROL_LINES],
+                    }
+                    if len(lines) > FLOW_CONTROL_LINES:
+                        entry["line_count"] = len(lines)
+                    control.append(entry)
+                continue
+            for member_dd, _path in locator.flattened(step, dd):
+                dataset = member_dd.dataset
+                if not dataset or member_dd.sysout is not None or member_dd.is_dummy:
+                    continue
+                if dataset.upper() == "NULLFILE":
+                    continue
+                if ddname in ("SYSIN", "SYMNAMES", "TOOLIN", "DFSPARM", "CTLCARD"):
+                    found = _MEMBER_RE.search(dataset)
+                    path = (
+                        members.find(found.group(1), jfile.display) if found else None
+                    )
+                    if path is not None:
+                        lines = _control_lines(Workspace.read_text(path))
+                        control.append(
+                            {
+                                "dd": dd.name,
+                                "member": dataset,
+                                "file": locator.workspace.display(path),
+                                "lines": lines[:FLOW_CONTROL_LINES],
+                            }
+                        )
+                        continue
+                access, _from = _step_access(
+                    step, member_dd, _access(member_dd.disposition), programs
+                )
+                label = f"{dd.name}={dataset}"
+                base = _base(dataset).upper()
+                if access in _WRITES:
+                    writes.append(f"{label} ({access})")
+                else:
+                    reads.append(label)
+                    if base in written_by:
+                        fed_by[dataset] = written_by[base]
+                if access in _WRITES:
+                    written_by[base] = step.name or ""
+        for named, access, command in _idcams_named(step):
+            label = f"{command} {named}"
+            if access == "read":
+                reads.append(label)
+            else:
+                writes.append(f"{label} ({access})")
+                written_by[_base(named).upper()] = step.name or ""
+        if reads:
+            row["reads"] = reads
+        if writes:
+            row["writes"] = writes
+        if fed_by:
+            row["fed_by"] = fed_by
+        if control:
+            row["control"] = control
+        steps.append(row)
+    flow: dict[str, Any] = {"file": jfile.display, "job": job.name, "steps": steps}
+    if len(job.steps) > JOB_FLOW_STEPS:
+        response.truncated.append(
+            {
+                "field": f"jobs[{job.name}].steps",
+                "shown": JOB_FLOW_STEPS,
+                "total": len(job.steps),
+            }
+        )
+    return flow
 
 
 def _follow_calls(
@@ -1259,6 +1549,56 @@ def _utility_uses(step: JobStep) -> dict[str, str] | None:
     return None
 
 
+_DSN = r"'?([A-Z0-9@#$&][A-Z0-9@#$&.\-]*(?:\([+-]?[A-Z0-9@#$]+\))?)'?"
+#: IDCAMS commands that name a dataset in SYSIN rather than through a DD:
+#: (regex, access, command). DEFINE ... NAME(X) is the cluster / index /
+#: GDG base itself, never its DATA or INDEX component.
+_IDCAMS_NAMED = (
+    (re.compile(rf"\bDELETE\s+\(?\s*{_DSN}"), "delete", "DELETE"),
+    (
+        re.compile(
+            rf"\bDEFINE\s+(?:CLUSTER|AIX|ALTERNATEINDEX|GDG|GENERATIONDATAGROUP|"
+            rf"NONVSAM|PATH)\s*\(\s*NAME\s*\(\s*{_DSN}"
+        ),
+        "define",
+        "DEFINE",
+    ),
+    (re.compile(rf"\bRELATE\s*\(\s*{_DSN}"), "read", "DEFINE AIX RELATE"),
+    (
+        re.compile(
+            rf"\b(?:REPRO|BLDINDEX|PRINT)\b[^;]*?\b(?:INDATASET|IDS)\s*\(\s*{_DSN}"
+        ),
+        "read",
+        "REPRO/BLDINDEX INDATASET",
+    ),
+    (
+        re.compile(rf"\b(?:REPRO|BLDINDEX)\b[^;]*?\b(?:OUTDATASET|ODS)\s*\(\s*{_DSN}"),
+        "write",
+        "REPRO/BLDINDEX OUTDATASET",
+    ),
+)
+
+
+def _idcams_named(step: JobStep) -> list[tuple[str, str, str]]:
+    """``(dataset, access, command)`` for every dataset an IDCAMS step's
+    in-stream SYSIN names directly: DELETE, DEFINE, a REPRO or BLDINDEX
+    INDATASET / OUTDATASET, an AIX's RELATE. A DD-named file is not here
+    (``_utility_uses`` has those)."""
+    if (step.program or "").upper() != "IDCAMS":
+        return []
+    text = re.sub(r"/\*.*?\*/", " ", _instream(step, "SYSIN"), flags=re.DOTALL)
+    # One IDCAMS command per statement: continuations (a trailing - or +)
+    # joined, a new command at each line that does not continue.
+    text = re.sub(r"[-+][ \t]*\n", " ", text).replace("\n", ";")
+    found: list[tuple[str, str, str]] = []
+    for regex, access, command in _IDCAMS_NAMED:
+        for match in regex.finditer(text):
+            entry = (match.group(1), access, command)
+            if entry not in found:
+                found.append(entry)
+    return found
+
+
 def _combine(use: str, disposition_access: str) -> str:
     """A program's *use* of a file, said with what DISP adds: a written
     dataset DISP=NEW is created; DISP=MOD with OUTPUT or EXTEND extends."""
@@ -1310,6 +1650,13 @@ class _ProgramUses:
                     modes.get(row["file_name"].upper(), set())
                 )
         return by_dd
+
+
+class _NoProgramUses(_ProgramUses):
+    """No program's open modes: every step falls back to DISP."""
+
+    def of(self, program: str) -> dict[str, set[str]] | None:
+        return None
 
 
 def _step_access(
@@ -1379,6 +1726,26 @@ def dataset_users(
                 row["temporary"] = True
             found.append(row)
 
+        for job in jfile.result.jobs:
+            for step in job.steps:
+                for named, access, command in _idcams_named(step):
+                    if not matches(named.upper()):
+                        continue
+                    found.append(
+                        {
+                            "dataset": named,
+                            "file": jfile.display,
+                            "job": job.name,
+                            "step": step.name,
+                            "programs": ["IDCAMS"],
+                            "ddname": None,
+                            "command": command,
+                            "access": access,
+                            "access_from": "idcams command",
+                            "location": locator.step(step),
+                        }
+                    )
+
     wanted = dataset.strip().strip("'").upper()
     _carry_index(
         index,
@@ -1402,8 +1769,10 @@ def dataset_users(
         "access_legend": "access_from program: the COBOL program's OPEN mode "
         "for the DD (read, write, update, extend; create when DISP=NEW); "
         "utility: what SORT, IEBGENER, IDCAMS REPRO or ICETOOL do with the "
-        "DD; disp: only DISP= was known (SHR/OLD say nothing about reading "
-        "or writing)",
+        "DD; idcams command: an IDCAMS DELETE, DEFINE, REPRO / BLDINDEX "
+        "INDATASET / OUTDATASET or AIX RELATE in SYSIN names the dataset "
+        "itself; disp: only DISP= was known (SHR/OLD say nothing about "
+        "reading or writing)",
     }
     if not found:
         answer["note"] = "no DD under the root names this dataset" + (
