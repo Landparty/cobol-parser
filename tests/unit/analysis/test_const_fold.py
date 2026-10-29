@@ -391,11 +391,12 @@ class TestLoopAndBranchPoisoning:
         assert fold.known == {"WS-A": "7"}
 
     def test_if_poisons_writes_in_both_arms(self):
+        # WS-FLAG is never set, so the walk cannot decide the IF.
         fold = _fold(
             "       MAIN-PARA.\n"
             "           MOVE 7 TO WS-A.\n"
             "           MOVE 1 TO WS-B.\n"
-            "           IF WS-A > 0\n"
+            "           IF WS-FLAG = 'Y'\n"
             "               MOVE 99 TO WS-B\n"
             "           ELSE\n"
             "               MOVE 1 TO WS-B\n"
@@ -410,8 +411,8 @@ class TestLoopAndBranchPoisoning:
             "       MAIN-PARA.\n"
             "           MOVE 7 TO WS-A.\n"
             "           MOVE 1 TO WS-B.\n"
-            "           EVALUATE WS-A\n"
-            "               WHEN 1\n"
+            "           EVALUATE WS-FLAG\n"
+            "               WHEN 'Y'\n"
             "                   MOVE 10 TO WS-B\n"
             "               WHEN OTHER\n"
             "                   MOVE 20 TO WS-B\n"
@@ -426,7 +427,7 @@ class TestLoopAndBranchPoisoning:
             "       MAIN-PARA.\n"
             "           MOVE 7 TO WS-A.\n"
             "           MOVE 1 TO WS-B.\n"
-            "           IF WS-A > 0\n"
+            "           IF WS-FLAG = 'Y'\n"
             "               PERFORM HELPER\n"
             "           END-IF.\n"
             "           DISPLAY WS-A.\n"
@@ -965,11 +966,27 @@ class TestValueAtObservationPoint:
 
     _DATA = "       01  N3                  PIC S9(3).\n"
 
-    def test_value_is_taken_at_the_display_not_at_the_end_of_the_walk(self):
+    def test_a_value_changed_after_the_display_is_not_reported(self):
+        # The DISPLAY showed 1, but a test harness checks N3 when the entry
+        # paragraph returns, where it holds 2: neither value is reported.
         fold = _fold(
             "       MAIN-PARA.\n"
             "           MOVE 1 TO N3.\n"
             "           DISPLAY N3.\n"
+            "           MOVE 2 TO N3.\n"
+            "           STOP RUN.\n",
+            extra_data=self._DATA,
+        )
+        assert fold.known == {}
+
+    def test_a_change_after_the_entry_paragraph_returns_does_not_matter(self):
+        # Control falls into NEXT-PARA in a real run, but a harness that
+        # PERFORMs MAIN-PARA gets control back with N3 still 1.
+        fold = _fold(
+            "       MAIN-PARA.\n"
+            "           MOVE 1 TO N3.\n"
+            "           DISPLAY N3.\n"
+            "       NEXT-PARA.\n"
             "           MOVE 2 TO N3.\n"
             "           STOP RUN.\n",
             extra_data=self._DATA,
@@ -1480,3 +1497,359 @@ class TestReadKeys:
         }
         assert read_keys[("VS-FILE", 27)] is None
         assert ConstantFolder().fold(result.ast, index).to_dict().keys() == {"known"}
+
+
+class TestDecidedBranches:
+    """An IF/EVALUATE the walk can decide from values it knows runs only the
+    arm it selects; anything else stays undecided and poisons every arm."""
+
+    _DATA = (
+        "       01  WS-CODE             PIC X(2).\n"
+        "           88  CODE-OK         VALUE 'OK' 'YS'.\n"
+        "       01  WS-LEVEL            PIC 9(2).\n"
+        "           88  LEVEL-LOW       VALUE 1 THRU 4.\n"
+        "       01  WS-TBL.\n"
+        "           05  WS-ITEM         PIC 9 OCCURS 3.\n"
+    )
+
+    def test_a_true_condition_runs_the_then_arm(self):
+        fold = _fold(
+            "       MAIN-PARA.\n"
+            "           MOVE 7 TO WS-A.\n"
+            "           IF WS-A > 0\n"
+            "               MOVE 99 TO WS-B\n"
+            "           ELSE\n"
+            "               MOVE 1 TO WS-B\n"
+            "           END-IF.\n"
+            "           DISPLAY WS-B.\n"
+        )
+        assert fold.known == {"WS-B": "99"}
+
+    def test_a_false_condition_runs_the_else_arm(self):
+        fold = _fold(
+            "       MAIN-PARA.\n"
+            "           MOVE 0 TO WS-A.\n"
+            "           IF WS-A > 0\n"
+            "               MOVE 99 TO WS-B\n"
+            "           ELSE\n"
+            "               MOVE 1 TO WS-B\n"
+            "           END-IF.\n"
+            "           DISPLAY WS-B.\n"
+        )
+        assert fold.known == {"WS-B": "1"}
+
+    def test_a_display_in_the_arm_that_does_not_run_does_not_veto(self):
+        fold = _fold(
+            "       MAIN-PARA.\n"
+            "           MOVE 7 TO WS-A.\n"
+            "           MOVE 1 TO WS-B.\n"
+            "           IF WS-A = 0\n"
+            "               MOVE 9 TO WS-B\n"
+            "               DISPLAY WS-B\n"
+            "           END-IF.\n"
+            "           DISPLAY WS-B.\n"
+        )
+        assert fold.known == {"WS-A": "7", "WS-B": "1"} or fold.known == {"WS-B": "1"}
+
+    def test_a_display_in_the_arm_that_runs_is_observed(self):
+        fold = _fold(
+            "       MAIN-PARA.\n"
+            "           MOVE 7 TO WS-A.\n"
+            "           IF WS-A = 7\n"
+            "               MOVE 9 TO WS-B\n"
+            "               DISPLAY WS-B\n"
+            "           END-IF.\n"
+            "           GOBACK.\n"
+        )
+        assert fold.known == {"WS-B": "9"}
+
+    def test_a_seeded_value_decides_the_branch(self):
+        source = (
+            "       MAIN-PARA.\n"
+            "           ACCEPT WS-FLAG.\n"
+            "           IF WS-FLAG = 'Y'\n"
+            "               MOVE 'YES' TO WS-NAME\n"
+            "           ELSE\n"
+            "               MOVE 'NO' TO WS-NAME\n"
+            "           END-IF.\n"
+            "           DISPLAY WS-NAME.\n"
+        )
+        assert _fold(source, seed_values={"WS-FLAG": "Y"}).known == {"WS-NAME": "YES"}
+        assert _fold(source, seed_values={"WS-FLAG": "N"}).known == {"WS-NAME": "NO"}
+        assert _fold(source).known == {}
+
+    def test_text_equality_pads_the_shorter_value_with_spaces(self):
+        fold = _fold(
+            "       MAIN-PARA.\n"
+            "           MOVE 'AB' TO WS-NAME.\n"
+            "           IF WS-NAME = 'AB   '\n"
+            "               MOVE 1 TO WS-B\n"
+            "           ELSE\n"
+            "               MOVE 2 TO WS-B\n"
+            "           END-IF.\n"
+            "           DISPLAY WS-B.\n"
+        )
+        assert fold.known == {"WS-B": "1"}
+
+    def test_spaces_compares_with_a_blank_text_value(self):
+        fold = _fold(
+            "       MAIN-PARA.\n"
+            "           MOVE SPACES TO WS-NAME.\n"
+            "           IF WS-NAME = SPACES\n"
+            "               MOVE 1 TO WS-B\n"
+            "           END-IF.\n"
+            "           DISPLAY WS-B.\n"
+        )
+        assert fold.known == {}  # SPACES is not folded by MOVE, so undecided
+
+    @pytest.mark.parametrize(
+        "condition",
+        [
+            # The answer depends on the collating sequence (EBCDIC vs ASCII).
+            "WS-NAME > 'A'",
+            # A number against text is not decided.
+            "WS-NAME = 1",
+            # A subscripted operand is not modeled.
+            "WS-ITEM (1) = 0",
+            # An operand the walk does not know.
+            "WS-TOTAL = 0",
+        ],
+    )
+    def test_undecidable_conditions_poison_both_arms(self, condition):
+        fold = _fold(
+            "       MAIN-PARA.\n"
+            "           MOVE 'B' TO WS-NAME.\n"
+            "           MOVE 1 TO WS-B.\n"
+            f"           IF {condition}\n"
+            "               MOVE 99 TO WS-B\n"
+            "           END-IF.\n"
+            "           DISPLAY WS-B.\n",
+            extra_data=self._DATA,
+        )
+        assert "WS-B" not in fold.known
+
+    def test_and_or_not_use_three_valued_logic(self):
+        # WS-TOTAL is unknown, but OR with a true leg is true and AND with a
+        # false leg is false.
+        fold = _fold(
+            "       MAIN-PARA.\n"
+            "           MOVE 7 TO WS-A.\n"
+            "           IF WS-TOTAL = 0 OR WS-A = 7\n"
+            "               MOVE 1 TO WS-B\n"
+            "           END-IF.\n"
+            "           IF WS-TOTAL = 0 AND NOT WS-A = 7\n"
+            "               MOVE 2 TO WS-B\n"
+            "           END-IF.\n"
+            "           DISPLAY WS-B.\n"
+        )
+        assert fold.known == {"WS-B": "1"}
+
+    def test_sign_condition_on_a_known_number(self):
+        fold = _fold(
+            "       MAIN-PARA.\n"
+            "           MOVE -3 TO WS-SIGNED.\n"
+            "           IF WS-SIGNED IS NEGATIVE\n"
+            "               MOVE 1 TO WS-B\n"
+            "           ELSE\n"
+            "               MOVE 2 TO WS-B\n"
+            "           END-IF.\n"
+            "           DISPLAY WS-B.\n"
+        )
+        assert fold.known == {"WS-B": "1"}
+
+    @pytest.mark.parametrize(("code", "expected"), [("'YS'", "1"), ("'NO'", "2")])
+    def test_condition_name_with_literal_values(self, code, expected):
+        fold = _fold(
+            "       MAIN-PARA.\n"
+            f"           MOVE {code} TO WS-CODE.\n"
+            "           IF CODE-OK\n"
+            "               MOVE 1 TO WS-B\n"
+            "           ELSE\n"
+            "               MOVE 2 TO WS-B\n"
+            "           END-IF.\n"
+            "           DISPLAY WS-B.\n",
+            extra_data=self._DATA,
+        )
+        assert fold.known == {"WS-B": expected}
+
+    @pytest.mark.parametrize(("level", "expected"), [(3, "1"), (5, "2")])
+    def test_condition_name_with_a_numeric_thru_range(self, level, expected):
+        fold = _fold(
+            "       MAIN-PARA.\n"
+            f"           MOVE {level} TO WS-LEVEL.\n"
+            "           IF LEVEL-LOW\n"
+            "               MOVE 1 TO WS-B\n"
+            "           ELSE\n"
+            "               MOVE 2 TO WS-B\n"
+            "           END-IF.\n"
+            "           DISPLAY WS-B.\n",
+            extra_data=self._DATA,
+        )
+        assert fold.known == {"WS-B": expected}
+
+    @pytest.mark.parametrize(
+        ("value", "expected"), [(1, "10"), (3, "20"), (7, "20"), (9, "30")]
+    )
+    def test_evaluate_subject_against_literals_ranges_and_other(self, value, expected):
+        fold = _fold(
+            "       MAIN-PARA.\n"
+            f"           MOVE {value} TO WS-A.\n"
+            "           EVALUATE WS-A\n"
+            "               WHEN 1\n"
+            "                   MOVE 10 TO WS-B\n"
+            "               WHEN 2 THRU 4\n"
+            "               WHEN 7\n"
+            "                   MOVE 20 TO WS-B\n"
+            "               WHEN OTHER\n"
+            "                   MOVE 30 TO WS-B\n"
+            "           END-EVALUATE.\n"
+            "           DISPLAY WS-B.\n"
+        )
+        assert fold.known == {"WS-B": expected}
+
+    def test_evaluate_with_no_matching_when_and_no_other_runs_nothing(self):
+        fold = _fold(
+            "       MAIN-PARA.\n"
+            "           MOVE 5 TO WS-A.\n"
+            "           MOVE 1 TO WS-B.\n"
+            "           EVALUATE WS-A\n"
+            "               WHEN 1\n"
+            "                   MOVE 10 TO WS-B\n"
+            "                   DISPLAY WS-B\n"
+            "           END-EVALUATE.\n"
+            "           DISPLAY WS-B.\n"
+        )
+        assert fold.known == {"WS-A": "5", "WS-B": "1"} or fold.known == {"WS-B": "1"}
+
+    def test_evaluate_true_with_condition_names(self):
+        fold = _fold(
+            "       MAIN-PARA.\n"
+            "           MOVE 'OK' TO WS-CODE.\n"
+            "           EVALUATE TRUE\n"
+            "               WHEN CODE-OK\n"
+            "                   MOVE 1 TO WS-B\n"
+            "               WHEN OTHER\n"
+            "                   MOVE 2 TO WS-B\n"
+            "           END-EVALUATE.\n"
+            "           DISPLAY WS-B.\n",
+            extra_data=self._DATA,
+        )
+        assert fold.known == {"WS-B": "1"}
+
+    def test_evaluate_true_with_a_relational_when_is_not_decided(self):
+        fold = _fold(
+            "       MAIN-PARA.\n"
+            "           MOVE 7 TO WS-A.\n"
+            "           EVALUATE TRUE\n"
+            "               WHEN WS-A > 3\n"
+            "                   MOVE 1 TO WS-B\n"
+            "               WHEN OTHER\n"
+            "                   MOVE 2 TO WS-B\n"
+            "           END-EVALUATE.\n"
+            "           DISPLAY WS-B.\n"
+        )
+        assert "WS-B" not in fold.known
+
+    def test_an_undecided_when_before_the_match_leaves_it_undecided(self):
+        fold = _fold(
+            "       MAIN-PARA.\n"
+            "           MOVE 7 TO WS-A.\n"
+            "           EVALUATE WS-A\n"
+            "               WHEN WS-TOTAL\n"
+            "                   MOVE 1 TO WS-B\n"
+            "               WHEN 7\n"
+            "                   MOVE 2 TO WS-B\n"
+            "           END-EVALUATE.\n"
+            "           DISPLAY WS-B.\n"
+        )
+        assert "WS-B" not in fold.known
+
+    def test_a_run_ender_in_the_arm_that_runs_ends_the_walk(self):
+        fold = _fold(
+            "       MAIN-PARA.\n"
+            "           MOVE 'Q' TO WS-FLAG.\n"
+            "           MOVE 1 TO WS-B.\n"
+            "           DISPLAY WS-B.\n"
+            "           IF WS-FLAG = 'Q'\n"
+            "               STOP RUN\n"
+            "           END-IF.\n"
+            "           MOVE 2 TO WS-B.\n"
+            "           DISPLAY WS-B.\n"
+        )
+        # The second DISPLAY never runs, so it is not a site that saw 1 --
+        # but it was never reached either, so it still vetoes WS-B.
+        assert "WS-B" not in fold.known
+
+    def test_a_branch_after_an_exit_paragraph_is_not_decided(self):
+        fold = _fold(
+            "       MAIN-PARA.\n"
+            "           MOVE 7 TO WS-A.\n"
+            "           EXIT PARAGRAPH.\n"
+            "           IF WS-A = 7\n"
+            "               MOVE 1 TO WS-B\n"
+            "           END-IF.\n"
+            "           DISPLAY WS-B.\n"
+        )
+        assert "WS-B" not in fold.known
+
+
+_FILE_PROGRAM = """\
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. WRTEST.
+       ENVIRONMENT DIVISION.
+       INPUT-OUTPUT SECTION.
+       FILE-CONTROL.
+           SELECT OUT-F ASSIGN TO OUTFILE.
+       DATA DIVISION.
+       FILE SECTION.
+       FD  OUT-F.
+       01  OUT-REC.
+           05  OUT-ID          PIC 9(4).
+           05  OUT-STATUS      PIC X(3).
+       WORKING-STORAGE SECTION.
+       01  WS-N                PIC 9(4).
+       PROCEDURE DIVISION.
+       MAIN-PARA.
+           OPEN OUTPUT OUT-F
+{body}
+           CLOSE OUT-F
+           GOBACK.
+"""
+
+
+def _fold_file_program(body: str):
+    result = parse_cobol(_FILE_PROGRAM.format(body=body), filename="w.cbl")
+    assert result.ast is not None and result.errors == [], result.errors
+    index = ProgramLayoutIndex.build(result.ast)
+    return ConstantFolder().fold(result.ast, index)
+
+
+class TestWholeRecordWrite:
+    def test_a_group_record_write_observes_every_member(self):
+        fold = _fold_file_program(
+            "           MOVE 42 TO OUT-ID\n"
+            "           MOVE 'NEW' TO OUT-STATUS\n"
+            "           WRITE OUT-REC"
+        )
+        assert fold.known == {"OUT-REC.OUT-ID": "42", "OUT-REC.OUT-STATUS": "NEW"}
+
+    def test_a_member_written_twice_with_different_values_is_dropped(self):
+        fold = _fold_file_program(
+            "           MOVE 42 TO OUT-ID\n"
+            "           MOVE 'NEW' TO OUT-STATUS\n"
+            "           WRITE OUT-REC\n"
+            "           MOVE 43 TO OUT-ID\n"
+            "           WRITE OUT-REC"
+        )
+        assert fold.known == {"OUT-REC.OUT-STATUS": "NEW"}
+
+    def test_a_record_write_in_an_undecided_arm_vetoes_its_members(self):
+        fold = _fold_file_program(
+            "           MOVE 42 TO OUT-ID\n"
+            "           MOVE 'NEW' TO OUT-STATUS\n"
+            "           WRITE OUT-REC\n"
+            "           IF WS-N = 1\n"
+            "               WRITE OUT-REC\n"
+            "           END-IF"
+        )
+        assert fold.known == {}

@@ -635,13 +635,23 @@ from cobolparser.analysis.const_fold import ConstantFolder
 folder = ConstantFolder()
 result = folder.fold(ast, index, seed_values={"WS-QTY": "622"})
 result.known   # dict[qualified_name, str]: the value each field held at
-               # the DISPLAY/WRITE sites that observed it
+               # the DISPLAY/WRITE sites that observed it, and still holds
+               # when the entry paragraph returns
 ```
 
-**`known` is the value at the observation point** (see #246).
-`_WalkState.observed` records the env value at every `DISPLAY`/`WRITE` site; a
-field is reported only when every site saw the same known value (not the env
-at the end of the walk: `MOVE 1 TO N3. DISPLAY N3. MOVE 2 TO N3.` is `1`). The
+**`known` is the value at the observation point** (see #246), **and it
+must still hold when the entry paragraph returns**. `_WalkState.observed`
+records the env value at every `DISPLAY`/`WRITE` site; a field is reported
+only when every site saw the same known value *and* the env at the end of
+the entry paragraph (or where a STOP RUN / GOBACK ended the walk inside it)
+holds that value too. The second rule is there because the bundle's consumer
+checks it there: mockymock PERFORMs the entry paragraph and runs every
+`EXPECT` after the PERFORM, so `MOVE 1 TO N3. DISPLAY N3. MOVE 2 TO N3.`
+used to give `N3 = 1` and a generated `EXPECT N3 TO BE 1` that failed on its
+first run; it now gives nothing. A change made only after the entry
+paragraph returns (in a paragraph control falls into) does not matter. A
+main-line `GO TO` sets `_WalkState.jumped`: where the entry paragraph
+returns is then unseen, and nothing is reported. The
 walk **falls through**: after the entry paragraph it continues into every
 following paragraph in source order (`_fall_through_chain`) until the walk
 stops (`STOP RUN`/`GOBACK`/`EXIT PROGRAM`/`GO TO`), so a program displaying
@@ -734,10 +744,29 @@ internal env) rather than approximating:
   it covers (`_LayoutFacts.renames`, the declaration-order run from `a`'s
   first leaf to `b`'s last; the whole record when that run is ambiguous).
   The alias is written, never seed-restored, by READ INTO / ACCEPT.
-* An `IF`/`EVALUATE` branches on data this walk does not evaluate (Phase 5's
-  `ScenarioPlanner` already owns targeting one specific arm elsewhere), so
-  every field either arm could write is poisoned the same way as a loop
-  body -- this is a conjunctive walk, not per-scenario branch evaluation.
+* **An `IF`/`EVALUATE` is decided when its outcome follows from what the
+  walk knows** (`_decided_if_arm`, `_decided_evaluate_arm`, `_decide`). The
+  arm it selects is walked like the main line; the DISPLAY/WRITE sites
+  nested in the other arms are recorded in `_WalkState.dismissed_sites`, so
+  they do not veto the fields they name (a site in a paragraph such an arm
+  PERFORMs is not dismissed: that paragraph may run from elsewhere). What
+  is decided: relations between two numbers; `=` / `NOT =` between two
+  alphanumeric values (the shorter padded with spaces; `SPACES` is a blank
+  value); `IS [NOT] POSITIVE/NEGATIVE/ZERO` on a number; a level-88 test
+  whose VALUEs are all plain literals or numeric THRU ranges
+  (`index.condition_raw_values`; a VALUE that is a figurative word or `ALL`
+  literal is not decided, since the index stores a quoted literal without
+  its quotes); `AND` / `OR` / `NOT` in three-valued logic (`unknown OR
+  true` is true); and an EVALUATE with one subject whose WHENs are literals,
+  data names or numeric THRU ranges (or `EVALUATE TRUE` with condition-name
+  WHENs), in order, up to the first match, else `WHEN OTHER`. Everything
+  else is left undecided and poisons every arm as before: an ordering
+  comparison between alphanumeric values (EBCDIC and ASCII order letters
+  and digits differently), a number against text, ZERO against text, a
+  subscripted or reference-modified operand, an operand the walk does not
+  know, a WHEN written as a condition, `ALSO`, and anything met in
+  uncertain mode. Pinned by
+  `tests/unit/analysis/test_const_fold.py::TestDecidedBranches`.
 * A conditional handler body (`AT END`/`NOT AT END`/`INVALID KEY`/`ON SIZE
   ERROR`/`ON OVERFLOW`/`ON EXCEPTION`/`AT EOP` and their `NOT` variants,
   the `_HANDLER_BODY_ATTRS` tuple) may or may not fire, so every field it
@@ -874,11 +903,11 @@ internal env) rather than approximating:
   (`INITIALIZE`, `SET`, `STRING`/`UNSTRING`, `INSPECT`, and the CALL/SQL/
   CICS/DLI cases above) conservatively poisons every name in its `.operands`
   -- a fail-safe default, not a silent skip.
-* Only a `DISPLAY`/`WRITE` operand that resolves *directly* to an elementary
-  field is an observation point -- a whole-record `WRITE`'s individual
-  member fields are not (yet) walked, so some real `field_equals`
-  opportunities are silently not offered. Never wrong, sometimes just
-  quieter than it could be. `GO TO`, `STOP RUN`, `GOBACK`, and `EXIT
+* A `DISPLAY` operand that resolves to an elementary field is an
+  observation point; a `WRITE` of a group record observes every elementary
+  field under it (`_site_fields`, used the same way for walked, poisoned and
+  unreached sites). Pinned by
+  `tests/unit/analysis/test_const_fold.py::TestWholeRecordWrite`. `GO TO`, `STOP RUN`, `GOBACK`, and `EXIT
   PROGRAM` all stop the walk outright (unreachable code after them is never
   folded or observed). A paragraph's end is not a stop: control falls
   through into the next paragraph (#246).

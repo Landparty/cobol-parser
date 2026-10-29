@@ -251,17 +251,21 @@ carries all three kinds that apply):
    of. The walk starts at the program's entry paragraph, follows
    non-looping `PERFORM`s (including `THRU` ranges) inline, and falls
    through into each following paragraph until `STOP RUN`/`GOBACK`/`EXIT
-   PROGRAM`/`GO TO`; a looping
-   `PERFORM`, an `IF`/`EVALUATE`, `DIVIDE` (the AST does not record `BY` vs
-   `INTO`, and the two invert dividend/divisor order), `ROUNDED`,
-   `CORRESPONDING`, and any numeric result that would need rounding or
-   truncation to fit its target field's PICTURE all leave the affected
-   field(s) unknown rather than guess. Only a `DISPLAY`/`WRITE` operand that
-   resolves directly to an elementary field is an observation point — never
+   PROGRAM`/`GO TO`. An `IF`/`EVALUATE` whose outcome follows from values
+   the walk knows (the scenario's own inputs included) runs only the arm it
+   selects; any other `IF`/`EVALUATE`, a looping `PERFORM`, `ROUNDED`,
+   `CORRESPONDING`, an inexact division, and any numeric result that would
+   need rounding or truncation to fit its target field's PICTURE leave the
+   affected field(s) unknown rather than guess. A `DISPLAY` operand that
+   resolves to an elementary field is an observation point, and a `WRITE`
+   of a group record observes every elementary field under it — never
    wrong, just narrower than a full interpreter would be. `value` is what
    the field held **at the `DISPLAY`/`WRITE`** -- what the program emitted
-   there, not its value at program end; a field observed at several sites
-   is offered only when every site saw the same known value. `ref` is the
+   there -- and it is offered only when every site saw the same known value
+   **and the field still holds it when the entry paragraph returns** (where
+   a harness that PERFORMs the entry paragraph checks it; a main-line
+   `GO TO` out of the entry paragraph leaves that point unknown, so nothing
+   is offered). `ref` is the
    field's qualified name (not a `"CATEGORY:KEY"` pair). A scenario that
    overrides a boundary's status carries no `field_equals` at all: the fold
    walks the normal path, which a failure path may never reach.

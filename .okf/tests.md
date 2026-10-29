@@ -8,7 +8,7 @@ timestamp: 2026-10-28T00:00:00Z
 
 # Tests
 
-The suite lives under `tests/` and runs with plain pytest: **~15,580 tests
+The suite lives under `tests/` and runs with plain pytest: **~15,610 tests
 collected from 633 `test_*.py` files** (`python -m pytest tests --collect-only
 -q --no-cov`, 2026-10-29). Configuration is `[tool.pytest.ini_options]` in
 `pyproject.toml` (`testpaths = ["tests"]`, `--strict-markers`, coverage on by
