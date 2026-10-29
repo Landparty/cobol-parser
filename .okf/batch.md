@@ -95,6 +95,10 @@ things `parse_cobol_with_expansion` attaches (#255), so the two entry points
 cannot disagree about a line:
 
 * `result.expansion_source_map` — expanded line -> `(file, original line)`.
+* `result.expansion_copybooks` — every copybook file the expander opened
+  (its `included_copybooks`), including a member that contributed no line
+  of its own (one that only COPYs another, or holds only comments), which
+  the source map never names; what the caches stamp (#763).
 * the expansion's `statistics.warnings`, merged (deduplicated) into
   `result.warnings`.
 * the dropped-`D`-lines warning the expansion hid from the parser
@@ -226,7 +230,9 @@ path changes a directory mtime though no file the parse read changed.
 `scan_one` with `cache_dir`: the key's settings are `ScanOptions.
 cache_settings()` (every field but `cache_dir`), the stamps are the program
 (taken *before* the parse, so an edit during it is a later miss), every file
-in the expansion source map and `directory_stamps(copybook_paths)`. A hit is
+in the expansion source map or `result.expansion_copybooks` (#763: a member
+that only COPYs another is in the second only) and
+`directory_stamps(copybook_paths)`. A hit is
 `FileScan.from_dict()` with `from_cache=True`; a file with an `error` is
 never stored. `summary.cached_file_count` appears only when `cache_dir` is
 set. Pinned by `tests/unit/test_facts_cache.py`.

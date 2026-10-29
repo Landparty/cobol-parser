@@ -224,3 +224,35 @@ class TestWarmUp:
         assert tools.workspace.facts_store.last_compute[1] == len(
             tools.workspace.program_files()
         )
+
+
+def test_edited_wrapper_copybook_is_reparsed(tmp_path: Path) -> None:
+    """#763: a member that only COPYs another adds no line to the source map,
+    so the parse must stamp it from the members the expander opened."""
+    import os
+
+    books = tmp_path / "copybooks"
+    books.mkdir()
+    (books / "OUTER.cpy").write_text("           COPY INNERA.\n")
+    (books / "INNERA.cpy").write_text("       01 FIELD-A PIC X(5).\n")
+    (books / "INNERB.cpy").write_text("       01 FIELD-B PIC X(5).\n")
+    (tmp_path / "P.cbl").write_text(
+        "       IDENTIFICATION DIVISION.\n"
+        "       PROGRAM-ID. P.\n"
+        "       DATA DIVISION.\n"
+        "       WORKING-STORAGE SECTION.\n"
+        "       COPY OUTER.\n"
+        "       PROCEDURE DIVISION.\n"
+        "           GOBACK.\n"
+    )
+    workspace = Workspace(tmp_path, ProjectConfig(copybook_path=(str(books),)))
+
+    def names() -> list[str]:
+        return [item.name for item in workspace.program("P.cbl").ast.get_data_items()]
+
+    assert names() == ["FIELD-A"]
+    outer = books / "OUTER.cpy"
+    outer.write_text("           COPY INNERB.\n")
+    info = outer.stat()
+    os.utime(outer, ns=(info.st_atime_ns, info.st_mtime_ns + 5_000_000_000))
+    assert names() == ["FIELD-B"]

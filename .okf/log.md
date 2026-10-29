@@ -14,6 +14,16 @@ deliberate. Anything else appended to the bottom is a mistake: five
 entries, including both 2026-09-15 sections, were found there on
 2026-09-15 and moved back up.
 
+## 2026-10-29 -- bug hunt fixes #757-#763
+
+[analysis/lineage.md](analysis/lineage.md): widen-check edited-sign rule
+(#757), occurrence hops checked (#759), inner REDEFINES only when it covers
+the change (#760), ENTRY ports matched by name (#761).
+[analysis/fixtures-support.md](analysis/fixtures-support.md): carriers must
+hold the source losslessly (#758) and see no READ before the MOVE (#762).
+[batch.md](batch.md), [mcp.md](mcp.md): `ParseResult.expansion_copybooks`,
+stamped by both caches (#763).
+
 ## 2026-10-28 -- merge main; FUNCTION callers in the MCP server
 
 [mcp.md](mcp.md): `_calls` rows with `via: "FUNCTION"`, so `callers_of` /

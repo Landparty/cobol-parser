@@ -2046,5 +2046,8 @@ def parse_cobol_with_expansion(
     # with stand-ins that carry only the fields they care about, and a map
     # that is merely absent must not take the whole parse down.
     result_obj.expansion_source_map = source_map
+    result_obj.expansion_copybooks = list(
+        getattr(expansion, "included_copybooks", None) or []
+    )
 
     return parse_result

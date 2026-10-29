@@ -87,6 +87,9 @@ class ParseResult:
     # Expanded line -> (origin file, origin line); set only by
     # parse_cobol_with_expansion, None otherwise (see preprocessing.md)
     expansion_source_map: dict[int, tuple[str, int]] | None = None
+    # Every copybook file parse_cobol_with_expansion opened, in order, incl.
+    # a member that adds no line of its own (#763); [] otherwise
+    expansion_copybooks: list[str] = field(default_factory=list)
 
     @property
     def success(self) -> bool:        # ast is not None AND no errors

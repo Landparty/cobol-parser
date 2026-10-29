@@ -828,7 +828,10 @@ next parent line maps to its own record.
 
 `expand_copybooks(..., source_file=...)` names the main program (default
 `"<main>"`); `parse_cobol_with_expansion` passes the real filename, always
-requests the map and exposes it as **`ParseResult.expansion_source_map`** --
+requests the map and exposes it as **`ParseResult.expansion_source_map`**
+(and the expansion's `included_copybooks` as `ParseResult.expansion_copybooks`:
+every member opened, including one that only COPYs another and so names no
+line in the map -- what the scan and MCP caches stamp, #763) --
 `None` when nothing was expanded, exactly when expanded and on-disk line
 numbers coincide. `analysis.lint.apply_source_map` stamps it onto findings
 (`origin_file` / `origin_line`); the `lint` CLI applies it whenever

@@ -204,7 +204,105 @@ class TestCarrierDetection:
             _COMPARE + "           MOVE WS-OTHER TO WS-PREV-KEY\n",
             "",
         ),
+        # #758: the MOVE cuts the key, so the carrier is not the previous key.
+        "narrower than the key": (
+            "       01  WS-PREV-KEY         PIC X(03) VALUE SPACES.\n",
+            _COMPARE + _CARRY,
+            "",
+        ),
+        "numeric carrier of an alphanumeric key": (
+            "       01  WS-PREV-KEY         PIC 9(04) VALUE ZERO.\n",
+            _COMPARE + _CARRY,
+            "",
+        ),
+        # #762: a READ between the comparison and the MOVE makes the MOVE
+        # carry the record the comparison sees next, not the one before it.
+        "read before the move": (
+            _PREV,
+            _COMPARE
+            + "           READ F1 AT END SET END-OF-FILE TO TRUE END-READ\n"
+            + _CARRY,
+            "",
+        ),
+        "a GO TO that skips the move": (
+            _PREV,
+            """\
+           IF F1-KEY = WS-PREV-KEY
+               GO TO LOOP-EXIT
+           END-IF
+""" + _CARRY,
+            """\
+       LOOP-EXIT.
+           EXIT.
+""",
+        ),
+        "read after a GO TO out of a performed range": (
+            _PREV,
+            _COMPARE + "           PERFORM CHK-PARA THRU CHK-EXIT\n" + _CARRY,
+            """\
+       CHK-PARA.
+           GO TO READ-PARA.
+       CHK-EXIT.
+           EXIT.
+       READ-PARA.
+           READ F1 AT END SET END-OF-FILE TO TRUE END-READ.
+""",
+        ),
+        "read in a paragraph performed before the move": (
+            _PREV,
+            _COMPARE + "           PERFORM NEXT-PARA\n" + _CARRY,
+            """\
+       NEXT-PARA.
+           PERFORM READ-PARA.
+       READ-PARA.
+           READ F1 AT END SET END-OF-FILE TO TRUE END-READ.
+""",
+        ),
     }
+
+    def test_go_to_within_a_performed_range_keeps_the_carrier(self) -> None:
+        compare = """\
+           IF F1-KEY = WS-PREV-KEY
+               PERFORM SHOW-PARA THRU SHOW-EXIT
+           END-IF
+"""
+        _ast, _b, constraints = _analyze(
+            _program(
+                _PREV,
+                compare + _CARRY,
+                """\
+       SHOW-PARA.
+           IF F1-TYPE = '01'
+               GO TO SHOW-EXIT
+           END-IF
+           DISPLAY 'SAME KEY'.
+       SHOW-EXIT.
+           EXIT.
+""",
+            )
+        )
+        (compared,) = [b for b in constraints.branches if b.correlations]
+        assert compared.correlations["THEN"]
+
+    def test_wider_carrier_and_a_performed_paragraph_that_reads_nothing(
+        self,
+    ) -> None:
+        compare = """\
+           IF F1-KEY = WS-PREV-KEY
+               PERFORM SHOW-PARA
+           END-IF
+"""
+        _ast, _b, constraints = _analyze(
+            _program(
+                "       01  WS-PREV-KEY         PIC X(06) VALUE SPACES.\n",
+                compare + _CARRY,
+                """\
+       SHOW-PARA.
+           DISPLAY 'SAME KEY'.
+""",
+            )
+        )
+        assert _branch(constraints).correlations["THEN"]
 
     @pytest.mark.parametrize("case", sorted(_NOT_A_CARRIER))
     def test_not_a_carrier(self, case: str) -> None:
@@ -390,3 +488,50 @@ class TestBundle:
             forced[scenario.name] = "FORCED" in out
         assert forced["PROCESS-REC: IF@32 THEN"] is True
         assert forced["happy path"] is False
+
+
+class TestLosslessCarrier:
+    """#758: only a carrier that holds the whole value stands for it."""
+
+    @staticmethod
+    def _spec(category, size=0, ints=0, decs=0, signed=False, justified=False):
+        from types import SimpleNamespace
+
+        return SimpleNamespace(
+            category=category,
+            size=size,
+            integer_digits=ints,
+            decimal_digits=decs,
+            is_signed=signed,
+            justified=justified,
+        )
+
+    @pytest.mark.parametrize(
+        ("carrier", "source", "expected"),
+        [
+            (("numeric", 3, 3), ("numeric", 3, 3), True),
+            (("numeric", 2, 2), ("numeric", 3, 3), False),
+            (("numeric", 5, 3, 2), ("numeric", 5, 3, 2), True),
+            (("numeric", 4, 3, 1), ("numeric", 5, 3, 2), False),
+            (("numeric", 3, 3, 0, False), ("numeric", 3, 3, 0, True), False),
+            (("numeric", 3, 3, 0, True), ("numeric", 3, 3, 0, False), True),
+            (("alphanumeric", 4), ("numeric", 4, 4), False),
+            (("numeric-edited", 4), ("numeric", 4, 4), False),
+            (("alphanumeric", 6), ("alphanumeric", 4), True),
+            (("alphanumeric", 3), ("alphanumeric", 4), False),
+            (("alphanumeric", 4), ("alphabetic", 4), True),
+            (("alphabetic", 4), ("alphanumeric", 4), False),
+            (("national", 4), ("national", 4), True),
+            (("national", 4), ("alphanumeric", 4), False),
+        ],
+    )
+    def test_holds_losslessly(self, carrier, source, expected) -> None:
+        from cobolparser.analysis.constraints import _holds_losslessly
+
+        assert _holds_losslessly(self._spec(*carrier), self._spec(*source)) is expected
+
+    def test_justified_wider_carrier_shifts_the_value(self) -> None:
+        from cobolparser.analysis.constraints import _holds_losslessly
+
+        carrier = self._spec("alphanumeric", 6, justified=True)
+        assert not _holds_losslessly(carrier, self._spec("alphanumeric", 4))

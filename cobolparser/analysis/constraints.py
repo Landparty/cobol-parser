@@ -25,7 +25,11 @@ from dataclasses import field as dataclass_field
 from typing import TYPE_CHECKING, Any
 
 from .._literals import is_quoted_literal, typed_literal_content, unquote_literal
-from ..generators.data.layout import all_literal_operand, condition_values_exhaustive
+from ..generators.data.layout import (
+    FieldCategory,
+    all_literal_operand,
+    condition_values_exhaustive,
+)
 from ..models.ast_base import SourceLocation
 from ..models.data_items import ConditionNameItem
 from ..models.program import CobolDivision, CobolParagraph, CobolProgram
@@ -43,6 +47,7 @@ from ..models.statements.control import (
 )
 from ..models.statements.data import MoveStatement
 from ..models.statements.io import IOReadStatement
+from ..models.statements.misc import ReturnStatement
 from .boundary_inventory import (
     BoundaryRef,
     BoundaryReport,
@@ -1703,9 +1708,82 @@ class _Carriers:
         source = self._index.resolve(str(move.source))
         if source is None or not _is_boundary_fed(source, self._fed):
             return None
+        if not _holds_losslessly(carrier.spec, source.spec):
+            return None  # #758: the MOVE cuts the value it carries
+        if self._refills_between(site, move.location.line):
+            return None  # #762: the carrier would hold the current record
         if not self._only_written_by(carrier, move.location.line):
             return None
         return source
+
+    def _refills_between(self, site: _CarrierSite, move_line: int) -> bool:
+        """True when a READ or RETURN may run after the comparison and before
+        the carrying MOVE in the comparison's paragraph -- directly, or in a
+        paragraph PERFORMed there. The MOVE would then carry the record just
+        read, which the comparison next sees as "the previous" one. A GO TO
+        there counts too: on that path the MOVE is skipped, and the carrier
+        keeps an older record. Lines are compared inclusively, so a READ
+        written on the comparison's or the MOVE's own line is not missed."""
+        paragraph = (site.paragraph or "").upper()
+        for name, statement, _enclosing in _walk_statements(self._procedure):
+            if (name or "").upper() != paragraph:
+                continue
+            location = getattr(statement, "location", None)
+            line = location.line if location is not None else None
+            if line is None or not site.line <= line <= move_line:
+                continue
+            if isinstance(statement, (IOReadStatement, ReturnStatement, GoStatement)):
+                return True
+            if isinstance(statement, PerformStatement) and self._performs_a_read(
+                statement
+            ):
+                return True
+        return False
+
+    def _performs_a_read(self, perform: PerformStatement) -> bool:
+        """True when the out-of-line paragraphs *perform* runs (THRU ranges,
+        sections, nested PERFORMs) may READ or RETURN, or cannot be found. A
+        GO TO out of the range leaves it for code not followed here, so it
+        counts as a read; one within it (``GO TO X-EXIT``) does not."""
+        if not perform.target_paragraph:
+            return False  # inline: its statements are walked in place
+        paragraphs = _all_paragraphs(self._procedure)
+        sections = {
+            str(section.section_name or "").upper(): list(section.paragraphs)
+            for section in self._procedure.sections
+            if not isinstance(section, CobolParagraph)
+        }
+        pending = [(perform.target_paragraph, perform.thru_paragraph)]
+        seen: set[tuple[str, str]] = set()
+        while pending:
+            first, last = pending.pop()
+            key = (str(first).upper(), str(last or "").upper())
+            if key in seen:
+                continue
+            seen.add(key)
+            run = _procedure_run(paragraphs, sections, *key)
+            if run is None:
+                return True  # not found: it may read
+            names = {str(p.paragraph_name or "").upper() for p in run}
+            for paragraph in run:
+                for _name, statement, _enclosing in _walk_list(
+                    paragraph.paragraph_name, paragraph.statements, ()
+                ):
+                    if isinstance(statement, (IOReadStatement, ReturnStatement)):
+                        return True
+                    if isinstance(statement, GoStatement):
+                        targets: list[str | None] = list(
+                            statement.target_paragraphs
+                        ) or [statement.target_paragraph]
+                        if any(str(t or "").upper() not in names for t in targets):
+                            return True
+                    if isinstance(statement, PerformStatement) and (
+                        statement.target_paragraph
+                    ):
+                        pending.append(
+                            (statement.target_paragraph, statement.thru_paragraph)
+                        )
+        return False
 
     def _only_written_by(self, carrier: ResolvedField, line: int) -> bool:
         """True when the MOVE at *line* is the one statement that may change
@@ -1752,6 +1830,64 @@ class _Carriers:
                     if any(r.role in _WRITING_ROLES for r in entry.references):
                         return False
         return writes == 1
+
+
+def _procedure_run(
+    paragraphs: list[CobolParagraph],
+    sections: dict[str, list[CobolParagraph]],
+    first: str,
+    last: str,
+) -> list[CobolParagraph] | None:
+    """The paragraphs ``PERFORM first [THRU last]`` runs, in source order, or
+    None when a name is not found."""
+
+    def span(name: str) -> tuple[int, int] | None:
+        if name in sections:
+            members = sections[name]
+            if not members:
+                return None
+            ids = [id(p) for p in paragraphs]
+            if id(members[0]) not in ids or id(members[-1]) not in ids:
+                return None
+            return ids.index(id(members[0])), ids.index(id(members[-1]))
+        for at, paragraph in enumerate(paragraphs):
+            if str(paragraph.paragraph_name or "").upper() == name:
+                return at, at
+        return None
+
+    start = span(first)
+    end = span(last) if last else start
+    if start is None or end is None or end[1] < start[0]:
+        return None
+    return paragraphs[start[0] : end[1] + 1]
+
+
+def _holds_losslessly(carrier: Any, source: Any) -> bool:
+    """True when a MOVE of *source* into *carrier* keeps its whole value, so
+    the carrier can stand for the previous record's field (#758): the same
+    kind of item, at least as many digits on each side of the decimal point
+    (and a sign when the source has one), or at least as many characters."""
+    numeric = str(FieldCategory.NUMERIC)
+    kinds = {str(carrier.category), str(source.category)}
+    if str(source.category) == numeric:
+        return (
+            str(carrier.category) == numeric
+            and (carrier.integer_digits or 0) >= (source.integer_digits or 0)
+            and (carrier.decimal_digits or 0) >= (source.decimal_digits or 0)
+            and (bool(carrier.is_signed) or not source.is_signed)
+        )
+    texts = {str(FieldCategory.ALPHANUMERIC), str(FieldCategory.ALPHABETIC)}
+    if kinds <= texts or kinds == {str(FieldCategory.NATIONAL)}:
+        if (
+            str(carrier.category)
+            == str(FieldCategory.ALPHABETIC)
+            != str(source.category)
+        ):
+            return False
+        if getattr(carrier, "justified", False) and carrier.size != source.size:
+            return False
+        return bool(carrier.size) and carrier.size >= (source.size or 0)
+    return False
 
 
 def _boundary_fed_names(report: BoundaryReport) -> set[str]:

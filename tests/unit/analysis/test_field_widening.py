@@ -73,7 +73,12 @@ class TestCapacity:
         [
             ("9(6)", "DISPLAY", Capacity(True, 6, 0)),
             ("S9(7)V99", "COMP-3", Capacity(True, 7, 2, signed=True)),
-            ("ZZZ,ZZ9.99", None, Capacity(True, 6, 2, signed=True)),
+            # An edited item keeps a sign only through a sign symbol (#757).
+            ("ZZZ,ZZ9.99", None, Capacity(True, 6, 2)),
+            ("ZZZ,ZZ9.99-", None, Capacity(True, 6, 2, signed=True)),
+            ("+ZZZ9", None, Capacity(True, 4, 0, signed=True)),
+            ("ZZ9CR", None, Capacity(True, 3, 0, signed=True)),
+            ("ZZ9DB", None, Capacity(True, 3, 0, signed=True)),
             ("X(10)", None, Capacity(False, chars=10)),
             ("N(4)", "NATIONAL", Capacity(False, chars=4)),
             ("XX/XX", None, Capacity(False, chars=5)),
@@ -368,3 +373,128 @@ class TestLineageReportAdditions:
         graph = LineageGraph([report.to_dict()])
         found = FieldWideningAnalyzer(graph).analyze("WS-AMT", "9(9)V99")
         assert _find(found, "layout", "WRITER", "IN-REC").line == 7
+
+
+def _inline(*sources: str) -> LineageGraph:
+    reports = []
+    for source in sources:
+        result = parse_cobol(source)
+        assert result.success, result.errors
+        reports.append(FieldFlowAnalyzer().analyze(result.ast).to_dict())
+    return LineageGraph(reports, [])
+
+
+def _program(name: str, data: str, procedure: str, using: str = "") -> str:
+    lines = [
+        "IDENTIFICATION DIVISION.",
+        f"PROGRAM-ID. {name}.",
+        "DATA DIVISION.",
+        *data.strip().splitlines(),
+        f"PROCEDURE DIVISION{using}.",
+        *procedure.strip().splitlines(),
+    ]
+    return "\n".join("       " + line.strip() for line in lines) + "\n"
+
+
+class TestRegressions:
+    def test_edited_receiver_without_sign_symbol_drops_the_sign(self) -> None:
+        """#757: ZZZZ9 cannot show a sign; -ZZZ9 can."""
+        graph = _inline(
+            _program(
+                "SIGNED",
+                """
+                WORKING-STORAGE SECTION.
+                01 AMT PIC 9(4).
+                01 ED-PLAIN PIC ZZZ9.
+                01 ED-SIGN PIC -ZZZ9.
+                """,
+                "MOVE AMT TO ED-PLAIN. MOVE AMT TO ED-SIGN. GOBACK.",
+            )
+        )
+        report = FieldWideningAnalyzer(graph).analyze("AMT", "S9(4)")
+        finding = _find(report, "truncation", "SIGNED", "ED-PLAIN")
+        assert "sign" in finding.message
+        _absent(report, "SIGNED", "ED-SIGN")
+
+    def test_receiver_of_a_literal_subscript_is_checked(self) -> None:
+        """#759: MOVE A(2) TO X reaches X through an occurrence node."""
+        graph = _inline(
+            _program(
+                "OCC",
+                """
+                WORKING-STORAGE SECTION.
+                01 REC.
+                   05 T OCCURS 3.
+                      10 A PIC 9(3).
+                01 OUT-A PIC 9(3).
+                """,
+                "MOVE A(2) TO OUT-A. GOBACK.",
+            )
+        )
+        report = FieldWideningAnalyzer(graph).analyze("A", "9(5)")
+        finding = _find(report, "truncation", "OCC", "OUT-A")
+        assert "high-order digits" in finding.message
+        # The start at one subscript is the start, not a receiver.
+        _absent(report, "OCC", "REC.T.A(2)")
+
+    def test_redefines_only_flagged_when_it_covers_the_change(self) -> None:
+        """#760: a REDEFINES after the changed field just shifts with it."""
+        graph = _inline(
+            _program(
+                "REDEF",
+                """
+                WORKING-STORAGE SECTION.
+                01 REC.
+                   05 G-A.
+                      10 AMT PIC 9(5).
+                      10 FIL PIC X(3).
+                   05 G-B REDEFINES G-A PIC X(8).
+                   05 D-X PIC X(8).
+                   05 D-N REDEFINES D-X PIC 9(8).
+                01 REC2 REDEFINES REC PIC X(16).
+                """,
+                "GOBACK.",
+            )
+        )
+        report = FieldWideningAnalyzer(graph).analyze("AMT", "9(7)")
+        _find(report, "layout", "REDEF", "REC.G-B")
+        _find(report, "layout", "REDEF", "REC2")
+        _absent(report, "REDEF", "REC.D-X")
+        _absent(report, "REDEF", "REC.D-N")
+
+    def test_entry_point_linkage_both_ways(self) -> None:
+        """#761: a CALL of an ENTRY name meets the ENTRY's USING record."""
+        caller = _program(
+            "CALLR",
+            """
+            WORKING-STORAGE SECTION.
+            01 REC.
+               05 A PIC 9(3).
+               05 B PIC X(7).
+            """,
+            "CALL 'SUBE' USING REC. GOBACK.",
+        )
+        callee = _program(
+            "SUBP",
+            """
+            LINKAGE SECTION.
+            01 LREC PIC X(10).
+            01 LREC2 PIC X(4).
+            """,
+            """
+            DISPLAY LREC2. GOBACK.
+            ENTRY 'SUBE' USING LREC.
+            DISPLAY LREC. GOBACK.
+            """,
+            using=" USING LREC2",
+        )
+        graph = _inline(caller, callee)
+        forward = FieldWideningAnalyzer(graph).analyze("A", "9(5)", "CALLR")
+        _find(forward, "layout", "SUBP", "LREC")
+        _absent(forward, "SUBP", "LREC2")
+        backward = FieldWideningAnalyzer(graph).analyze("LREC", "X(12)", "SUBP")
+        finding = _find(backward, "layout", "CALLR", "REC")
+        assert finding.severity == "error"
+        assert "to SUBE" in finding.message
+        none = FieldWideningAnalyzer(graph).analyze("LREC2", "X(12)", "SUBP")
+        _absent(none, "CALLR", "REC")

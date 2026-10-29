@@ -930,6 +930,8 @@ class Workspace:
         files = {filename}
         if source_map:
             files.update(file for file, _ in source_map.values())
+        # A member that only COPYs another adds no line to the map (#763).
+        files.update(getattr(result, "expansion_copybooks", None) or [])
         # A member that was missing, or one that would now shadow the one
         # used, is a new directory entry: no file the parse read changes,
         # but its directory's mtime does. ``COPY X OF LIB`` searches one
