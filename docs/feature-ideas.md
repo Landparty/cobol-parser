@@ -183,7 +183,10 @@ names what already exists, the concrete hook point, and a size.
 
 ## Analysis depth
 
-### 11. Cross-program CALL interface checking (S/M)
+### 11. Cross-program CALL interface checking (S/M) — SHIPPED
+
+> **Shipped** as `analysis/call_interface.py` (`CallInterfaceChecker`) behind
+> `cobol-parser call-check` (text, JSON or SARIF). See `.okf/analysis/codebase.md`.
 
 `LinkageChecker` correlates CALL ↔ ENTRY *within one source unit* only — its
 own docstring says so. `ProgramSignatureExtractor` already derives a callee's
@@ -195,7 +198,11 @@ calls which; `codebase.py` never consults a signature. Joining them answers
 nothing in the estate catches today. Cheapest high-value item on this list,
 because both halves are built and tested.
 
-### 12. Field-level data lineage / def-use (M/L)
+### 12. Field-level data lineage / def-use (M/L) — SHIPPED
+
+> **Shipped** as `analysis/field_lineage.py` (`FieldFlowAnalyzer`) and
+> `analysis/lineage_graph.py` (`LineageGraph`), behind `cobol-parser lineage`,
+> `field-impact` and `scan --analyzer lineage`. See `.okf/analysis/lineage.md`.
 
 Nothing answers "where does this field's value come from, and everywhere it
 flows to." `xref` has references with roles but no propagation; `const_fold`
@@ -204,7 +211,15 @@ chases dynamic CALL targets. A def-use graph over MOVE / COMPUTE / READ INTO /
 CALL USING / SQL host variables is the missing primitive — and the prerequisite
 for 13 and 31 below. The biggest genuine capability gap in the analysis suite.
 
-### 13. Field-widening impact check (M, depends on 12)
+### 13. Field-widening impact check (M, depends on 12) — SHIPPED
+
+> **Shipped** as `analysis/field_widening.py` (`FieldWideningAnalyzer`) behind
+> `cobol-parser widen-check FIELD PATH... --to PIC`: truncations along every
+> forward path (new vs. already-present), narrowing feeders, shifted layouts,
+> REDEFINES and group overlays, and the file / CALL / LINKAGE interfaces the
+> record crosses, and every DB2 column the value is stored in (named, not
+> type-checked against the column's declared type). See
+> `.okf/analysis/lineage.md`.
 
 "Widen `CUST-ID` from `PIC 9(6)` to `PIC 9(9)` — which programs, copybooks,
 file record layouts and DCLGEN columns break?" Joins 12's lineage with
@@ -212,7 +227,12 @@ file record layouts and DCLGEN columns break?" Joins 12's lineage with
 and `DclgenChecker`'s column facts. This is the single question legacy
 modernization engagements are actually paid to answer.
 
-### 14. Join JCL to the codebase graph (S/M)
+### 14. Join JCL to the codebase graph (S/M) — PARTLY SHIPPED
+
+> **Partly shipped.** JCL joins field lineage (`analysis/lineage_jcl.py`, so
+> `field-impact --jcl` follows a field through the datasets jobs bind), and the
+> MCP server answers `jobs_running` / `dataset_users` / `jcl_job`.
+> `codebase-graph` itself still has no job, step or dataset node.
 
 `.okf/jcl.md` names this gap itself: DD → dataset resolution exists,
 `analysis/codebase.py` has no job, step or dataset node. So "which dataset does
@@ -222,7 +242,10 @@ end-to-end batch flow. Pairs with closing the two JCL gaps that block it:
 `DSN=*.step.ddname` backward references, and cross-file PROCLIB / `INCLUDE`
 resolution.
 
-### 15. SARIF output for `lint` and `scan` (S)
+### 15. SARIF output for `lint` and `scan` (S) — SHIPPED
+
+> **Shipped** as `analysis/sarif.py`: `--format sarif` on `lint`, `scan` and
+> `call-check`.
 
 `LintFinding` already carries rule id, severity, message, symbol and a
 source-map-corrected location, and `apply_source_map()` already resolves a
@@ -280,7 +303,8 @@ one readable page is pure assembly, and it is the artifact a "document the
 legacy estate" engagement ships. Extension side: "Open Program Spec" in a
 webview.
 
-### 21. Business-rule extraction as decision tables (M)
+### 21. Business-rule extraction as decision tables (M) — SHIPPED
+
 
 > **Shipped** as `analysis/business_rules.py` (`BusinessRuleExtractor`) and
 > `cobol-parser business-rules`. Built on the AST directly rather than on
@@ -313,7 +337,11 @@ mockymock already runs GnuCOBOL in Docker, so the runner exists in the family.
 
 ## Scale and ops
 
-### 24. Incremental scan cache (S)
+### 24. Incremental scan cache (S) — SHIPPED
+
+> **Shipped** as `_facts_cache.py` (`FactsCache`) behind `scan --cache-dir`;
+> the MCP server keeps its own per-file facts in `mcp/facts.py`. See
+> `.okf/batch.md`.
 
 `scan.py` has no caching of any kind — no mtime check, no cache file. Every
 "Analyze Workspace" in the extension and every CI run re-parses the whole
@@ -387,7 +415,11 @@ handed it.
 
 ## Feed the model — context is the binding constraint
 
-### 30. An agent-shaped MCP server (S/M)
+### 30. An agent-shaped MCP server (S/M) — SHIPPED
+
+> **Shipped** as `cobolparser/mcp/` (`cobol-parser mcp`, the `[mcp]` extra):
+> question-shaped tools, `file:line` on every fact, and a closed-vocabulary
+> caveats envelope. See `docs/mcp-server.md` and `.okf/mcp.md`.
 
 The naive version exposes each subcommand and spends the whole context on the
 first call. The useful version exposes *questions* — `explain_symbol`, `slice`,
@@ -397,7 +429,10 @@ envelope naming what could not be resolved. A model told "the COPY for CUSTREC
 did not resolve, so unused-variable results are incomplete" writes a different,
 better answer. Nothing MCP-related exists in either repo today.
 
-### 31. Program slicing (M, depends on 12)
+### 31. Program slicing (M, depends on 12) — SHIPPED
+
+> **Shipped** as the MCP server's `slice` tool (`mcp/slicing.py`). There is no
+> `slice` CLI subcommand.
 
 `cobol-parser slice --field CUST-BAL --direction backward` → only the
 statements that can affect that field, with their paragraph context. A
@@ -439,7 +474,9 @@ into: run the COBOL program and the model-generated Java/Python against the
 rewrote this program" from a leap of faith into a test result. Strategically
 the most valuable item in this batch.
 
-### 36. A claim checker for model-written prose (M)
+### 36. A claim checker for model-written prose (M) — SHIPPED
+
+> **Shipped** as the MCP server's `check_claims` tool (`mcp/claims.py`).
 
 Feed it generated documentation, a PR description, or a chat answer about a
 program; it validates the checkable assertions against the AST — "says it
@@ -521,11 +558,15 @@ nothing checks: 31 and 36 are what make the explanation worth reading.
 
 Not new capability — shipped features that are quietly less true than they look.
 
-* **Cross-record correlation in `ScenarioPlanner`.** The design doc landed
-  (`docs/plans/2026-09-04-cross-record-correlation-design.md`) and
-  `PlannedScenario.row_witnesses` is groundwork nothing populates, so scenarios
-  are still *named* for arms they provably never reach. Idea 22 would at least
-  make the failure visible.
+* **Cross-record correlation in `ScenarioPlanner`.** Now built for the
+  common shape: a comparison against a working-storage *carrier* of the same
+  record's field (`MOVE IN-KEY TO WS-PREV-KEY` after the IF, in the same
+  paragraph) becomes a `CorrelationConstraint`, planned as two pinned rows and
+  checked by verification (`docs/plans/2026-09-04-cross-record-correlation-design.md`).
+  A carrier written in another paragraph or only on some arms is still refused,
+  and arm reachability is still CFG-shaped, so a scenario can still be named
+  for an arm its data never reaches in those cases. Idea 22 would make that
+  visible.
 * **Free-format source in the extension.** The parser handles it; the
   extension's outline, navigation and focus mode read by column position and
   report little or nothing.
@@ -536,22 +577,22 @@ Not new capability — shipped features that are quietly less true than they loo
 
 # Suggested next step
 
-Ideas 2, 3, 5, 6, 7 and 9 shipped, as did the JCL front end that was never on
-the list, and 41 shipped with this batch. What remains from the original ten is
-**1** (dialect classes), **4** (pretty-printer/formatter), **8**
-(`gen-fixtures --emit-test`) and **10** (plugin entry-points).
+Shipped from the two batches so far: 2, 3, 5, 6, 7, 9, 11, 12, 13, 15, 21, 24,
+30, 31, 36 and 41, with 14 partly done, plus the JCL front end that was never
+on the list. What remains from the original ten is **1** (dialect classes),
+**4** (pretty-printer/formatter), **8** (`gen-fixtures --emit-test`) and **10**
+(plugin entry-points).
 
-Across both batches, in the order I would actually do them:
+In the order I would do them next:
 
-1. **11** (cross-program CALL checking) — days of wiring between two shipped
-   components, and it produces findings nothing else in the pipeline can.
-2. **24** (scan cache) and **38** (caveat envelope) — each about a day, each
-   felt everywhere.
-3. **12** (lineage/def-use) — the one structural investment, because **13**
-   (field widening) and **31** (slicing) both wait on it.
-4. **35** (fixtures as an equivalence oracle) — the strategic bet: it is what
+1. **8** (`gen-fixtures --emit-test`) — the cheapest closed loop left: bundles
+   already carry exact expectations, and mockymock already runs them.
+2. **38** (caveat envelope) — the MCP server has one; the CLI reports still
+   differ in shape. About a day, felt everywhere.
+3. **35** (fixtures as an equivalence oracle) — the strategic bet: it is what
    makes an AI-assisted migration defensible rather than hopeful.
+4. **20** (`doc`) and **17** (copybook → JSON Schema) — both are serializers
+   over facts that already exist.
 
-**8** remains the cheapest closed loop of the original ten, and **4** is worth
-more than its own description suggests now that a lint stream exists — an AST
-pretty-printer is what a `lint --fix` would need.
+**4** is worth more than its own description suggests now that a lint stream
+exists: an AST pretty-printer is what a `lint --fix` would need.
