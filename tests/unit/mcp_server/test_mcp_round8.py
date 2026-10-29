@@ -286,3 +286,98 @@ class TestIncludeStatement:
     def test_one_kind_needs_no_summary(self, shop: Path) -> None:
         answer = tools_for(shop).impact_of_change("TRANREC")["answer"]
         assert "brought_in_by" not in answer
+
+
+EXTRACT = """\
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. EXTRACT.
+       PROCEDURE DIVISION.
+       MAIN-PARA.
+           CALL 'GETACCT'
+           GOBACK.
+"""
+
+VSAM_GETACCT = """\
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. GETACCT.
+       ENVIRONMENT DIVISION.
+       INPUT-OUTPUT SECTION.
+       FILE-CONTROL.
+           SELECT ACCT-FILE ASSIGN TO BNKACC.
+           SELECT OPTIONAL LOG-FILE ASSIGN TO ACCTLOG.
+       DATA DIVISION.
+       FILE SECTION.
+       FD  ACCT-FILE.
+       01  ACCT-REC               PIC X(40).
+       FD  LOG-FILE.
+       01  LOG-REC                PIC X(80).
+       PROCEDURE DIVISION.
+       MAIN-PARA.
+           OPEN INPUT ACCT-FILE
+           READ ACCT-FILE
+           CLOSE ACCT-FILE
+           GOBACK.
+"""
+
+SQL_GETACCT = """\
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. GETACCT.
+       PROCEDURE DIVISION.
+       MAIN-PARA.
+           EXEC SQL SELECT ID INTO :WS-ID FROM ACCOUNTS END-EXEC
+           GOBACK.
+"""
+
+EXTJOB = """\
+//EXTJOB   JOB (ACCT),'BANK',CLASS=A
+//EXTRACT  EXEC PGM=EXTRACT
+//BNKACC   DD DSN=PROD.VSAM.BNKACC,DISP=SHR
+"""
+
+
+class TestImplementations:
+    @pytest.fixture
+    def bank(self, tmp_path: Path) -> Path:
+        pytest.importorskip("jclparser")
+        root = tmp_path / "bank"
+        write(root, "core/EXTRACT.cbl", EXTRACT)
+        write(root, "data/sql/GETACCT.cbl", SQL_GETACCT)
+        write(root, "data/vsam/GETACCT.cbl", VSAM_GETACCT)
+        write(root, "jcl/EXTJOB.jcl", EXTJOB)
+        return root
+
+    def test_the_step_says_which_version_it_runs(self, bank: Path) -> None:
+        answer = CobolTools(Workspace(bank)).program_brief(
+            "core/EXTRACT.cbl", follow_calls=True
+        )["answer"]
+        (row,) = answer["call_tree"]
+        impls = {i["file"]: i for i in row["implementations"]}
+        assert set(impls) == {"data/sql/GETACCT.cbl", "data/vsam/GETACCT.cbl"}
+        sql, vsam = impls["data/sql/GETACCT.cbl"], impls["data/vsam/GETACCT.cbl"]
+        assert sql["sql_tables"] == [{"name": "ACCOUNTS", "access": "-R--"}]
+        assert "dds" not in sql
+        # The OPTIONAL file's DD is not needed.
+        assert vsam["dds"] == ["BNKACC"]
+        assert vsam["dds_coded_by"] == [
+            {
+                "step": "jcl/EXTJOB.jcl EXTJOB.EXTRACT",
+                "datasets": {"BNKACC": "PROD.VSAM.BNKACC"},
+            }
+        ]
+        assert "data/vsam/GETACCT.cbl" in row["implementation_note"]
+
+    def test_no_step_coding_the_dds(self, bank: Path) -> None:
+        write(bank, "jcl/EXTJOB.jcl", EXTJOB.replace("//BNKACC", "//OTHER "))
+        answer = CobolTools(Workspace(bank)).program_brief(
+            "core/EXTRACT.cbl", follow_calls=True
+        )["answer"]
+        (row,) = answer["call_tree"]
+        assert row["implementation_note"].startswith("no JCL step")
+        assert all(not i.get("dds_coded_by") for i in row["implementations"])
+
+    def test_one_source_no_implementations(self, bank: Path) -> None:
+        (bank / "data/sql/GETACCT.cbl").unlink()
+        answer = CobolTools(Workspace(bank)).program_brief(
+            "core/EXTRACT.cbl", follow_calls=True
+        )["answer"]
+        assert "implementations" not in answer["call_tree"][0]

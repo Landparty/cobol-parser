@@ -84,7 +84,9 @@ value comes from. codebase_overview takes language and path to look at only
 the PL/I, assembler or COBOL programs, or one application's folder: pass
 path when the question names an application, since the whole root is large.
 program_brief with follow_calls gives every program a transaction runs,
-each with the files and SQL tables it reads and writes. The root is
+each with the files and SQL tables it reads and writes; a callee with
+several sources (a VSAM and a DB2 version) lists each under
+implementations, with the JCL steps whose DDs say which one they run. The root is
 indexed in the background at start; later calls reuse the index until a file
 changes. PL/I and assembler programs (with the [pl1] / [hlasm] extras) are in
 the call graph, callers_of and program_brief too; the other tools read COBOL
@@ -429,7 +431,9 @@ def build_server(
         SQL tables, calls, CICS/DL/I, unreachable paragraphs, health, worst
         lint findings, the JCL steps that run it; a PL/I or assembler file:
         its calls and includes. Start here; follow_calls for what a whole
-        transaction or job step touches."""
+        transaction or job step touches (a callee with several sources
+        compares them under implementations: which one the jobs that run
+        this program are set up for, by the DDs they code)."""
         return await off_loop(
             "program_brief",
             lambda: tools.program_brief(file, program, limit, follow_calls),

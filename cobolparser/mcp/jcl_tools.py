@@ -1605,6 +1605,45 @@ def run_by(workspace: Workspace, names: set[str]) -> list[dict[str, Any]] | None
     return rows
 
 
+def step_dds(
+    workspace: Workspace, names: set[str]
+) -> list[tuple[str, dict[str, str | None]]]:
+    """Each JCL step that runs a program called any of *names*, as
+    ``"FILE JOB.STEP"`` and the DDs it codes, name -> dataset (procedures
+    expanded); empty when the ``[jcl]`` extra is missing or the root holds
+    no JCL."""
+    if not jcl_available():
+        return []
+    index = jcl_index(workspace)
+    found: list[tuple[str, dict[str, str | None]]] = []
+    for jfile in index.parsed():
+        assert jfile.result is not None
+        for name in sorted(names):
+            for step in jfile.result.steps_running(name):
+                job = next((j for j in jfile.result.jobs if step in j.steps), None)
+                label = f"{jfile.display} {job.name if job else '?'}.{step.name}"
+                dds = {
+                    (dd.name or "").upper(): dd.dataset
+                    for dd in step.dd_statements
+                    if dd.name
+                }
+                found.append((label, dds))
+    return found
+
+
+def program_dds(parsed: ParsedProgram, unit: CobolProgram) -> list[str]:
+    """The DD names a program's SELECTs need: not OPTIONAL, not a sort work
+    file, not a run-time ASSIGN USING."""
+    rows = _selects(parsed, unit, Response())
+    return sorted(
+        {
+            str(r["ddname"]).upper()
+            for r in rows
+            if r.get("ddname") and not r.get("optional") and not r.get("sort_work_file")
+        }
+    )
+
+
 def _program_selects(
     workspace: Workspace, name: str, response: Response
 ) -> dict[str, Any] | None:
