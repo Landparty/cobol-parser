@@ -1,6 +1,6 @@
 # Field-level data lineage across programs
 
-**Status:** design only, nothing implemented. Read against `cobol-parser` main
+**Status:** Phases 1 to 3 built in this repo (`lineage`, `field-impact`, `key_relationships()`, and later `widen-check` on top); Phases 4 and 5 belong to the backend and frontend. The design was read against `cobol-parser` main
 @ `3fa0212`, `backend` main and `legacy-application` main on 2026-10-08.
 **Repos touched:** `cobol-parser` (analysis + CLI), `backend` (storage, join,
 API), `frontend` (one view). Also delivers Phase 4 of the backend's

@@ -11,7 +11,7 @@ constructs that make a program *that* type must survive into the AST and
 into the analyzers that consume them.
 
 The same corpus lives in `mocky-mock/tests/fixtures/enterprise/`, where
-`tests/unit/test_enterprise_corpus.py` pins what `mockymock generate` does
+`mocky-mock/tests/unit/test_enterprise_corpus.py` pins what `mockymock generate` does
 with each program (scaffold / nothing to mock / refused, and under which
 refusal code). Keep the two copies identical.
 
@@ -39,6 +39,12 @@ refusal code). Keep the two copies identical.
 | `COMPDIR` | compiler directives | `CBL`/`PROCESS` option lines, `>>DEFINE` (hyphenated names), `>>IF`/`>>ELSE`/`>>END-IF`, `>>EVALUATE`/`>>WHEN`, `IS DEFINED`, `TITLE`, `EJECT`, `SKIP2`, `/` page eject, `D` debugging lines, `REPLACE ==:TAG:== BY ==...==`/`REPLACE OFF` | clean (conditional compilation now runs by default; `REPLACE` partial words; unknown `>>` directives blanked) | -- | nothing to mock |
 | `MODERN63` | Enterprise COBOL 6.x data | `PIC U(n)`, `PIC U BYTE-LENGTH n`, `DYNAMIC LENGTH LIMIT n`, `PIC N ... NATIONAL`, `COMP-5`, 64-bit `COMP`, `COMP-1`/`COMP-2`, 31-digit `COMP-3`, `SIGN LEADING SEPARATE`, `CURRENCY SIGN ... WITH PICTURE SYMBOL`, `BLANK WHEN ZERO`, `JUSTIFIED`, `VOLATILE`, `X''`/`Z''`/`N''`/`U''` literals, `POINTER`/`POINTER-64`/`PROCEDURE-POINTER`/`FUNCTION-POINTER`/`INDEX`, `SYNC`, `66 RENAMES`, `OCCURS ... KEY ... INDEXED BY`, `OCCURS UNBOUNDED DEPENDING ON`, `ALLOCATE`/`FREE`, `SET ADDRESS OF`, `SEARCH ALL`, `EXIT PARAGRAPH`/`EXIT SECTION`/`EXIT PERFORM [CYCLE]`, `PERFORM WITH TEST AFTER`, `INSPECT CONVERTING`, class conditions | clean (`PIC U`, `BYTE-LENGTH`, `DYNAMIC LENGTH`, `VOLATILE`, `UNBOUNDED` new) | -- | nothing to mock |
 | `COPYREPL` | copybook-heavy | `COPY ... REPLACING ==:PFX:== BY ==...==`, a copybook that COPYs another (no REPLACING -- the only nesting IBM allows), `COPY ... OF library SUPPRESS`, a PROCEDURE DIVISION `COPY`, `EXEC SQL INCLUDE SQLCA` / a DCLGEN member | clean | items from every member present; `dclgen-check` clean | scaffolds |
+
+User-defined functions (`FUNCTION-ID`, Enterprise COBOL 6.4) have no program
+in this corpus yet. `tests/unit/test_function_id.py` pins them instead: the
+unit parses with `unit_kind` `"FUNCTION"`, `END FUNCTION` closes it, and a
+`FUNCTION name(...)` call to a function the REPOSITORY paragraph declares is a
+`function` edge in the codebase graph.
 
 ## Known limitations (documented, not silent)
 

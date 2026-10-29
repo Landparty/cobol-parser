@@ -1,7 +1,7 @@
 # Program-Scoped Test-Data Generation — Design Plan
 
 **Date:** 2026-08-02
-**Status:** Proposed (no code written yet)
+**Status:** Built as `gen-fixtures` (`ProgramFixtureGenerator`, `generators/program_fixtures.py` and `generators/scenarios.py`); the bundle format is [docs/fixture-bundle-schema.md](../fixture-bundle-schema.md). The text below is the original plan.
 **Scope:** `Landparty/cobol-parser` (bulk) + `samdion1994/mocky-mock` (consumer hook)
 **Detailed implementation plans:**
 [Phase 0](2026-08-02-phase0-value-engine-refactor.md) ·

@@ -604,7 +604,6 @@ class CobolParser:
     # `parse_cobol()` crash with a native access violation on the very next
     # call. Gating on TYPE_CHECKING keeps the overloads visible to mypy/IDEs
     # while making them runtime-invisible, so Cython never sees them at all.
-    # See docs/superpowers/specs/2026-08-18-overload-cython-crash-fix.md.
     if TYPE_CHECKING:
 
         @overload

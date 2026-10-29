@@ -126,6 +126,10 @@ Python.
 
 ### Beyond reading code
 
+`business_rules` is in the default `core` group. `diff_programs`,
+`decode_record` and `gen_fixtures` are the `data` group, which `auto` leaves
+out: start the server with `--tools core,data` (or `all`) to offer them.
+
 | Tool | Ask it |
 |---|---|
 | `business_rules(file, program?, kind?, procedure?, include_technical?, limit?)` | "What business rules does this program implement?" Every IF / EVALUATE / SEARCH as a decision table (one branch per condition, with the actions it runs and their lines), promoted to a `validation` when a branch rejects input, and paragraph-level arithmetic as a `calculation` with its formula. Each rule has its inputs and outputs, the conditions that guard it (`guards`), the branches elsewhere that PERFORM its paragraph (`reached_via`) and why it was classified as it was; level-88 names it tests are spelled out under `condition_names`. File status, end-of-file and SQLCODE / EIB checks are counted but left out unless `include_technical` is true. `kind` and `procedure` narrow the list; the `summary` always counts the whole program. |
@@ -349,7 +353,9 @@ tools = CobolTools(Workspace("/path/to/checkout"))
 tools.explain_symbol("src/ACCTUPD.cbl", "CUST-BAL")
 ```
 
-## Coming next
+## Design
 
-Program slicing (only the statements that can affect a field), once the
-library has it. See [the design plan](plans/2026-10-15-mcp-server-design.md).
+Why the server is shaped the way it is, and where each phase differed from
+the plan: [the design plan](plans/2026-10-15-mcp-server-design.md). How it
+works inside (envelope, caveat kinds, cache, workspace guard):
+[.okf/mcp.md](../.okf/mcp.md).

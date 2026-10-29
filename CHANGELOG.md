@@ -171,6 +171,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   traces REPRO only from in-stream `SYSIN`; a `SYSIN DD DSN=...` step now
   adds a note naming that dataset instead of dropping the flow silently.
 
+### Documentation
+
+* **Docs cleanup.** The README is rewritten around what the library does
+  today (PyPI install and extras, `call-check`, `widen-check`, the scan
+  cache, SARIF, FUNCTION-ID, the MCP server) with its stale test and coverage
+  badges fixed. `docs/README.md` maps where each kind of doc lives. Design
+  plans from `docs/superpowers/` move into `docs/plans/`, the root `AUDIT.md`
+  into `reports/audit-2026-09-27.md`, and every plan starts with a status line
+  saying whether it was built. `scripts/okf_check.py` now checks `README.md`,
+  `interface-contract.md` and the user guides in `docs/` as well as the OKF.
+  `docs/project-config.md` names every subcommand each key fills (the `lint:`
+  section's `min_severity` and `fail_on` also reach `call-check` and
+  `widen-check`). A tracked 1.4 MB `coverage.json` is removed and ignored.
+
 ## [3.1.1](https://github.com/Landparty/cobol-parser/compare/v3.1.0...v3.1.1) (2026-10-17)
 
 

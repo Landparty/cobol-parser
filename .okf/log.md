@@ -14,6 +14,17 @@ deliberate. Anything else appended to the bottom is a mistake: five
 entries, including both 2026-09-15 sections, were found there on
 2026-09-15 and moved back up.
 
+## 2026-10-29 -- docs cleanup
+
+`scripts/okf_check.py`'s `EXTRA_FILES` now also covers `README.md`,
+`interface-contract.md` and the user guides in `docs/` (`docs/README.md`
+maps them). [tests.md](tests.md): test count refreshed (~15,580 from 633
+files). [analysis/codebase.md](analysis/codebase.md): "Not yet joined to
+JCL" names where the JCL joins do live (lineage, the MCP JCL tools).
+Docstrings that pointed at moved or missing docs fixed (`constraints.py`,
+`config/project.py`, `parsers/divisions/base.py`, `parser.py`); the root
+`AUDIT.md` is now `reports/audit-2026-09-27.md`.
+
 ## 2026-10-29 -- bug hunt fixes #757-#763
 
 [analysis/lineage.md](analysis/lineage.md): widen-check edited-sign rule

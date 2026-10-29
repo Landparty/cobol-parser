@@ -209,9 +209,11 @@ Backs the `codebase-graph` and `copybook-impact` CLI subcommands. Tests:
 
 **Not yet joined to JCL.** The graph has `ProgramNode` / `CallEdge` / `CopyEdge`
 and no job, step or dataset node, while `cobolparser/jcl/` already resolves
-DD → dataset and step → program. So "which dataset does this program's INVFILE
-resolve to" is answerable and "which job populates the dataset this program
-reads" is not. See [jcl.md](../jcl.md).
+DD → dataset and step → program. The JCL joins live elsewhere: field lineage
+(`analysis/lineage_jcl.py`, behind `field-impact --jcl` and `widen-check
+--jcl`) and the MCP server's `jobs_running` / `dataset_users` / `jcl_job`
+(`mcp/jcl_tools.py`), which answer "which job writes the dataset this program
+reads". `codebase-graph` output has no JCL in it. See [jcl.md](../jcl.md).
 
 ## ProgramSignatureExtractor
 

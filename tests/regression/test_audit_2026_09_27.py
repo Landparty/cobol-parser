@@ -1,4 +1,4 @@
-"""Regressions for the patch-release batch from the 2026-09-27 audit (AUDIT.md).
+"""Regressions for the patch-release batch from the 2026-09-27 audit (reports/audit-2026-09-27.md).
 
 - 2.1: a typed literal in a VALUE clause lost its prefix, so ``VALUE X"4142"``
   generated the text ``41`` instead of the two bytes ``AB``.

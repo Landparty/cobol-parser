@@ -1,8 +1,8 @@
 # An MCP server for AI-assisted COBOL analysis
 
-**Status:** Phase 1 implemented (2026-10-15): `cobolparser/mcp/`,
-`cobol-parser mcp`, tools `read_source`, `lint`, `explain_symbol`; user guide
-in `docs/mcp-server.md`. Phases 2-4 are design only. Read against
+**Status:** All four phases built, `slice` included; the user guide is
+`docs/mcp-server.md`. The "as built" sections record where each phase
+differed from this plan. Read against
 `cobol-parser` main @ `af1690d` on 2026-10-15. Implements
 `docs/feature-ideas.md` #30.
 

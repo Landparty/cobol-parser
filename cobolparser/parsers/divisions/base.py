@@ -216,7 +216,7 @@ class BaseDivisionParser(IDivisionParser, ABC):
             # Parse (rather than blindly discard) optional header clauses
             # before the period, e.g. PROCEDURE DIVISION USING data-name-1
             # data-name-2 GIVING result-name. -- data-name-1/2 are the
-            # implicit entry interface `LinkageChecker._collect_procedure_using`
+            # implicit entry interface `LinkageChecker._collect_interfaces`
             # relies on; without capturing them here that check was silently
             # inert for every program, not just nested ones. GIVING's own
             # target is a return value, not an incoming parameter, so it is
