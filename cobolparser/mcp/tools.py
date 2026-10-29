@@ -46,6 +46,9 @@ BRIEF_RUN_BY = 10
 #: files and tables it uses; ``jobs_running`` with follow_calls lists them all.
 BRIEF_CALL_TREE = 25
 
+#: Sources of one callee ``program_brief`` compares in ``implementations``.
+BRIEF_IMPLEMENTATIONS = 4
+
 #: Lint findings a program brief shows (worst first); ``lint`` has the rest.
 BRIEF_LINT = 5
 
@@ -584,11 +587,23 @@ class CobolTools:
             } - {""}
             self._brief_run_by(answer, response, names, cap)
         if follow_calls:
-            self._brief_call_tree(unit.program_name or "", answer, response, cap)
+            self._brief_call_tree(
+                unit.program_name or "",
+                answer,
+                response,
+                cap,
+                {(unit.program_name or "").upper(), Path(str(parsed.path)).stem.upper()}
+                - {""},
+            )
         return response.build(answer, parsed.program_info(unit))
 
     def _brief_call_tree(
-        self, name: str, answer: dict[str, Any], response: Response, cap: int
+        self,
+        name: str,
+        answer: dict[str, Any],
+        response: Response,
+        cap: int,
+        names: set[str] | None = None,
     ) -> None:
         """``answer["call_tree"]``: every program *name* runs through CALL /
         LINK / XCTL, breadth first, each COBOL one with its ``files`` and
@@ -612,6 +627,14 @@ class CobolTools:
             )
             if uses:
                 row.update(uses)
+            if any(o.get("language") == "COBOL" for o in row.get("also_in") or []):
+                _attempt(
+                    response,
+                    f"implementations of {callee}",
+                    functools.partial(
+                        self._implementations, row, names or {name.upper()}
+                    ),
+                )
         answer["call_tree"] = shown
         if shown:
             answer.setdefault("access_legend", "C=create R=read U=update D=delete")
@@ -622,6 +645,53 @@ class CobolTools:
             "programs those dynamic CALLs reach are missing from call_tree",
             lead="the call chain could not be followed everywhere",
         )
+
+    def _implementations(self, row: dict[str, Any], names: set[str]) -> None:
+        """A callee with several COBOL sources (a VSAM and a DB2 version of
+        one I/O module): each one's files, DD names and tables, and which
+        of the JCL steps that run the caller code every DD it opens. The
+        step decides which one it is set up for; the call tree alone
+        cannot, since a CALL names a load module, not a source."""
+        from .jcl_tools import jcl_available, program_dds, step_dds
+
+        program = str(row["program"])
+        files = [str(row["file"])] + [
+            str(o["file"])
+            for o in row.get("also_in") or []
+            if o.get("language") == "COBOL"
+        ]
+        steps = step_dds(self.workspace, names) if jcl_available() else []
+        impls = []
+        for file in files[:BRIEF_IMPLEMENTATIONS]:
+            parsed = self.workspace.program(file)
+            unit = parsed.ast.find_program_unit(program) or parsed.ast
+            impl: dict[str, Any] = {"file": file, **self._program_uses(file, program)}
+            dds = program_dds(parsed, unit)
+            if dds:
+                impl["dds"] = dds
+                impl["dds_coded_by"] = [
+                    {
+                        "step": label,
+                        "datasets": {dd: coded[dd] for dd in dds if coded[dd]},
+                    }
+                    for label, coded in steps
+                    if set(dds) <= set(coded)
+                ]
+            impls.append(impl)
+        row["implementations"] = impls
+        set_up = [i for i in impls if i.get("dds_coded_by")]
+        if steps and set_up:
+            row["implementation_note"] = "; ".join(
+                f"{', '.join(c['step'] for c in i['dds_coded_by'])} code(s) every "
+                f"DD {i['file']} opens ({', '.join(i['dds'])}): that is the "
+                "version those steps are set up to run"
+                for i in set_up
+            )
+        elif steps:
+            row["implementation_note"] = (
+                "no JCL step that runs the caller codes the DDs any version "
+                "opens; which one runs depends on which is linked"
+            )
 
     def _program_uses(self, file: str, program: str) -> dict[str, Any]:
         """The files and SQL tables one program uses (C/R/U/D) and its CICS
