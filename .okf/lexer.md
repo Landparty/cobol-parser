@@ -492,6 +492,19 @@ two apart; real COBOL writes spaces around operators. Pinned as an *expected*
 result by
 `TestDigitLedHyphenatedProcedureNames::test_space_free_exponent_shaped_subtraction_is_an_accepted_tradeoff`.
 
+### All-digit procedure names
+
+A procedure name may be digits alone (`1000-0`, `0100-0200`). The digit
+branch above still reads `1000-0` as `1000` `-` `0` (no letter), so the
+`_post_tokenize` pass `_merge_numeric_procedure_names()` (shared by both
+lexers) joins digit runs glued by hyphens, with no gap between the tokens,
+into one `IDENTIFIER` when nothing but a period, comma, semicolon or line
+end abuts the last run. `1000-0.5` and anything inside `EXEC ... END-EXEC`
+(SQL `10-5` is arithmetic) are left alone. Before 2026-10-29 the paragraph
+header and every PERFORM / GO TO of it were dropped as unparsed tokens.
+Pinned by `tests/regression/test_all_digit_procedure_names.py`. Same
+trade-off as above: a space-free `COMPUTE X = 10-1` is one word.
+
 ## Stray SQL characters post-pass
 
 `!`, `|`, `¬`, `#` and `@` (tokens `BANG`, `PIPE`, `NOT_SIGN`, `SQL_NAME_CHAR`) are errors outside `EXEC ... END-EXEC`.

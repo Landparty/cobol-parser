@@ -118,6 +118,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+* **A `#` in a copybook comment no longer fails the parse when the member
+  has numbered blank lines.** An export that strips trailing blanks leaves
+  each empty record as its sequence number alone (`000300`); the
+  fixed-format detector did not count those lines, so a copybook with a few
+  in its banner was judged free-form and its column-7 comment lines were
+  lexed as code (`Lexer error: Invalid character: #`).
+* **All-digit procedure names** (`1000-0.`, `PERFORM 1000-0 THRU 1000-9`,
+  `GO TO 10-0 20-0 DEPENDING ON X`) parse; they were lexed as a subtraction
+  and dropped as unparsed tokens.
 * **`gen-fixtures`: a `field_equals` no longer asserts a value the field has
   lost by the time it is checked.** The fold reported what a DISPLAY/WRITE
   showed, but mocky-mock runs the matching `EXPECT` after the PERFORM of the
