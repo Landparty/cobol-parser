@@ -118,6 +118,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+* **widen-check: four wrong answers fixed** (#757, #759, #760, #761). An
+  edited receiver with no sign symbol (`ZZ,ZZ9`) now loses the sign of a
+  field that gains one; a receiver fed through a literal subscript
+  (`MOVE A(2) TO X`) is checked instead of skipped; a REDEFINES inside the
+  record that the change only shifts is no longer a layout warning; and a
+  CALL of an ENTRY point meets the ENTRY's LINKAGE record, both ways.
+* **gen-fixtures: no more "verified" cross-record scenarios that cannot
+  run** (#758, #762). A carrier that cuts the value it carries (`PIC 9(2)`
+  for a `9(3)` key), or one moved after a READ of the next record, is no
+  carrier: the arm stays unsupported instead of planned with rows that never
+  reach it.
+* **`scan --cache-dir` and the MCP server notice an edited wrapper
+  copybook** (#763), one that only COPYs another and so added no line to the
+  source map. `ParseResult.expansion_copybooks` lists every member the
+  expander opened, and both caches stamp them.
+
 * **`dead-code` is linear in the length of a PERFORM chain.** Its
   reachability worklist admitted one PERFORM target per round and re-ran
   the whole fall-through pass each time, so a program whose paragraphs

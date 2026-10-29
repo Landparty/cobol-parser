@@ -274,17 +274,25 @@ report is a caveat and no start. Finding kinds:
   when the old value lost the same things (`pre_existing`), `warning` when
   only decimal places are new, the path is derived (arithmetic) or not
   `exact`, else `error`. A derived pre-existing loss is dropped (a rate, a
-  running total: the arithmetic's business). A path through a `redefines` /
-  `occurrence` hop is aliasing, not a receiver: skipped. When the new
+  running total: the arithmetic's business). A path through a `redefines`
+  hop is aliasing, not a receiver: skipped. An `occurrence` hop (`T.A` ->
+  `T.A(2)`) is the same field at one subscript, so what `MOVE A(2) TO X`
+  feeds is checked (#759); the start at a subscript is not a hit of its own.
+  A numeric-edited item is signed only with a `+`, `-`, `CR` or `DB` in its
+  PICTURE (`ZZ,ZZ9` drops the sign, #757). When the new
   PICTURE is narrower in any way (`old.losses(new)`), a backward trace flags
   the nearest feeders holding more than the new capacity.
 * `layout` -- only when the byte length changes (`storage_size` of old and
   new PICTURE x enclosing OCCURS): the record's later fields shift (`info`);
-  a REDEFINES over or by the record, and each `overlays` entry touching it
-  (`warning`); file ports a record field meets -> LRECL (`warning`) plus
+  a REDEFINES over or by the record, or one inside it whose bytes hold the
+  changed field (a REDEFINES after the field only shifts with its target,
+  #760), and each `overlays` entry touching it (`warning`); file ports a record field meets -> LRECL (`warning`) plus
   every *other* program bound to the same dataset (`error`); CALL ports ->
   the callee's LINKAGE record (`warning`); LINKAGE ports -> every caller's
-  argument record (`error`: the callee addresses past it).
+  argument record (`error`: the callee addresses past it). Both match the
+  port key `NAME#n` exactly, so a CALL of an ENTRY name meets the record the
+  ENTRY's USING names, and an ENTRY's LINKAGE record meets the callers of
+  that ENTRY, not of the PROGRAM-ID (#761).
 * `same-layout` (`info`) -- another program's item with the same qualified
   name (minus `#n`) and PICTURE: a shared copybook or a copy.
 * `column` (`warning`) -- a DB2 column the value reaches; its type is not in

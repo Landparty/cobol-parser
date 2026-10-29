@@ -8,7 +8,7 @@ This module provides delegating CobolParser that orchestrates parsing through:
 
 import logging
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Literal, overload
 
 # Core parsing infrastructure
@@ -134,6 +134,11 @@ class ParseResult:
     #: human edits. ``None`` when no expansion ran, in which case the two
     #: numbering schemes are the same thing.
     expansion_source_map: dict[int, tuple[str, int]] | None = None
+    #: Every copybook file ``parse_cobol_with_expansion`` opened, in order --
+    #: including a member that contributed no line of its own (one that only
+    #: COPYs another, or holds only comments), which the source map never
+    #: names. What a cache must stamp (#763).
+    expansion_copybooks: list[str] = field(default_factory=list)
 
     @property
     def success(self) -> bool:

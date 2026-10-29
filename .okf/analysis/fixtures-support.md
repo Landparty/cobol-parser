@@ -560,7 +560,17 @@ from one boundary-fed field, unconditional (no enclosing arm), in the
 comparison's own paragraph and on a later line; xref shows no other
 value-changing role (`write`, `call-argument`, `host-variable`,
 `reference`, `file-operation`) on it or any group above it, no level-88 of
-it is SET, and no REDEFINES touches the chain. Anything else (a MOVE before
+it is SET, and no REDEFINES touches the chain. The carrier must also hold
+the source losslessly (`_holds_losslessly`, #758): numeric for a numeric
+source with at least its integer and decimal digits and a sign when it has
+one; for alphanumeric / alphabetic (an alphabetic carrier only of an
+alphabetic source) or national, at least its characters, and no JUSTIFIED
+RIGHT unless the sizes match. And no READ / RETURN may run between the
+comparison and the MOVE (`_refills_between`, #762): directly in the
+paragraph, or in a paragraph it PERFORMs there (THRU ranges, sections,
+nested PERFORMs; an unknown target counts as a read) -- the MOVE would carry
+the record just read, which the comparison then sees as "the previous" one.
+Anything else (a MOVE before
 the comparison carries the *current* record) keeps the unchanged
 "comparison between two resolved fields not supported in v1" reason.
 
