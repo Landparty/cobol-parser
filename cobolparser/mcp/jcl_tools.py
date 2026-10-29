@@ -127,6 +127,12 @@ JOB_FLOW_STEPS = 40
 #: Control-card lines a job flow shows per DD (SYSIN, SYMNAMES, ...).
 FLOW_CONTROL_LINES = 12
 
+#: Programs tried for the record layout of a SORT step input dataset.
+SORT_LAYOUT_PROGRAMS = 6
+
+#: Fields of the output layout a SORT step's ``output_read_as`` lists.
+SORT_READ_BACK_FIELDS = 40
+
 #: Suffixes of a control-card member a SYSIN ``DD DSN=LIB(MEMBER)`` may name
 #: under the root (a PDS member downloaded as ``ctl/MEMBER.ctl``).
 CONTROL_SUFFIXES: frozenset[str] = frozenset(
@@ -137,7 +143,7 @@ CONTROL_SUFFIXES: frozenset[str] = frozenset(
 _FLOW_SKIPPED_DDS = frozenset({"STEPLIB", "JOBLIB", "SYSLIB", "SYSUDUMP", "SYSABEND"})
 
 #: What counts as writing a dataset in a job flow.
-_WRITES = frozenset({"create", "write", "extend", "update", "exclusive"})
+_WRITES = frozenset({"create", "write", "extend", "update", "exclusive", "delete"})
 
 INSTALL_HINT = (
     "the JCL tools read JCL through jcl-parser, which is not installed: "
@@ -446,6 +452,12 @@ def _access(disposition: str | None) -> str:
     return _ACCESS.get(status or "NEW", status.lower())
 
 
+def _normal_disposition(disposition: str | None) -> str:
+    """The normal-termination part of ``DISP=(status,normal,abnormal)``."""
+    parts = (disposition or "").strip("()").split(",")
+    return parts[1].strip().upper() if len(parts) > 1 else ""
+
+
 def _dd_row(
     dd: DDStatement,
     step: JobStep | None,
@@ -460,6 +472,15 @@ def _dd_row(
         row["dataset"] = dd.dataset
         row["disposition"] = dd.disposition
         row["access"] = _access(dd.disposition)
+        utility = None if step is None else _utility_uses(step)
+        use = (utility or {}).get((dd.name or "").upper()) or (utility or {}).get(
+            f"DSN:{dd.dataset.upper()}"
+        )
+        if use:
+            # What SORT, IEBGENER, IDCAMS REPRO or IEFBR14 does with the DD,
+            # not what DISP=SHR on a REPRO OUTFILE seems to say.
+            row["access"] = _combine(use, row["access"])
+            row["access_from"] = "utility"
     if dd.sysout is not None:
         row["sysout_class"] = dd.sysout
     if dd.record_format:
@@ -811,6 +832,8 @@ def jcl_job(
             )
     cap = clamp_limit(limit)
     sources = _source_files(workspace)
+    members = _ControlMembers(workspace)
+    layouts = _Layouts(workspace)
     programs: dict[str, str | None] = {}
     # Looked up once per program name: each lookup checks the languages
     # index's stamps, a walk of the root.
@@ -836,6 +859,12 @@ def jcl_job(
                     found = other["file"] if other else None
                 programs[name] = found
         rows.append(_job_row(each, shown, locator))
+        for shown_step, step_row in zip(shown, rows[-1]["steps"], strict=True):
+            laid = _sort_layout(
+                shown_step, _sysin_lines(shown_step, members, jfile), layouts, each
+            )
+            if laid is not None:
+                step_row["sort_layout"] = laid
     if step and not any(row["steps"] for row in rows):
         names = [s.name for j in jobs for s in j.steps]
         raise ToolError(
@@ -877,8 +906,29 @@ def _job_row(job: JclJob, steps: list[JobStep], locator: _Locator) -> dict[str, 
     if job.dd_statements:
         row["dds"] = [_dd_row(dd, None, locator) for dd in job.dd_statements]
     row["step_count"] = len(job.steps)
+    row["run_order"] = run_order(job.steps)
     row["steps"] = [_step_row(s, locator, instream=True) for s in steps]
     return row
+
+
+def run_order(steps: list[JobStep]) -> str:
+    """The steps in the order they run, each with its program and when it
+    runs: ``A (IDCAMS) -> B (SORT, only if every earlier step's return code
+    is 0)``. The one line a flow description should not leave out."""
+    parts = []
+    for step in steps[:JOB_FLOW_STEPS]:
+        what = step.program or (
+            f"procedure {step.procedure}" if step.procedure else "?"
+        )
+        when = explain_condition(step.condition) if step.condition else None
+        if when:
+            when = when.split("so it ", 1)[-1]
+            parts.append(f"{step.name} ({what}, {when})")
+        else:
+            parts.append(f"{step.name} ({what})")
+    if len(steps) > JOB_FLOW_STEPS:
+        parts.append(f"... {len(steps) - JOB_FLOW_STEPS} more")
+    return " -> ".join(parts)
 
 
 def _procedures(
@@ -989,6 +1039,7 @@ def jobs_running(
             else _NoProgramUses(workspace, response)
         )
         members = _ControlMembers(workspace)
+        layouts = _Layouts(workspace) if selects is not None else None
         answer["jobs"] = [
             _job_flow(
                 jfile,
@@ -998,6 +1049,7 @@ def jobs_running(
                 members,
                 running,
                 response,
+                layouts,
             )
             for jfile, job, running in flows
         ]
@@ -1075,6 +1127,254 @@ def _control_lines(text: str) -> list[str]:
     return out
 
 
+class _Layouts:
+    """The record layout a COBOL program reads a dataset through, by the
+    dataset's base name, found once per tool call."""
+
+    def __init__(self, workspace: Workspace) -> None:
+        self.workspace = workspace
+        self._held: dict[str, dict[str, Any] | None] = {}
+
+    def of(self, dataset: str) -> dict[str, Any] | None:
+        base = _base(dataset).upper()
+        if base not in self._held:
+            self._held[base] = self._find(base)
+        return self._held[base]
+
+    def _find(self, base: str) -> dict[str, Any] | None:
+        """The most detailed record a program opening a DD for *base* uses:
+        the FD record, or what it READs INTO / WRITEs FROM."""
+        index = jcl_index(self.workspace)
+        seen: set[str] = set()
+        best: dict[str, Any] | None = None
+        for jfile in index.parsed():
+            assert jfile.result is not None
+            locator = _Locator(jfile, self.workspace)
+            for _job, step, dd, _path in _cards(jfile.result, locator):
+                if step is None or dd.dataset is None:
+                    continue
+                if _base(dd.dataset).upper() != base or _utility_uses(step):
+                    continue
+                for program in self._programs(step):
+                    key = f"{program}:{(dd.name or '').upper()}"
+                    if key in seen:
+                        continue
+                    seen.add(key)
+                    found = self._record(program, (dd.name or "").upper())
+                    if found and (
+                        best is None or found["field_count"] > best["field_count"]
+                    ):
+                        best = found
+                if len(seen) >= SORT_LAYOUT_PROGRAMS:
+                    return best
+        return best
+
+    def _programs(self, step: JobStep) -> list[str]:
+        """The step's programs and those they CALL: a called I/O routine
+        opens the DD for its caller (CBSTM03B for CBSTM03A)."""
+        from .codebase_index import call_chain
+
+        found = list(step.effective_programs())
+        for program in list(found):
+            rows, _notes = call_chain(self.workspace, program, 2)
+            found += [
+                str(r["program"]).upper()
+                for r in rows
+                if r.get("file") and r.get("language", "COBOL") == "COBOL"
+            ]
+        return list(dict.fromkeys(found))
+
+    def _record(self, program: str, ddname: str) -> dict[str, Any] | None:
+        from .tools import CobolTools, _file_facts
+
+        selects = _program_selects(self.workspace, program, Response())
+        if selects is None:
+            return None
+        file_names = [
+            row["file_name"].upper()
+            for row in selects["files"]
+            if (row.get("ddname") or "").upper() == ddname
+        ]
+        if not file_names:
+            return None
+        file = selects["source"]["file"]
+        parsed = self.workspace.program(file)
+        unit = parsed.ast.find_program_unit(program) or parsed.ast
+        facts = _file_facts(parsed, unit)
+        candidates: dict[str, str] = {}
+        for file_name in file_names:
+            fact = facts.get(file_name)
+            records = {r.upper() for r in (fact.record_names if fact else [])}
+            for record in sorted(records):
+                candidates.setdefault(record, f"the FD record of {file_name}")
+            for node in unit.find_all_by_type("IOReadStatement"):
+                into = getattr(node, "into_target", None)
+                read = (getattr(node, "file_name", None) or "").upper()
+                if into and read == file_name:
+                    candidates[into.upper()] = f"READ {file_name} INTO {into.upper()}"
+            for kind, verb in (
+                ("IOWriteStatement", "WRITE"),
+                ("IORewriteStatement", "REWRITE"),
+            ):
+                for node in unit.find_all_by_type(kind):
+                    source = getattr(node, "from_clause", None)
+                    record = (getattr(node, "record_name", None) or "").upper()
+                    if source and record in records:
+                        candidates.setdefault(
+                            source.upper(), f"{verb} {record} FROM {source.upper()}"
+                        )
+        tools = CobolTools(self.workspace)
+        best: dict[str, Any] | None = None
+        for record, how in candidates.items():
+            try:
+                answer = tools.record_layout(file, record, program, 500)["answer"]
+            except ToolError:
+                continue
+            for laid in answer.get("records") or []:
+                fields = _elementary(laid.get("fields") or [])
+                if best is not None and len(fields) <= best["field_count"]:
+                    continue
+                best = {
+                    "record": laid["name"],
+                    "declared_at": laid.get("declared_at"),
+                    "length": laid.get("byte_length"),
+                    "field_count": len(fields),
+                    "how": f"{how} in {program} ({file}), which opens the "
+                    f"dataset as DD {ddname}",
+                    "fields": fields,
+                }
+        return best
+
+
+def _elementary(fields: list[dict[str, Any]]) -> list[tuple[str, int, int]]:
+    """The elementary items of a record_layout field list, as (name,
+    0-based offset, length)."""
+    out = []
+    for at, item in enumerate(fields):
+        after = fields[at + 1] if at + 1 < len(fields) else None
+        if after is not None and after.get("level", 0) > item.get("level", 0):
+            continue
+        if item.get("byte_offset") is None or item.get("byte_length") is None:
+            continue
+        out.append((str(item["name"]), item["byte_offset"], item["byte_length"]))
+    return out
+
+
+def _sysin_lines(step: JobStep, members: _ControlMembers, jfile: JclFile) -> list[str]:
+    """A step's SYSIN control statements: in-stream, or the member under
+    the root its ``DSN=LIB(MEMBER)`` names."""
+    for dd in step.dd_statements:
+        if (dd.name or "").upper() != "SYSIN":
+            continue
+        if dd.is_instream:
+            return [ln.strip() for ln in dd.instream_lines if ln.strip()]
+        found = _MEMBER_RE.search(dd.dataset or "")
+        path = members.find(found.group(1), jfile.display) if found else None
+        if path is not None:
+            return _control_lines(Workspace.read_text(path))
+    return []
+
+
+def _sort_layout(
+    step: JobStep, lines: list[str], layouts: _Layouts, job: JclJob | None = None
+) -> dict[str, Any] | None:
+    """A SORT / MERGE step's control cards in field names, when a COBOL
+    program under the root reads its input dataset: which fields are the
+    keys, what the reformatted record holds, what it leaves out."""
+    from .sort_layout import map_sort, parse_sort_control, read_back
+
+    if (step.program or "").upper() not in _SORT_PROGRAMS or not lines:
+        return None
+    control = parse_sort_control(lines)
+    if not (control.sort_keys or control.tests or control.inrec or control.outrec):
+        return None
+    sortin = next(
+        (
+            dd
+            for dd in step.dd_statements
+            if (dd.name or "").upper().startswith(("SORTIN", "SORTJNF")) and dd.dataset
+        ),
+        None,
+    )
+    if sortin is None or sortin.dataset is None:
+        return None
+    layout = layouts.of(sortin.dataset)
+    if layout is None:
+        return {
+            "input": sortin.dataset,
+            "note": "no COBOL program under the root opens this dataset, so its "
+            "record layout is unknown; read the positions against the "
+            "layout's record_layout",
+        }
+    mapped = map_sort(control, layout["fields"], int(layout["length"] or 0))
+    answer: dict[str, Any] = {
+        "input": sortin.dataset,
+        "input_layout": _layout_source(layout),
+        **mapped,
+    }
+    output = _sort_output_layout(step, job, layouts)
+    if output is not None:
+        dataset, read_as = output
+        rows = read_back(control, layout["fields"], read_as["fields"])
+        if rows is not None:
+            answer["output_read_as"] = {
+                "dataset": dataset,
+                **_layout_source(read_as),
+                "fields": rows[:SORT_READ_BACK_FIELDS],
+            }
+    return answer
+
+
+def _layout_source(layout: dict[str, Any]) -> dict[str, Any]:
+    return {
+        k: layout[k]
+        for k in ("record", "declared_at", "length", "how")
+        if layout.get(k) is not None
+    }
+
+
+def _sort_output_layout(
+    step: JobStep, job: JclJob | None, layouts: _Layouts
+) -> tuple[str, dict[str, Any]] | None:
+    """The layout a program reads the SORTOUT dataset through: directly,
+    or after a later IDCAMS REPRO of the same job copies it (a sorted
+    sequential file loaded into a KSDS)."""
+    out = next(
+        (
+            dd.dataset
+            for dd in step.dd_statements
+            if (dd.name or "").upper() == "SORTOUT" and dd.dataset
+        ),
+        None,
+    )
+    if out is None:
+        return None
+    datasets = [out]
+    later = job.steps[job.steps.index(step) + 1 :] if job and step in job.steps else []
+    for other in later:
+        if (other.program or "").upper() != "IDCAMS":
+            continue
+        uses = _utility_uses(other) or {}
+        cards = {(dd.name or "").upper(): dd.dataset for dd in other.dd_statements}
+        named = {
+            key: key[4:] if key.startswith("DSN:") else cards.get(key) for key in uses
+        }
+        if any(
+            use == "read" and _base(named[key] or "").upper() == _base(out).upper()
+            for key, use in uses.items()
+        ):
+            datasets += [
+                found
+                for key, use in uses.items()
+                if use == "write" and (found := named[key])
+            ]
+    for dataset in datasets:
+        layout = layouts.of(dataset)
+        if layout is not None:
+            return dataset, layout
+    return None
+
+
 def _job_flow(
     jfile: JclFile,
     job: JclJob,
@@ -1083,6 +1383,7 @@ def _job_flow(
     members: _ControlMembers,
     running: set[int],
     response: Response,
+    layouts: _Layouts | None = None,
 ) -> dict[str, Any]:
     """One job, step by step: what each step runs, the datasets it reads and
     writes (by what the program or utility does with each DD, else DISP),
@@ -1178,6 +1479,13 @@ def _job_flow(
             row["fed_by"] = fed_by
         if control:
             row["control"] = control
+        if layouts is not None:
+            sysin: list[str] = next(
+                (c["lines"] for c in control if c["dd"] == "SYSIN"), []
+            )
+            laid = _sort_layout(step, sysin, layouts, job)
+            if laid is not None:
+                row["sort_layout"] = laid
         steps.append(row)
     flow: dict[str, Any] = {"file": jfile.display, "job": job.name, "steps": steps}
     if len(job.steps) > JOB_FLOW_STEPS:
@@ -1527,6 +1835,12 @@ def _utility_uses(step: JobStep) -> dict[str, str] | None:
         return uses
     if program in _COPY_PROGRAMS:
         return {"SYSUT1": "read", "SYSUT2": "write"}
+    if program == "IEFBR14":
+        # It opens nothing: DISP alone acts, so (MOD,DELETE) deletes.
+        for dd in step.dd_statements:
+            if _normal_disposition(dd.disposition) == "DELETE":
+                uses[(dd.name or "").upper()] = "delete"
+        return uses
     if program == "ICETOOL":
         toolin = _instream(step, "TOOLIN")
         for match in _ICETOOL_FROM_RE.finditer(toolin):

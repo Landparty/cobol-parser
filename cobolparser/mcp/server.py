@@ -104,7 +104,9 @@ follow_calls, also every program it CALLs in turn and its language) and
 each of those jobs step by step: the datasets every step reads and writes,
 its SORT / IDCAMS control cards, and which earlier step fed what it reads;
 dataset_users for every job, step and program that reads or writes a
-dataset; jcl_job to read one JCL file's jobs, steps and DD statements.
+dataset; jcl_job to read one JCL file's jobs, steps and DD statements,
+with each job's run_order (when every step runs) and, for a SORT step, its
+keys and OUTREC output already mapped onto the record's fields.
 program_brief names the steps that run a program under run_by.
 """,
 }
@@ -480,9 +482,10 @@ def build_server(
         full_paths: FullPaths = False,
         ctx: MCPContext | None = None,
     ) -> dict[str, Any]:
-        """What a change reaches: for a copybook, every program COPYing it;
-        for a field, everything its value flows into across programs, files,
-        CALLs and DB2 columns."""
+        """What a change reaches: for a copybook, every program COPYing it
+        (each site says COPY or EXEC SQL INCLUDE: only the INCLUDEs go
+        through the DB2 precompiler); for a field, everything its value
+        flows into across programs, files, CALLs and DB2 columns."""
         return await off_loop(
             "impact_of_change",
             lambda: tools.impact_of_change(
@@ -706,7 +709,12 @@ def build_server(
         limit: Limit = None,
     ) -> dict[str, Any]:
         """One JCL file's jobs, steps and DD statements, procedures
-        expanded, with the COBOL source of each program run."""
+        expanded, with the COBOL source of each program run. Each job has
+        ``run_order``: the steps in order with when each runs (its COND in
+        words), worth stating in any description of the job. A SORT step
+        whose input a COBOL program reads has ``sort_layout``: the sort
+        keys, INCLUDE tests and OUTREC output in field names, the input
+        bytes not copied, and the layout the output is read through."""
         return await off_loop("jcl_job", lambda: tools.jcl_job(file, job, step, limit))
 
     async def jobs_running(
