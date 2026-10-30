@@ -165,6 +165,7 @@ def statement_rows(
                 held = operands.setdefault(key, {})
                 for n in names:
                     held.setdefault(n, set()).add(ref.role)
+        cursors = _cursor_tables(unit)
         for statement in _own_statements(unit):
             location = getattr(statement, "location", None)
             if location is None or not location.line:
@@ -174,6 +175,16 @@ def statement_rows(
                 continue
             paragraph, section = _procedure_of(statement)
             ops = operands.get((location.line, type(statement).__name__), {})
+            text = _statement_text(lines.line(located["file"], located["line"]))
+            tables = _sql_table_roles(statement, cursors)
+            if tables:
+                ops = {k: set(v) for k, v in ops.items()}
+                for table, role in tables.items():
+                    for qualified in {table, table.rsplit(".", 1)[-1]}:
+                        ops.setdefault(qualified, set()).add(role)
+                if text.upper() == "EXEC SQL":
+                    # The statement itself is on the lines that follow.
+                    text = _statement_text("EXEC SQL " + statement.sql_text)
             yield StatementRow(
                 program=name,
                 file=located["file"],
@@ -181,9 +192,59 @@ def statement_rows(
                 verb=statement_verb(statement),
                 paragraph=paragraph,
                 section=section,
-                text=_statement_text(lines.line(located["file"], located["line"])),
+                text=text,
                 operands={k: sorted(v) for k, v in ops.items()},
             )
+
+
+#: The role of the table an EXEC SQL statement changes, by statement type.
+_SQL_WRITE_ROLES = {
+    "INSERT": "insert",
+    "UPDATE": "update",
+    "DELETE": "delete",
+    "TRUNCATE": "delete",
+    "MERGE": "merge",
+}
+
+
+def _cursor_tables(unit: CobolProgram) -> dict[str, list[str]]:
+    """Cursor name -> the tables its DECLARE CURSOR selects from, wherever
+    in *unit* the DECLARE is coded (often WORKING-STORAGE)."""
+    from ..models.sql_statements import ExecSQLStatement, SQLStatementType
+
+    cursors: dict[str, list[str]] = {}
+    for node in unit.traverse_depth_first():
+        if (
+            isinstance(node, ExecSQLStatement)
+            and node.sql_type == SQLStatementType.DECLARE_CURSOR
+            and node.cursor_name
+        ):
+            held = cursors.setdefault(node.cursor_name.upper(), [])
+            held += [t.upper() for t in node.tables if t and t.upper() not in held]
+    return cursors
+
+
+def _sql_table_roles(statement: Any, cursors: dict[str, list[str]]) -> dict[str, str]:
+    """The SQL tables an EXEC SQL statement names, each with its role: the
+    one a data change targets ``insert`` / ``update`` / ``delete`` /
+    ``merge``, any other ``read``; an OPEN or FETCH reads its cursor's."""
+    from ..models.sql_statements import ExecSQLStatement, SQLStatementType
+
+    if not isinstance(statement, ExecSQLStatement):
+        return {}
+    kind = statement.sql_type
+    tables = [t.upper() for t in statement.tables if t]
+    roles: dict[str, str] = {}
+    for verb, table in getattr(statement, "data_change_tables", []):
+        roles[table.upper()] = _SQL_WRITE_ROLES.get(verb, "merge")
+    if kind in _SQL_WRITE_ROLES and tables:
+        roles.setdefault(tables[0], _SQL_WRITE_ROLES[kind])
+        tables = tables[1:]
+    elif kind in (SQLStatementType.OPEN_CURSOR, SQLStatementType.FETCH):
+        tables = list(cursors.get((statement.cursor_name or "").upper(), []))
+    for table in tables:
+        roles.setdefault(table, "read")
+    return roles
 
 
 # ---------------------------------------------------------------------------
