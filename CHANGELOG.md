@@ -118,6 +118,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+* **Field lineage no longer grows quadratically on wide programs.** A
+  program funnelling hundreds of fields through one work area produced a
+  port-to-port `summary` of fields x fields flows (604,000 flows, 272 MB of
+  JSON, for one program of a real codebase), enough to get a LegacyLens
+  upload worker OOM-killed. `FieldFlowAnalyzer(summary_limit=...)` now caps
+  it (default `DEFAULT_SUMMARY_LIMIT`, 10,000; `None` for all, `0` for
+  none) with a caveat and `statistics.summary_truncated`; `lineage
+  --summary-limit N|all` sets it on the command line. `edges`, which
+  `LineageGraph` traces, are never cut. `LineageGraph` joined every
+  argument sent to an opaque callee to every argument handed back, one
+  edge per pair; it now routes them through one hub node per program and
+  callee (`["O", program, callee]` in `join_edges()`), with the same impact
+  answers: a 300-field record passed to three unknown callees went from
+  269,100 join edges to 1,800.
+
 * **`dead-code` / `program-flow`: `DECLARE GLOBAL TEMPORARY TABLE` is covered
   by `EXEC SQL WHENEVER`.** The parser files it as a `DECLARE TABLE`, so it
   was skipped with the DCLGEN declarations and a handler reached only from it

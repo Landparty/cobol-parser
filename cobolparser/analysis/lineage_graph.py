@@ -76,9 +76,19 @@ _DUP_SUFFIX_RE = re.compile(r"#\d+$")
 _GDG_RELATIVE_RE = re.compile(r"\(\s*[+-]?\d+\s*\)$")
 _GDG_ABSOLUTE_RE = re.compile(r"\.G\d{4}V\d{2}$")
 
-# Node keys. Program-scoped: ("P", program, kind, name, offset, length).
+# Node keys. Program-scoped: ("P", program, kind, name, offset, length), and
+# ("O", program, callee): the hub of one program's CALLs to an opaque callee
+# (every argument sent -> hub -> every argument handed back; a hub instead of
+# an edge per sent/back pair keeps that join linear, not quadratic).
 # Shared: ("D", dataset, offset, length) and ("T", "TABLE.COLUMN").
 NodeKey = tuple[Any, ...]
+
+
+def _node_program(node: NodeKey) -> str | None:
+    """The program a node belongs to (a port, an item or an opaque-call hub)."""
+    return node[1] if node[0] in ("P", "O") else None
+
+
 #: (node, overlay class of the edge it arrived over: see ``overlay_class``).
 _State = tuple[NodeKey, int]
 
@@ -603,7 +613,8 @@ class LineageGraph:
         opaque pass-through), JSON-shaped, in a stable order: what a caller
         stores to rebuild this graph later with ``LineageGraph(reports,
         join_edges=...)``. Node keys are lists: ``["P", program, kind, name,
-        offset, length]``, ``["D", dataset, offset, length]`` or ``["T",
+        offset, length]``, ``["O", program, callee]`` (an opaque callee's
+        hub), ``["D", dataset, offset, length]`` or ``["T",
         "TABLE.COLUMN"]``."""
         return [
             {
@@ -846,20 +857,23 @@ class LineageGraph:
                                 cross=True,
                             ),
                         )
-        for (_program, callee), (sent, back) in sorted(opaque.items()):
+        for (program, callee), (sent, back) in sorted(opaque.items()):
             if callee not in self.opaque_callees:
                 self.opaque_callees.append(callee)
+            if not sent or not back:
+                continue
+            # Every argument sent reaches every argument handed back, through
+            # one hub node per program and callee: sent + back edges, where an
+            # edge per pair was sent x back (a 500-field record passed BY
+            # REFERENCE was 250,000 edges per callee).
+            hub: NodeKey = ("O", program, callee)
+            info = _EdgeInfo(
+                "opaque-call", statement=f"CALL {callee}", confidence="opaque"
+            )
             for src in sent:
-                for dst in back:
-                    self._add(
-                        src,
-                        dst,
-                        _EdgeInfo(
-                            "opaque-call",
-                            statement=f"CALL {callee}",
-                            confidence="opaque",
-                        ),
-                    )
+                self._add(src, hub, info)
+            for dst in back:
+                self._add(hub, dst, info)
         if self.opaque_callees:
             self._join_caveat(_opaque_caveat(self.opaque_callees))
 
@@ -1009,6 +1023,8 @@ class LineageGraph:
         if node[0] == "D":
             span = f"@{node[2]}+{node[3]}" if node[2] is not None else ""
             return None, f"{node[1]}{span}", "dataset"
+        if node[0] == "O":
+            return node[1], f"CALL {node[2]}", "call"
         _, program, kind, name, offset, length = node
         if kind == ITEM:
             return program, name, "item"
@@ -1079,7 +1095,7 @@ class LineageGraph:
                 overlay = overlay_class(info.kind)
                 if overlay and overlay == arrived:
                     continue
-                enters = nxt[0] == "P" and (node[0] != "P" or node[1] != nxt[1])
+                enters = nxt[0] == "P" and _node_program(node) != nxt[1]
                 step = cost + (1 if enters else 0)
                 if depth is not None and step > depth:
                     continue
@@ -1100,11 +1116,11 @@ class LineageGraph:
         start_set = set(starts)
         hits: list[tuple[NodeKey, ImpactHit]] = []
         for node, state in chosen.items():
-            if node in start_set:
+            if node in start_set or node[0] == "O":
                 continue
             program, name, kind = self._describe(node)
             if kind == "port" and any(
-                info.cross or nxt[0] != "P" or nxt[1] != node[1]
+                info.cross or _node_program(nxt) != node[1]
                 for nxt, info in adjacency.get(node, [])
             ):
                 # A port is only worth reporting where the trail ends at it:
@@ -1120,6 +1136,11 @@ class LineageGraph:
             cursor = state
             while cursor[0] not in start_set or cursor[1]:
                 prev, info = parent[cursor]
+                if cursor[0][0] == "O":
+                    # An opaque callee's hub is no hop of its own: the hop
+                    # out of it (``opaque-call``) is the CALL, as it reads.
+                    cursor = prev
+                    continue
                 chain.append((cursor[0], info))
                 p, n, _ = self._describe(cursor[0])
                 path.append(
@@ -1308,9 +1329,13 @@ class LineageGraph:
         while queue:
             node = queue.popleft()
             for prev, info in self._in.get(node, []):
-                if info.cross or prev in seen or prev[0] != "P":
+                if info.cross or prev in seen or prev[0] not in ("P", "O"):
                     continue
                 seen.add(prev)
+                if prev[0] == "O":
+                    # Through an opaque callee to the arguments sent to it.
+                    queue.append(prev)
+                    continue
                 if prev[2] != ITEM:
                     found.append(prev)
                     continue
@@ -1340,7 +1365,7 @@ class LineageGraph:
         return labels
 
     def to_dict(self) -> dict[str, Any]:
-        nodes = set(self._out) | set(self._in)
+        nodes = {n for n in (*self._out, *self._in) if n[0] != "O"}
         return {
             "programs": sorted(self.reports),
             "statistics": {

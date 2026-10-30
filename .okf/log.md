@@ -14,6 +14,16 @@ deliberate. Anything else appended to the bottom is a mistake: five
 entries, including both 2026-09-15 sections, were found there on
 2026-09-15 and moved back up.
 
+## 2026-10-30 -- lineage memory: summary limit, opaque-call hub
+
+[analysis/lineage.md](analysis/lineage.md): a LegacyLens upload worker was
+OOM-killed on a real codebase. `FieldFlowReport.summary` is quadratic in a
+program's fields (one program: 604k flows, 272 MB) and is now capped by
+`FieldFlowAnalyzer(summary_limit=DEFAULT_SUMMARY_LIMIT)` with a caveat
+(`lineage --summary-limit`, [cli.md](cli.md)). `LineageGraph._join_calls`
+joined an opaque callee's arguments sent x back; it now routes them through a
+hub node `("O", program, callee)`, same reachability, linear edge count.
+
 ## 2026-10-30 -- WHENEVER covers DECLARE GLOBAL TEMPORARY TABLE
 
 [analysis/flow.md](analysis/flow.md) (SQL WHENEVER handlers):

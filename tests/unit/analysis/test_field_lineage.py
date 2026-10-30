@@ -683,3 +683,83 @@ class TestWriteFromFlatRecord:
         )
         # A source longer than the record is truncated: through the record.
         assert ("OUT-REC", "file:OUTDD@0+20", True) in to_file
+
+
+def _funnel(fields: int) -> str:
+    """*fields* input fields all MOVEd through one work area to *fields*
+    output fields: a summary of fields x fields flows."""
+    ins = "\n".join(f"          05 IN-F{i} PIC X(4)." for i in range(fields))
+    outs = "\n".join(f"          05 OUT-F{i} PIC X(4)." for i in range(fields))
+    moves_in = "\n".join(f"           MOVE IN-F{i} TO WS-HUB." for i in range(fields))
+    moves_out = "\n".join(f"           MOVE WS-HUB TO OUT-F{i}." for i in range(fields))
+    return f"""\
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. FUNNEL.
+       ENVIRONMENT DIVISION.
+       INPUT-OUTPUT SECTION.
+       FILE-CONTROL.
+           SELECT INF ASSIGN TO INDD.
+           SELECT OUTF ASSIGN TO OUTDD.
+       DATA DIVISION.
+       FILE SECTION.
+       FD INF.
+       01 IN-REC.
+{ins}
+       FD OUTF.
+       01 OUT-REC.
+{outs}
+       WORKING-STORAGE SECTION.
+       01 WS-HUB PIC X(4).
+       PROCEDURE DIVISION.
+           READ INF.
+{moves_in}
+{moves_out}
+           WRITE OUT-REC.
+           GOBACK.
+"""
+
+
+@pytest.fixture(scope="module")
+def ast():
+    result = parse_cobol(_funnel(12), "FUNNEL.cbl")
+    assert result.ast is not None
+    return result.ast
+
+
+class TestSummaryLimit:
+    def test_unlimited_lists_every_flow(self, ast) -> None:
+        report = FieldFlowAnalyzer(summary_limit=None).analyze(ast)
+        assert len(report.summary) == 144
+        assert not report.summary_truncated
+        assert not any("summary" in c for c in report.caveats)
+
+    def test_limit_stops_the_summary_with_a_caveat(self, ast) -> None:
+        full = FieldFlowAnalyzer(summary_limit=None).analyze(ast)
+        report = FieldFlowAnalyzer(summary_limit=50).analyze(ast)
+        assert len(report.summary) == 50
+        assert report.summary_truncated
+        assert set(report.summary) <= set(full.summary)
+        # The edges, which LineageGraph traces, are never cut.
+        assert report.edges == full.edges
+        assert any("stops at 50 flows" in c for c in report.caveats)
+        data = report.to_dict()
+        assert data["statistics"]["summary"] == 50
+        assert data["statistics"]["summary_truncated"] is True
+
+    def test_limit_zero_skips_the_summary(self, ast) -> None:
+        report = FieldFlowAnalyzer(summary_limit=0).analyze(ast)
+        assert report.summary == [] and report.summary_truncated
+        assert any("not computed" in c for c in report.caveats)
+
+    def test_limit_not_reached(self, ast) -> None:
+        report = FieldFlowAnalyzer(summary_limit=144).analyze(ast)
+        assert len(report.summary) == 144 and not report.summary_truncated
+
+    def test_default_limit(self) -> None:
+        from cobolparser.analysis.field_lineage import DEFAULT_SUMMARY_LIMIT
+
+        assert FieldFlowAnalyzer().summary_limit == DEFAULT_SUMMARY_LIMIT
+
+    def test_negative_limit_is_refused(self) -> None:
+        with pytest.raises(ValueError):
+            FieldFlowAnalyzer(summary_limit=-1)

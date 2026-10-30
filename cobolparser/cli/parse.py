@@ -3455,15 +3455,43 @@ def _build_lineage_parser(subparsers: argparse._SubParsersAction) -> None:
     _add_program_arg(p)
     _add_define_args(p)
     _add_output_arg(p)
+    p.add_argument(
+        "--summary-limit",
+        type=_summary_limit,
+        default=None,
+        metavar="N",
+        help="Most port-to-port flows the summary lists (default: 10000; "
+        "'all' for no limit, 0 for none)",
+    )
     p.set_defaults(func=_cmd_lineage)
+
+
+def _summary_limit(value: str) -> int | str:
+    if value.strip().lower() == "all":
+        return "all"
+    try:
+        limit = int(value)
+    except ValueError:
+        raise argparse.ArgumentTypeError(
+            f"expected a number or 'all', got {value!r}"
+        ) from None
+    if limit < 0:
+        raise argparse.ArgumentTypeError("must be 0 or more")
+    return limit
 
 
 def _cmd_lineage(args: argparse.Namespace) -> None:
     from ..analysis.field_lineage import FieldFlowAnalyzer, apply_source_map
 
     ast, _prof = _parse_or_fail(args)
+    limit = getattr(args, "summary_limit", None)
+    analyzer = (
+        FieldFlowAnalyzer()
+        if limit is None
+        else FieldFlowAnalyzer(summary_limit=None if limit == "all" else limit)
+    )
     report = apply_source_map(
-        FieldFlowAnalyzer().analyze(ast), getattr(args, "_expansion_source_map", None)
+        analyzer.analyze(ast), getattr(args, "_expansion_source_map", None)
     )
     text = getattr(args, "output_format", "json") == "text"
     if args.field:

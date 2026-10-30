@@ -51,6 +51,28 @@ class TestLineage:
         assert data["lineage_version"] == "2"
         assert {p["kind"] for p in data["ports"]} == {"file", "call", "sql", "console"}
 
+    def test_summary_limit(self, monkeypatch, capsys) -> None:
+        path = str(SAMPLES / "WRITER.cbl")
+        full = json.loads(
+            _run(monkeypatch, capsys, "lineage", path, "--summary-limit", "all")
+        )
+        assert full["summary"] and not full["statistics"]["summary_truncated"]
+        one = json.loads(
+            _run(monkeypatch, capsys, "lineage", path, "--summary-limit", "1")
+        )
+        assert len(one["summary"]) == 1
+        assert one["statistics"]["summary_truncated"]
+        none = json.loads(
+            _run(monkeypatch, capsys, "lineage", path, "--summary-limit", "0")
+        )
+        assert none["summary"] == []
+        assert "--summary-limit" in _fails(
+            monkeypatch, capsys, "lineage", path, "--summary-limit", "-1"
+        )
+        assert "--summary-limit" in _fails(
+            monkeypatch, capsys, "lineage", path, "--summary-limit", "many"
+        )
+
     def test_text(self, monkeypatch, capsys) -> None:
         out = _run(
             monkeypatch,

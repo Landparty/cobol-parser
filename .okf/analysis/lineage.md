@@ -84,7 +84,11 @@ make a flow *derived*. Each edge carries `line`, `paragraph`, `guarded`
 `apply_source_map` stamps `origin` on every edge after copybook expansion
 -- edges carry a bare `line`, so `lint.stamp_report_origins` does not
 reach them. `summary` is every input-port field -> output-port field the
-program connects; `key_uses` are items used as READ/START/RECORD KEY or in
+program connects, up to `FieldFlowAnalyzer(summary_limit=...)` flows
+(`DEFAULT_SUMMARY_LIMIT` 10,000; `None` unlimited, `0` none): it is quadratic
+in a program's fields (604k flows, 272 MB of JSON, for one real program), so
+past the limit it stops with a caveat and `summary_truncated` /
+`statistics.summary_truncated` set. `LineageGraph` never reads it; `key_uses` are items used as READ/START/RECORD KEY or in
 a SQL `WHERE col = :hv`. `overwrites` (JSON `"overwrites"`, edge dicts) are
 the edges into an item that replace all of it: exact, unguarded, in a named
 paragraph, statement in `OVERWRITING_STATEMENTS` (MOVE, READ INTO, RETURN
@@ -193,7 +197,10 @@ datasets nothing in scope writes are seeded from their readers' ranges;
 CALL argument *n* meets callee linkage *n* (and `CALLEE#RETURNING` meets
 `PROGRAM#RETURNING`); a callee with no report is an
 *opaque* pass-through (every argument sent reaches every argument back,
-`confidence="opaque"`) unless `_INTERFACE_RE` names it a system interface
+`confidence="opaque"`), routed through one hub node `("O", program, callee)`
+per program and callee so the join is sent + back edges, not sent x back
+(the hub is never a hit or a hop of an impact path, and costs no depth),
+unless `_INTERFACE_RE` names it a system interface
 (the MQI verbs by name -- not every `MQ*` -- *TDLI, CEE*, DSN*...). DB2:
 `SCHEMA.TABLE.COLUMN` and an unqualified `TABLE.COLUMN` join both ways by
 `table-alias` edges with `confidence="candidate"`; two schemas never join.
