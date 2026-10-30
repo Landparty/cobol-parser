@@ -264,3 +264,63 @@ class TestLinkDecks:
                 ],
             }
         ]
+
+
+DLI_PROGRAM = """\
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. {name}.
+       DATA DIVISION.
+       WORKING-STORAGE SECTION.
+       01  FUNC PIC X(4) VALUE 'ISRT'.
+       01  SEG  PIC X(10).
+       LINKAGE SECTION.
+       01  PCB  PIC X(10).
+       PROCEDURE DIVISION.
+       MAIN-PARA.
+           {dli}
+           GOBACK.
+"""
+
+
+class TestOtherForms:
+    def test_an_exec_dli_search_counts_the_call_form(self, tmp_path: Path) -> None:
+        write(
+            tmp_path,
+            "cbl/ONLINE.cbl",
+            DLI_PROGRAM.format(
+                name="ONLINE",
+                dli="EXEC DLI GU USING PCB(1) SEGMENT(ROOTSEG) INTO(SEG) END-EXEC.",
+            ),
+        )
+        write(
+            tmp_path,
+            "cbl/BATCH.cbl",
+            DLI_PROGRAM.format(name="BATCH", dli="CALL 'CBLTDLI' USING FUNC PCB SEG."),
+        )
+        tools = tools_for(tmp_path)
+        answer = tools.find_statements(verb="EXEC DLI")["answer"]
+        assert answer["match_count"] == 1
+        assert answer["other_forms"]["programs"] == {"BATCH": 1}
+        back = tools.find_statements(verb="CALL", literal="CBLTDLI")["answer"]
+        assert back["other_forms"]["programs"] == {"ONLINE": 1}
+        assert back["other_forms"]["form"] == "EXEC DLI"
+
+    def test_counted_with_no_exec_dli_and_absent_for_a_plain_search(self, tmp_path: Path) -> None:
+        write(
+            tmp_path,
+            "cbl/BATCH.cbl",
+            DLI_PROGRAM.format(name="BATCH", dli="CALL 'CBLTDLI' USING FUNC PCB SEG."),
+        )
+        answer = tools_for(tmp_path).find_statements(verb="EXEC DLI")["answer"]
+        assert "other_forms" in answer
+        answer = tools_for(tmp_path).find_statements(verb="CALL")["answer"]
+        assert "other_forms" not in answer
+
+
+def test_the_instructions_ask_for_every_form_and_branch() -> None:
+    pytest.importorskip("mcp")
+    from cobolparser.mcp.server import INSTRUCTIONS
+
+    assert "Search so that nothing is missed" in INSTRUCTIONS
+    assert "CALL 'CBLTDLI'" in INSTRUCTIONS
+    assert "link_edited_into" in INSTRUCTIONS

@@ -393,6 +393,15 @@ def find_statements(
     }
     if wanted_operand and matches:
         answer["programs_by_role"] = _programs_by_role(matches)
+    other = _other_forms(rows, wanted_verb, wanted_program, matches)
+    if other:
+        answer["other_forms"] = other
+    if wanted_operand and any(m["verb"].startswith("EXEC SQL") for m in matches):
+        answer["also_check"] = (
+            "SQL also runs outside programs: DSNTEP2 / DSNTEP4, DSNTIAD and "
+            f'DSNTIAUL job steps. dataset_users(dataset="{wanted_operand}") '
+            "lists them with the programs that change or only read the table"
+        )
     if not matches:
         suggestions: list[str] = []
         if wanted_verb and not any(_verb_matches(v, wanted_verb) for v in known_verbs):
@@ -412,6 +421,60 @@ def find_statements(
             "a literal on a statement's continuation line is not found",
         )
     return response.build(answer, program_info)
+
+
+#: The DL/I interface modules a ``CALL 'name' USING function, PCB, ...``
+#: names: the call form of the requests ``EXEC DLI`` makes.
+_DLI_MODULES = ("CBLTDLI", "AIBTDLI", "CEETDLI", "PLITDLI", "ASMTDLI", "AERTDLI")
+
+
+def _other_forms(
+    rows: list[StatementRow],
+    wanted_verb: str | None,
+    wanted_program: str | None,
+    matches: list[dict[str, Any]],
+) -> dict[str, Any] | None:
+    """The same service requested the other way, which a search by one
+    verb misses: DL/I as ``CALL 'CBLTDLI'`` when the search was
+    ``EXEC DLI``, and ``EXEC DLI`` when it was a CALL of a DL/I module.
+    Counted with the programs, so a "which programs" answer covers both."""
+    if not wanted_verb:
+        return None
+    if wanted_verb.startswith("EXEC DLI"):
+        form, label = "CALL", "CALL 'CBLTDLI' (or AIBTDLI, CEETDLI, ...)"
+
+        def wanted(row: StatementRow) -> bool:
+            text = row.text.upper().replace('"', "'")
+            return row.verb == "CALL" and any(f"'{m}'" in text for m in _DLI_MODULES)
+
+    elif wanted_verb == "CALL" and any(
+        any(f"'{m}'" in str(match["text"]).upper() for m in _DLI_MODULES)
+        for match in matches
+    ):
+        form, label = "EXEC DLI", "EXEC DLI"
+
+        def wanted(row: StatementRow) -> bool:
+            return row.verb.startswith("EXEC DLI")
+
+    else:
+        return None
+    programs: dict[str, int] = {}
+    for row in rows:
+        if wanted_program and row.program.upper() != wanted_program:
+            continue
+        if wanted(row):
+            programs[row.program] = programs.get(row.program, 0) + 1
+    if not programs:
+        return None
+    return {
+        "form": label,
+        "statement_count": sum(programs.values()),
+        "programs": dict(sorted(programs.items())),
+        "note": f"these programs request DL/I as {label}, which this search "
+        f"does not match: search verb {form!r}"
+        + (" with literal 'CBLTDLI' (and each other module)" if form == "CALL" else "")
+        + " too before saying which programs read or change a segment",
+    }
 
 
 def _programs_by_role(matches: list[dict[str, Any]]) -> dict[str, Any]:
