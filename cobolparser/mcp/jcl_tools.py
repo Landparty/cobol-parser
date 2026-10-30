@@ -1976,26 +1976,55 @@ def _idcams_named(step: JobStep) -> list[tuple[str, str, str]]:
 def _jobs_by_effect(found: list[dict[str, Any]]) -> dict[str, Any]:
     """The jobs that change the dataset (any use but a read: a write,
     load, delete, define, or DISP=OLD with nothing more known), each with
-    its steps and what they do, and the jobs that only read it. Counted,
+    every step that uses it and what it does (a utility's copy with where
+    it copies from or to), and the jobs that only read it. Counted,
     so an answer's "N jobs change it" is never a guess."""
-    changes: dict[str, list[str]] = {}
+    changing = {str(r["job"]) for r in found if r["access"] != "read"}
+    steps: dict[str, list[tuple[int, str]]] = {}
     readers: set[str] = set()
     for row in found:
         job = str(row["job"])
-        if row["access"] == "read":
+        if job not in changing:
             readers.add(job)
             continue
         what = row.get("command") or row["access"]
         said = f"{row['step'] or 'JOB'}: {what}"
         if row["access"] not in what.lower():
             said += f" ({row['access']})"
-        if said not in changes.setdefault(job, []):
-            changes[job].append(said)
+        if row.get("access_from") in ("utility", "program") and row["programs"]:
+            said += " by " + ", ".join(row["programs"])
+        if row.get("copied_from"):
+            said += " from " + ", ".join(row["copied_from"])
+        if row.get("copied_to"):
+            said += " to " + ", ".join(row["copied_to"])
+        at = (row.get("location") or {}).get("line") or 0
+        if all(said != text for _, text in steps.setdefault(job, [])):
+            steps[job].append((at, said))
+    # In the order the steps are coded (cards of one JCL file).
+    changes = {job: [t for _, t in sorted(rows)] for job, rows in steps.items()}
     only_read = sorted(readers - set(changes))
     return {
         "change_it": {"count": len(changes), "jobs": dict(sorted(changes.items()))},
         "only_read_it": {"count": len(only_read), "jobs": only_read},
     }
+
+
+def _utility_datasets(step: JobStep, use: str) -> list[str]:
+    """The datasets a utility step reads (*use* "read": SORTIN, SYSUT1, a
+    REPRO INFILE or INDATASET, an ICETOOL FROM) or writes ("write")."""
+    uses = _utility_uses(step) or {}
+    found: list[str] = []
+    for dd in step.dd_statements:
+        if uses.get((dd.name or "").upper()) == use and dd.dataset:
+            found.append(dd.dataset)
+    for key, value in uses.items():
+        if key.startswith("DSN:") and value == use:
+            found.append(key[4:])
+    side = "INDATASET" if use == "read" else "OUTDATASET"
+    for named, access, command in _idcams_named(step):
+        if side in command and (access == "read") == (use == "read"):
+            found.append(named)
+    return list(dict.fromkeys(found))
 
 
 def _combine(use: str, disposition_access: str) -> str:
@@ -2175,6 +2204,15 @@ def dataset_users(
                 row["access_because"] = programs.because(
                     step, dd.name or "", dd.disposition
                 )
+            if source == "utility" and step is not None:
+                if access in _WRITES:
+                    inputs = _utility_datasets(step, "read")
+                    if inputs:
+                        row["copied_from"] = inputs
+                elif access == "read":
+                    outputs = _utility_datasets(step, "write")
+                    if outputs:
+                        row["copied_to"] = outputs
             if dd.dataset.startswith("&&"):
                 row["temporary"] = True
             found.append(row)
