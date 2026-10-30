@@ -334,7 +334,9 @@ def build_server(
         ctx: MCPContext | None = None,
     ) -> dict[str, Any]:
         """Parsed statements matching every filter given (copybook code
-        included, comments not), in one file or under the root."""
+        included, comments not), in one file or under the root. With
+        operand, programs_by_role counts the programs that change it and
+        those that only read it."""
         return await off_loop(
             "find_statements",
             lambda: tools.find_statements(
@@ -492,7 +494,9 @@ def build_server(
         """What a change reaches: for a copybook, every program COPYing it
         (each site says COPY or EXEC SQL INCLUDE: only the INCLUDEs go
         through the DB2 precompiler; commented_out lists programs whose only
-        COPY of it is on a comment line, so they are not affected); for a field, everything its value
+        COPY of it is on a comment line, so they are not affected, and
+        not_affected the programs beside them that do not copy it); for a
+        field, everything its value
         flows into across programs, files, CALLs and DB2 columns."""
         return await off_loop(
             "impact_of_change",
@@ -757,7 +761,8 @@ def build_server(
         limit: Limit = None,
     ) -> dict[str, Any]:
         """Every job, step and program that uses a dataset, and whether it
-        reads, creates, extends or writes it."""
+        reads, creates, extends or writes it; jobs_by_effect counts the
+        jobs that change it and those that only read it."""
         return await off_loop(
             "dataset_users", lambda: tools.dataset_users(dataset, limit)
         )

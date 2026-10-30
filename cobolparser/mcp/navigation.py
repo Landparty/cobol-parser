@@ -330,6 +330,8 @@ def find_statements(
         ),
         "statements": response.cap(matches, cap, "statements"),
     }
+    if wanted_operand and matches:
+        answer["programs_by_role"] = _programs_by_role(matches)
     if not matches:
         suggestions: list[str] = []
         if wanted_verb and not any(_verb_matches(v, wanted_verb) for v in known_verbs):
@@ -349,6 +351,29 @@ def find_statements(
             "a literal on a statement's continuation line is not found",
         )
     return response.build(answer, program_info)
+
+
+def _programs_by_role(matches: list[dict[str, Any]]) -> dict[str, Any]:
+    """The programs whose statements change the operand (any role but a
+    read or a test), each with where, and those that only read or test it.
+    Counted from every match, before the statements are cut to a limit."""
+    changed: dict[str, list[str]] = {}
+    seen: set[str] = set()
+    for match in matches:
+        program = str(match["program"])
+        seen.add(program)
+        if set(match.get("operand_roles") or ()) - {"read", "condition"}:
+            at = match["location"]
+            where = f"{match['verb']} at {at['file']}:{at['line']}"
+            changed.setdefault(program, []).append(where)
+    read_only = sorted(seen - set(changed))
+    return {
+        "changed_by": {
+            "count": len(changed),
+            "programs": dict(sorted(changed.items())),
+        },
+        "only_read_by": {"count": len(read_only), "programs": read_only},
+    }
 
 
 def _operand_roles(operands: dict[str, list[str]], wanted: str) -> list[str] | None:

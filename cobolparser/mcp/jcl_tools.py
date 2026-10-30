@@ -1487,7 +1487,13 @@ def _job_flow(
             if laid is not None:
                 row["sort_layout"] = laid
         steps.append(row)
-    flow: dict[str, Any] = {"file": jfile.display, "job": job.name, "steps": steps}
+    flow: dict[str, Any] = {
+        "file": jfile.display,
+        "job": job.name,
+        "step_count": len(job.steps),
+        "run_order": run_order(job.steps),
+        "steps": steps,
+    }
     if len(job.steps) > JOB_FLOW_STEPS:
         response.truncated.append(
             {
@@ -1967,6 +1973,31 @@ def _idcams_named(step: JobStep) -> list[tuple[str, str, str]]:
     return found
 
 
+def _jobs_by_effect(found: list[dict[str, Any]]) -> dict[str, Any]:
+    """The jobs that change the dataset (any use but a read: a write,
+    load, delete, define, or DISP=OLD with nothing more known), each with
+    its steps and what they do, and the jobs that only read it. Counted,
+    so an answer's "N jobs change it" is never a guess."""
+    changes: dict[str, list[str]] = {}
+    readers: set[str] = set()
+    for row in found:
+        job = str(row["job"])
+        if row["access"] == "read":
+            readers.add(job)
+            continue
+        what = row.get("command") or row["access"]
+        said = f"{row['step'] or 'JOB'}: {what}"
+        if row["access"] not in what.lower():
+            said += f" ({row['access']})"
+        if said not in changes.setdefault(job, []):
+            changes[job].append(said)
+    only_read = sorted(readers - set(changes))
+    return {
+        "change_it": {"count": len(changes), "jobs": dict(sorted(changes.items()))},
+        "only_read_it": {"count": len(only_read), "jobs": only_read},
+    }
+
+
 def _combine(use: str, disposition_access: str) -> str:
     """A program's *use* of a file, said with what DISP adds: a written
     dataset DISP=NEW is created; DISP=MOD with OUTPUT or EXTEND extends."""
@@ -1984,6 +2015,8 @@ class _ProgramUses:
         self.workspace = workspace
         self.response = response
         self._held: dict[str, dict[str, set[str]] | None] = {}
+        # program -> DD -> (file name, source file, OPEN line) per open mode
+        self._opens: dict[str, dict[str, list[tuple[str, str, str, int | None]]]] = {}
 
     def of(self, program: str) -> dict[str, set[str]] | None:
         name = program.upper()
@@ -2011,13 +2044,61 @@ class _ProgramUses:
             e.file_name.upper(): {str(m).upper() for m in e.open_modes}
             for e in crud.file_entries
         }
+        lines = _open_lines(parsed, unit)
         by_dd: dict[str, set[str]] = {}
+        opens = self._opens.setdefault(name, {})
         for row in selects["files"]:
             if row.get("ddname"):
-                by_dd.setdefault(row["ddname"].upper(), set()).update(
-                    modes.get(row["file_name"].upper(), set())
-                )
+                ddname = row["ddname"].upper()
+                file_name = row["file_name"].upper()
+                by_dd.setdefault(ddname, set()).update(modes.get(file_name, set()))
+                for mode in sorted(modes.get(file_name, set())):
+                    opens.setdefault(ddname, []).append(
+                        (mode, file_name, *lines.get((file_name, mode), (file, None)))
+                    )
         return by_dd
+
+    def because(self, step: JobStep, ddname: str, disposition: str | None) -> str:
+        """The OPEN that says what *step*'s programs do with *ddname*, in
+        words with its line, and what DISP= alone would have said."""
+        said = []
+        for program in step.effective_programs():
+            if self.of(program) is None:
+                continue
+            for mode, file_name, file, line in self._opens.get(program.upper(), {}).get(
+                ddname.upper(), []
+            ):
+                where = f"{file}:{line}" if line else file
+                said.append(f"{program} opens {file_name} {mode} ({where})")
+        text = "; ".join(said)
+        status = (disposition or "").strip("()").split(",")[0].strip().upper()
+        if status in ("SHR", "OLD"):
+            text += (
+                f"; DISP={disposition} only says how the dataset is shared, "
+                "not whether it is read or written"
+            )
+        return text
+
+
+def _open_lines(
+    parsed: ParsedProgram, unit: Any
+) -> dict[tuple[str, str], tuple[str, int]]:
+    """(file, OPEN mode) -> where on disk its first OPEN in *unit* is."""
+    from ..models.statements import IOOpenStatement
+
+    lines: dict[tuple[str, str], tuple[str, int]] = {}
+    for stmt in unit.find_all_by_type("IOOpenStatement"):
+        if not isinstance(stmt, IOOpenStatement) or stmt.location is None:
+            continue
+        file_modes = getattr(stmt, "file_modes", None) or {}
+        for file_name in stmt.file_names:
+            mode = (file_modes.get(file_name) or stmt.open_mode or "").upper()
+            if not mode or (file_name.upper(), mode) in lines:
+                continue
+            at = parsed.locate(stmt.location.line, None, Response())
+            if at is not None:
+                lines[(file_name.upper(), mode)] = (at["file"], at["line"])
+    return lines
 
 
 class _NoProgramUses(_ProgramUses):
@@ -2090,6 +2171,10 @@ def dataset_users(
             row["access_from"] = source
             if source != "disp":
                 row["disposition_access"] = _access(dd.disposition)
+            if source == "program" and step is not None:
+                row["access_because"] = programs.because(
+                    step, dd.name or "", dd.disposition
+                )
             if dd.dataset.startswith("&&"):
                 row["temporary"] = True
             found.append(row)
@@ -2132,6 +2217,7 @@ def dataset_users(
         "use_count": len(found),
         "by_access": by_access,
         "jobs": sorted({row["job"] for row in found}),
+        "jobs_by_effect": _jobs_by_effect(found),
         "uses": response.cap(found, clamp_limit(limit), "uses"),
         "jcl_files": len(index.files),
         "access_legend": "access_from program: the COBOL program's OPEN mode "

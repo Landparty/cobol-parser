@@ -761,6 +761,11 @@ class TestAccessFromTheProgram:
         master = rows[("PROD.MASTER", "STEP1")]
         assert (master["access"], master["access_from"]) == ("write", "program")
         assert master["disposition_access"] == "read"
+        assert master["access_because"] == (
+            "LOADER opens OUT-FILE OUTPUT (LOADER.cbl:18); DISP=SHR only says "
+            "how the dataset is shared, not whether it is read or written"
+        )
+        assert "access_because" not in rows[("PROD.MASTER", "STEP2")]
         assert rows[("PROD.IN", "STEP1")]["access"] == "read"
         assert rows[("PROD.LOG", "STEP1")]["access"] == "extend"
         assert (

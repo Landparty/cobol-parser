@@ -1507,19 +1507,19 @@ class CobolTools:
                 "copied_by": response.cap(direct, cap, "copied_by"),
                 **_statement_counts(direct),
                 **self._commented_out(member, direct, response, cap),
+                **_unaffected_neighbours(graph, direct, nested, self.workspace),
                 "copied_through_other_members": response.cap(
                     nested, cap, "copied_through_other_members"
                 ),
                 "fields": response.cap(report.fields, cap, "fields"),
                 "coverage": _coverage(self.workspace, index),
                 **(
-                    {
-                        "included_by_other_languages": response.cap(
-                            self._included_rows(index, included, member),
-                            cap,
-                            "included_by_other_languages",
-                        )
-                    }
+                    _other_language_members(
+                        [self.workspace.display(p) for p in report.paths],
+                        self._included_rows(index, included, member),
+                        response,
+                        cap,
+                    )
                     if included
                     else {}
                 ),
@@ -2822,6 +2822,67 @@ def _statement_counts(direct: list[dict[str, Any]]) -> dict[str, Any]:
         return {}
     return {
         "brought_in_by": {k: {"count": len(v), "programs": v} for k, v in by.items()}
+    }
+
+
+def _other_language_members(
+    resolved: list[str],
+    rows: list[dict[str, Any]],
+    response: Response,
+    cap: int,
+) -> dict[str, Any]:
+    """``included_by_other_languages`` and, when those programs include
+    their own file of the member, ``member_files_to_change``: every file
+    that spells the layout. A copybook and a PL/I or assembler include
+    of the same name are separate files, so a change is made in each."""
+    out: dict[str, Any] = {
+        "included_by_other_languages": response.cap(
+            rows, cap, "included_by_other_languages"
+        )
+    }
+    others = [f for r in rows for f in r.get("member_files", []) if f not in resolved]
+    if others:
+        out["member_files_to_change"] = {
+            "files": list(dict.fromkeys([*resolved, *others])),
+            "note": "each language includes its own file of this member: a "
+            "layout change has to be made in every one of them",
+        }
+    return out
+
+
+_NEIGHBOURS_SHOWN = 25
+
+
+def _unaffected_neighbours(
+    graph: Any,
+    direct: list[dict[str, Any]],
+    nested: list[dict[str, Any]],
+    workspace: Workspace,
+) -> dict[str, Any]:
+    """``not_affected``: the programs that share a folder with the ones that
+    copy the member but do not copy it, directly or through another member.
+    "Which must be recompiled" is half an answer without the ones that need
+    not be, and the folder is where a reader would look for them."""
+    affected = {str(r["file"]) for r in [*direct, *nested] if r.get("file")}
+    folders = {str(Path(f).parent) for f in affected}
+    names: set[str] = set()
+    for node in graph.programs:
+        shown = workspace.display(node.path)
+        if shown not in affected and str(Path(shown).parent) in folders:
+            names.add(node.program_id)
+    names -= {str(r["program"]) for r in [*direct, *nested]}
+    if not names:
+        return {}
+    shown_names = sorted(names)[:_NEIGHBOURS_SHOWN]
+    return {
+        "not_affected": {
+            "count": len(names),
+            "programs": shown_names,
+            "folders": sorted(folders),
+            "note": "programs in the same folders that do not copy the member, "
+            "directly or through another: no recompile; name them when the "
+            "question asks which must be recompiled",
+        }
     }
 
 
