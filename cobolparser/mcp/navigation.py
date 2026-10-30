@@ -165,6 +165,7 @@ def statement_rows(
                 held = operands.setdefault(key, {})
                 for n in names:
                     held.setdefault(n, set()).add(ref.role)
+        cursors = _cursor_tables(unit)
         for statement in _own_statements(unit):
             location = getattr(statement, "location", None)
             if location is None or not location.line:
@@ -174,6 +175,16 @@ def statement_rows(
                 continue
             paragraph, section = _procedure_of(statement)
             ops = operands.get((location.line, type(statement).__name__), {})
+            text = _statement_text(lines.line(located["file"], located["line"]))
+            tables = _sql_table_roles(statement, cursors)
+            if tables:
+                ops = {k: set(v) for k, v in ops.items()}
+                for table, role in tables.items():
+                    for qualified in {table, table.rsplit(".", 1)[-1]}:
+                        ops.setdefault(qualified, set()).add(role)
+                if text.upper() == "EXEC SQL":
+                    # The statement itself is on the lines that follow.
+                    text = _statement_text("EXEC SQL " + statement.sql_text)
             yield StatementRow(
                 program=name,
                 file=located["file"],
@@ -181,9 +192,59 @@ def statement_rows(
                 verb=statement_verb(statement),
                 paragraph=paragraph,
                 section=section,
-                text=_statement_text(lines.line(located["file"], located["line"])),
+                text=text,
                 operands={k: sorted(v) for k, v in ops.items()},
             )
+
+
+#: The role of the table an EXEC SQL statement changes, by statement type.
+_SQL_WRITE_ROLES = {
+    "INSERT": "insert",
+    "UPDATE": "update",
+    "DELETE": "delete",
+    "TRUNCATE": "delete",
+    "MERGE": "merge",
+}
+
+
+def _cursor_tables(unit: CobolProgram) -> dict[str, list[str]]:
+    """Cursor name -> the tables its DECLARE CURSOR selects from, wherever
+    in *unit* the DECLARE is coded (often WORKING-STORAGE)."""
+    from ..models.sql_statements import ExecSQLStatement, SQLStatementType
+
+    cursors: dict[str, list[str]] = {}
+    for node in unit.traverse_depth_first():
+        if (
+            isinstance(node, ExecSQLStatement)
+            and node.sql_type == SQLStatementType.DECLARE_CURSOR
+            and node.cursor_name
+        ):
+            held = cursors.setdefault(node.cursor_name.upper(), [])
+            held += [t.upper() for t in node.tables if t and t.upper() not in held]
+    return cursors
+
+
+def _sql_table_roles(statement: Any, cursors: dict[str, list[str]]) -> dict[str, str]:
+    """The SQL tables an EXEC SQL statement names, each with its role: the
+    one a data change targets ``insert`` / ``update`` / ``delete`` /
+    ``merge``, any other ``read``; an OPEN or FETCH reads its cursor's."""
+    from ..models.sql_statements import ExecSQLStatement, SQLStatementType
+
+    if not isinstance(statement, ExecSQLStatement):
+        return {}
+    kind = statement.sql_type
+    tables = [t.upper() for t in statement.tables if t]
+    roles: dict[str, str] = {}
+    for verb, table in getattr(statement, "data_change_tables", []):
+        roles[table.upper()] = _SQL_WRITE_ROLES.get(verb, "merge")
+    if kind in _SQL_WRITE_ROLES and tables:
+        roles.setdefault(tables[0], _SQL_WRITE_ROLES[kind])
+        tables = tables[1:]
+    elif kind in (SQLStatementType.OPEN_CURSOR, SQLStatementType.FETCH):
+        tables = list(cursors.get((statement.cursor_name or "").upper(), []))
+    for table in tables:
+        roles.setdefault(table, "read")
+    return roles
 
 
 # ---------------------------------------------------------------------------
@@ -332,6 +393,15 @@ def find_statements(
     }
     if wanted_operand and matches:
         answer["programs_by_role"] = _programs_by_role(matches)
+    other = _other_forms(rows, wanted_verb, wanted_program, matches)
+    if other:
+        answer["other_forms"] = other
+    if wanted_operand and any(m["verb"].startswith("EXEC SQL") for m in matches):
+        answer["also_check"] = (
+            "SQL also runs outside programs: DSNTEP2 / DSNTEP4, DSNTIAD and "
+            f'DSNTIAUL job steps. dataset_users(dataset="{wanted_operand}") '
+            "lists them with the programs that change or only read the table"
+        )
     if not matches:
         suggestions: list[str] = []
         if wanted_verb and not any(_verb_matches(v, wanted_verb) for v in known_verbs):
@@ -351,6 +421,60 @@ def find_statements(
             "a literal on a statement's continuation line is not found",
         )
     return response.build(answer, program_info)
+
+
+#: The DL/I interface modules a ``CALL 'name' USING function, PCB, ...``
+#: names: the call form of the requests ``EXEC DLI`` makes.
+_DLI_MODULES = ("CBLTDLI", "AIBTDLI", "CEETDLI", "PLITDLI", "ASMTDLI", "AERTDLI")
+
+
+def _other_forms(
+    rows: list[StatementRow],
+    wanted_verb: str | None,
+    wanted_program: str | None,
+    matches: list[dict[str, Any]],
+) -> dict[str, Any] | None:
+    """The same service requested the other way, which a search by one
+    verb misses: DL/I as ``CALL 'CBLTDLI'`` when the search was
+    ``EXEC DLI``, and ``EXEC DLI`` when it was a CALL of a DL/I module.
+    Counted with the programs, so a "which programs" answer covers both."""
+    if not wanted_verb:
+        return None
+    if wanted_verb.startswith("EXEC DLI"):
+        form, label = "CALL", "CALL 'CBLTDLI' (or AIBTDLI, CEETDLI, ...)"
+
+        def wanted(row: StatementRow) -> bool:
+            text = row.text.upper().replace('"', "'")
+            return row.verb == "CALL" and any(f"'{m}'" in text for m in _DLI_MODULES)
+
+    elif wanted_verb == "CALL" and any(
+        any(f"'{m}'" in str(match["text"]).upper() for m in _DLI_MODULES)
+        for match in matches
+    ):
+        form, label = "EXEC DLI", "EXEC DLI"
+
+        def wanted(row: StatementRow) -> bool:
+            return row.verb.startswith("EXEC DLI")
+
+    else:
+        return None
+    programs: dict[str, int] = {}
+    for row in rows:
+        if wanted_program and row.program.upper() != wanted_program:
+            continue
+        if wanted(row):
+            programs[row.program] = programs.get(row.program, 0) + 1
+    if not programs:
+        return None
+    return {
+        "form": label,
+        "statement_count": sum(programs.values()),
+        "programs": dict(sorted(programs.items())),
+        "note": f"these programs request DL/I as {label}, which this search "
+        f"does not match: search verb {form!r}"
+        + (" with literal 'CBLTDLI' (and each other module)" if form == "CALL" else "")
+        + " too before saying which programs read or change a segment",
+    }
 
 
 def _programs_by_role(matches: list[dict[str, Any]]) -> dict[str, Any]:

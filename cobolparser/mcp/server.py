@@ -45,6 +45,28 @@ cite what they return. Root-wide answers carry coverage (the files read, by
 language, and those no parser here reads): when it covers the question, a
 short or empty list is the whole answer, with no text search needed.
 
+Search so that nothing is missed (most wrong answers are things never
+looked at, not things misread):
+- Start with a tool, not a file read: program_brief (follow_calls=True for
+  a transaction or flow), callers_of, dataset_users, find_statements. They
+  read every file under the root; a Glob and a few Reads see only what you
+  open.
+- Trace every branch, not only the main path: for each program the flow
+  can reach (a PF key, a menu option, an error path, an XCTL or LINK
+  through a data item), run program_brief on it too, and say what it does.
+- A service has more than one form. DL/I: EXEC DLI and CALL 'CBLTDLI' /
+  'AIBTDLI'. DB2: EXEC SQL in programs and DSNTEP2/4, DSNTIAD, DSNTIAUL job
+  steps (dataset_users on the table gives both). A call: CALL 'literal',
+  CALL of a data item, EXEC CICS LINK / XCTL, and a link-edit deck that
+  binds one program into another (callers_of's link_edited_into). Search
+  every form before saying which programs do something; find_statements'
+  other_forms counts the ones a search missed.
+- Read what the tools flag and repeat it: also_declared_in (another copy
+  of the program or application), control_flow_notes, unreachable code,
+  caveats, implementations. These are often part of the answer.
+- Name a job both by its JOB card and its file when they differ.
+- Counts in your opening sentence must match the lists you give.
+
 Every result has the same envelope:
 - answer: the tool's own result. Every location is {file, line[, column]}
   in the file on disk (a copybook is named as itself), relative to the
@@ -335,8 +357,9 @@ def build_server(
     ) -> dict[str, Any]:
         """Parsed statements matching every filter given (copybook code
         included, comments not), in one file or under the root. With
-        operand, programs_by_role counts the programs that change it and
-        those that only read it."""
+        operand (a data item, file or DB2 table, qualified or not),
+        programs_by_role counts the programs that change it and those that
+        only read it."""
         return await off_loop(
             "find_statements",
             lambda: tools.find_statements(
@@ -431,8 +454,11 @@ def build_server(
     ) -> dict[str, Any]:
         """A program on one page: interface, files and their C/R/U/D use,
         SQL tables, calls, CICS/DL/I, unreachable paragraphs, health, worst
-        lint findings, the JCL steps that run it; a PL/I or assembler file:
-        its calls and includes. Start here; follow_calls for what a whole
+        lint findings, the JCL steps that run it; control_flow_notes (no
+        GOBACK, paragraphs run by falling through, files never OPENed or
+        CLOSEd), also_declared_in (other files with this PROGRAM-ID and how
+        they differ), link_edit decks; a PL/I or assembler file: its calls
+        and includes. Start here; follow_calls for what a whole
         transaction or job step touches (a callee with several sources
         compares them under implementations: which one the jobs that run
         this program are set up for, by the DDs they code)."""
@@ -458,8 +484,9 @@ def build_server(
         it is reachable; for a PROGRAM-ID, every CALL / LINK / XCTL to it
         under the root, each caller with how the call links (call_type:
         static, dynamic, PL/I FETCHABLE) and whether it runs online, in
-        batch or under IMS (runs_as, evidence in runs_as_because): quote
-        those rather than infer them from program names."""
+        batch or under IMS (runs_as, evidence in runs_as_because), and the
+        load modules a link-edit deck binds it into (link_edited_into):
+        quote those rather than infer them from program names."""
         return await off_loop(
             "callers_of", lambda: tools.callers_of(file, name, program, limit), ctx
         )
@@ -760,9 +787,11 @@ def build_server(
         ],
         limit: Limit = None,
     ) -> dict[str, Any]:
-        """Every job, step and program that uses a dataset, and whether it
-        reads, creates, extends or writes it; jobs_by_effect counts the
-        jobs that change it and those that only read it."""
+        """Every job, step and program that uses a dataset or DB2 table, and
+        whether it reads, creates, extends or writes it; jobs_by_effect
+        counts the jobs that change it and those that only read it. For a
+        table: DSNTEP2/4, DSNTIAD and DSNTIAUL steps' SQL, and sql_programs
+        (the COBOL programs whose EXEC SQL changes or only reads it)."""
         return await off_loop(
             "dataset_users", lambda: tools.dataset_users(dataset, limit)
         )

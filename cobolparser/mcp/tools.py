@@ -27,6 +27,7 @@ from ..models.data_items import CobolDataItem, ConditionNameItem, RenamesItem
 from ..models.program import CobolProgram, CobolSection
 from ..preprocess import PreprocessingError
 from .envelope import Response, ToolError, clamp_limit
+from .link_decks import bound_into, own_decks
 from .workspace import ParsedProgram, Workspace, stdout_to_stderr
 
 #: Prefixes of the xref caveats that are about undeclared names only.
@@ -443,6 +444,9 @@ class CobolTools:
                     "unreachable_reasons",
                 )
             answer["perform_cycles"] = len(flow.cycles)
+            flow_notes = _control_flow_notes(nodes)
+            if flow_notes:
+                answer["control_flow_notes"] = flow_notes
 
         signature = _attempt(
             response,
@@ -517,6 +521,9 @@ class CobolTools:
                         row["status_field"] = fact.file_status_field
                 files.append({k: v for k, v in row.items() if _worth_showing(v)})
             answer["files"] = response.cap(files, cap, "files")
+            notes = _file_open_close_notes(crud.file_entries, facts or {}, unit)
+            if notes:
+                answer.setdefault("control_flow_notes", []).extend(notes)
             tables = [
                 {
                     "name": entry.table_name,
@@ -587,6 +594,23 @@ class CobolTools:
             } - {""}
             self._brief_run_by(answer, response, names, cap)
         self._brief_runs_as(unit.program_name or "", answer, response)
+        _attempt(
+            response,
+            "other declarations",
+            lambda: self._brief_also_declared(parsed, unit, answer),
+        )
+        name = (unit.program_name or "").upper()
+        if name:
+            decks = _attempt(
+                response, "link-edit decks", lambda: own_decks(self.workspace, name)
+            )
+            if decks:
+                answer["link_edit"] = decks
+            bound = _attempt(
+                response, "link-edit decks", lambda: bound_into(self.workspace, name)
+            )
+            if bound:
+                answer["link_edited_into"] = bound
         if follow_calls:
             self._brief_call_tree(
                 unit.program_name or "",
@@ -597,6 +621,37 @@ class CobolTools:
                 - {""},
             )
         return response.build(answer, parsed.program_info(unit))
+
+    def _brief_also_declared(
+        self, parsed: ParsedProgram, unit: CobolProgram, answer: dict[str, Any]
+    ) -> None:
+        """``also_declared_in``: the other files whose PROGRAM-ID is this
+        one's, each compared with this file line by line, so "is it the
+        same program?" is answered rather than left to a diff."""
+        from .codebase_index import programs_index
+
+        name = (unit.program_name or "").upper()
+        mine = self.workspace.display(parsed.path)
+        others = sorted(
+            {
+                self.workspace.display(node.path)
+                for node in programs_index(self.workspace).graph.programs
+                if node.program_id.upper() == name
+            }
+            - {mine}
+        )
+        if not others:
+            return
+        text = Workspace.read_text(parsed.path)
+        rows = []
+        for other in others[:BRIEF_ALSO_DECLARED]:
+            try:
+                theirs = Workspace.read_text(self.workspace.resolve(other))
+            except (ToolError, OSError):
+                rows.append({"file": other})
+                continue
+            rows.append({"file": other, **compare_sources(text, theirs)})
+        answer["also_declared_in"] = rows
 
     def _brief_call_tree(
         self,
@@ -1207,6 +1262,11 @@ class CobolTools:
         if out_of_scope:
             answer["out_of_scope_callers"] = sorted(out_of_scope)
         _label_runs_as(self.workspace, answer, callers, response)
+        bound = _attempt(
+            response, "link-edit decks", lambda: bound_into(self.workspace, wanted)
+        )
+        if bound:
+            answer["link_edited_into"] = bound
         # Only outermost (or stacked) declarations share one load-module
         # namespace: a nested program is reached from its own compilation
         # unit, whatever else is in the load library (#532).
@@ -1247,6 +1307,14 @@ class CobolTools:
                 "only its own compilation unit can CALL; the CALLs from "
                 "out_of_scope_callers reach a separately compiled program "
                 "of that name"
+            )
+        elif not callers and bound:
+            answer["note"] = (
+                "no CALL, LINK or XCTL under the root names it as a literal, but "
+                "a link-edit deck binds it into "
+                + ", ".join(sorted({b["load_module"] for b in bound}))
+                + " (link_edited_into): it runs as part of that load module, "
+                "CALLed from it statically or through a data item"
             )
         elif not callers:
             answer["note"] = (
@@ -3165,6 +3233,110 @@ def _calls(
                 line = statement.location.line if statement.location else None
                 row["sites"].append({"location": parsed.locate(line, None, response)})
     return list(rows.values())
+
+
+BRIEF_ALSO_DECLARED = 5
+_DIFF_LINES_SHOWN = 10
+
+
+def compare_sources(mine: str, theirs: str) -> dict[str, Any]:
+    """How two source texts differ: ``identical``, else the line numbers
+    (of *mine*) that differ, and whether every one of them is a comment
+    line (column 7 ``*`` or ``/``) on both sides."""
+    import difflib
+
+    a, b = split_source_lines(mine), split_source_lines(theirs)
+    if a == b:
+        return {"identical": True, "comparison": "identical, line for line"}
+    changed: list[int] = []
+    comments_only = True
+    matcher = difflib.SequenceMatcher(a=a, b=b, autojunk=False)
+    for tag, i1, i2, j1, j2 in matcher.get_opcodes():
+        if tag == "equal":
+            continue
+        changed.extend(range(i1 + 1, i2 + 1) or [i1 + 1])
+        for line in [*a[i1:i2], *b[j1:j2]]:
+            if line[6:7] not in ("*", "/") and line.strip():
+                comments_only = False
+    if comments_only:
+        what = "only comment lines differ"
+    else:
+        what = "code differs"
+    shown = changed[:_DIFF_LINES_SHOWN]
+    return {
+        "identical": False,
+        "comments_only": comments_only,
+        "differing_lines": shown,
+        "differing_line_count": len(changed),
+        "comparison": f"{what}: {len(changed)} line(s), "
+        f"at {', '.join(map(str, shown))}"
+        + (" ..." if len(changed) > len(shown) else ""),
+    }
+
+
+def _control_flow_notes(nodes: list[Any]) -> list[str]:
+    """What a reader of the PROCEDURE DIVISION easily misses: no statement
+    that ends the program (control falls off the last paragraph), and
+    paragraphs that run in order by falling through because nothing
+    PERFORMs or GOes TO them."""
+    if not nodes:
+        return []
+    notes: list[str] = []
+    ends = [
+        n
+        for n in nodes
+        if n.has_stop_run or n.has_goback or n.has_exit_program or n.has_cics_exit
+    ]
+    if not ends:
+        notes.append(
+            "no GOBACK, STOP RUN, EXIT PROGRAM or EXEC CICS RETURN: control "
+            f"falls off the end of the last procedure, {nodes[-1].name}"
+        )
+    named = [n for n in nodes if n.name != "PROCEDURE DIVISION"]
+    jumps = sum(n.perform_count + n.goto_count for n in nodes)
+    if len(named) > 1 and not jumps and (not ends or ends[0] is nodes[-1]):
+        notes.append(
+            "nothing is PERFORMed or GONE TO: the paragraphs run once each, "
+            "in order, by falling through: " + " -> ".join(n.name for n in named)
+        )
+    return notes
+
+
+def _file_open_close_notes(
+    entries: Any, facts: dict[str, Any], unit: CobolProgram
+) -> list[str]:
+    """FD files that are never OPENed, or OPENed and never CLOSEd.
+
+    An SD, an EXEC CICS file (no FD) and a SORT/MERGE USING or GIVING file
+    are opened by something else, so none of them counts.
+    """
+    closed: set[str] = set()
+    sorted_by: set[str] = set()
+    for statement in _own_statements(unit):
+        kind = getattr(statement, "statement_type", "")
+        if kind == "CLOSE":
+            closed.update(n.upper() for n in getattr(statement, "file_names", []))
+        elif kind in ("SORT", "MERGE"):
+            for attr in ("using_files", "giving_files"):
+                sorted_by.update(n.upper() for n in getattr(statement, attr, []))
+    declared = [
+        e
+        for e in entries
+        if getattr(facts.get(e.file_name.upper()), "record_type", None) == "FD"
+        and e.file_name.upper() not in sorted_by
+    ]
+    unopened = sorted(e.file_name for e in declared if not e.open_modes)
+    unclosed = sorted(
+        e.file_name
+        for e in declared
+        if e.open_modes and e.file_name.upper() not in closed
+    )
+    notes = []
+    if unopened:
+        notes.append(f"declared but never OPENed: {', '.join(unopened)}")
+    if unclosed:
+        notes.append(f"OPENed but never CLOSEd: {', '.join(unclosed)}")
+    return notes
 
 
 def _own_statements(unit: CobolProgram) -> list[Any]:
