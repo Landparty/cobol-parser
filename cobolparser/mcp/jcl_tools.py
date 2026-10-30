@@ -1487,7 +1487,13 @@ def _job_flow(
             if laid is not None:
                 row["sort_layout"] = laid
         steps.append(row)
-    flow: dict[str, Any] = {"file": jfile.display, "job": job.name, "steps": steps}
+    flow: dict[str, Any] = {
+        "file": jfile.display,
+        "job": job.name,
+        "step_count": len(job.steps),
+        "run_order": run_order(job.steps),
+        "steps": steps,
+    }
     if len(job.steps) > JOB_FLOW_STEPS:
         response.truncated.append(
             {
