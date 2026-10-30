@@ -261,6 +261,12 @@ def _read_pli(facts: SourceFacts, text: str, path: Path) -> None:
                 rows[(statement.target.upper(), via)]["dynamic"] = True
                 continue
             _row(rows, statement.target.upper(), via, location, **extra)
+    fetchable = _fetchable_entries(text)
+    for row in rows.values():
+        name = str(row.get("local_name") or row["program"]).upper()
+        if row["via"] == "CALL" and name in fetchable:
+            # Linked dynamically: the module is fetched on the first CALL.
+            row["fetchable"] = True
     facts.calls = list(rows.values())
     for include in program.includes:
         row = {
@@ -270,6 +276,25 @@ def _read_pli(facts: SourceFacts, text: str, path: Path) -> None:
         if include.library:
             row["library"] = include.library
         facts.includes.append(row)
+
+
+_PLI_DECLARE = re.compile(r"\b(?:DCL|DECLARE)\b([^;]*);", re.IGNORECASE)
+_PLI_DECLARED_NAME = re.compile(r"^\s*(?:\d+\s+)?([A-Z_#@$][A-Z0-9_#@$]*)", re.I)
+
+
+def _fetchable_entries(text: str) -> set[str]:
+    """Names a PL/I source declares ``ENTRY ... OPTIONS(... FETCHABLE ...)``:
+    a CALL to one loads the module at run time, a dynamic link."""
+    names: set[str] = set()
+    for found in _PLI_DECLARE.finditer(re.sub(r"/\*.*?\*/", " ", text, flags=re.S)):
+        body = found.group(1)
+        upper = body.upper()
+        if "ENTRY" not in upper or "FETCHABLE" not in upper:
+            continue
+        named = _PLI_DECLARED_NAME.match(body)
+        if named:
+            names.add(named.group(1).upper())
+    return names
 
 
 def _read_assembler(facts: SourceFacts, text: str, path: Path) -> None:

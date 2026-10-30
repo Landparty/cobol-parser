@@ -55,7 +55,7 @@ from .workspace import ParsedProgram, Stamp, Workspace, _stamp
 
 #: Bumped whenever :class:`FileFacts` or anything it holds changes shape:
 #: facts on disk from another version are never read.
-FACTS_VERSION = "7"
+FACTS_VERSION = "8"
 
 #: The fields only the lineage and statement indexes read. They are most of
 #: the bytes of a file's facts (a field-flow report per unit), so on disk they
@@ -161,7 +161,13 @@ def compute_facts(workspace: Workspace, path: Path, builder: Any) -> FileFacts:
 
 def _unit_facts(workspace: Workspace, parsed: ParsedProgram, facts: FileFacts) -> None:
     from ..analysis.codebase import program_graph_ids
-    from .codebase_index import UnitFacts, _entry_names, _units_with_depth
+    from .codebase_index import (
+        UnitFacts,
+        _entry_names,
+        _units_with_depth,
+        unit_commarea,
+        unit_services,
+    )
     from .tools import _calls, _flow
 
     response = Response()
@@ -179,6 +185,11 @@ def _unit_facts(workspace: Workspace, parsed: ParsedProgram, facts: FileFacts) -
             unit_facts.calls = _calls(parsed, unit, _flow(parsed, unit), response)
         except Exception as exc:  # noqa: BLE001
             _failed(facts, "called programs", exc)
+        try:
+            unit_facts.services = unit_services(unit)
+            unit_facts.commarea = unit_commarea(unit)
+        except Exception as exc:  # noqa: BLE001
+            _failed(facts, "services", exc)
         facts.units.append(unit_facts)
     for caveat in response.caveats:
         facts.note(caveat)

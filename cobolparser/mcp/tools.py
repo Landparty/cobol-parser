@@ -586,6 +586,7 @@ class CobolTools:
                 Path(str(parsed.path)).stem.upper(),
             } - {""}
             self._brief_run_by(answer, response, names, cap)
+        self._brief_runs_as(unit.program_name or "", answer, response)
         if follow_calls:
             self._brief_call_tree(
                 unit.program_name or "",
@@ -635,6 +636,7 @@ class CobolTools:
                         self._implementations, row, names or {name.upper()}
                     ),
                 )
+        _label_runs_as(self.workspace, answer, shown, response)
         answer["call_tree"] = shown
         if shown:
             answer.setdefault("access_legend", "C=create R=read U=update D=delete")
@@ -692,6 +694,20 @@ class CobolTools:
                 "no JCL step that runs the caller codes the DDs any version "
                 "opens; which one runs depends on which is linked"
             )
+
+    def _brief_runs_as(
+        self, program: str, answer: dict[str, Any], response: Response
+    ) -> None:
+        """``runs_as``: online (CICS), batch or IMS, and why."""
+        from .codebase_index import RunsAs
+
+        if not program:
+            return
+        found = _attempt(
+            response, "online or batch", lambda: RunsAs(self.workspace).of(program)
+        )
+        if found:
+            answer["runs_as"] = found
 
     def _program_uses(self, file: str, program: str) -> dict[str, Any]:
         """The files and SQL tables one program uses (C/R/U/D) and its CICS
@@ -1138,6 +1154,9 @@ class CobolTools:
                     if resolved_from is not None:
                         caller["dynamic"] = True
                         caller["target_from"] = resolved_from
+                    linkage = _call_type(unit.language, row, resolved_from)
+                    if linkage:
+                        caller["call_type"] = linkage
                     callers.append(caller)
 
         declared = []
@@ -1187,6 +1206,7 @@ class CobolTools:
         }
         if out_of_scope:
             answer["out_of_scope_callers"] = sorted(out_of_scope)
+        _label_runs_as(self.workspace, answer, callers, response)
         # Only outermost (or stacked) declarations share one load-module
         # namespace: a nested program is reached from its own compilation
         # unit, whatever else is in the load library (#532).
@@ -1486,6 +1506,7 @@ class CobolTools:
                 "program_count": report.program_count,
                 "copied_by": response.cap(direct, cap, "copied_by"),
                 **_statement_counts(direct),
+                **self._commented_out(member, direct, response, cap),
                 "copied_through_other_members": response.cap(
                     nested, cap, "copied_through_other_members"
                 ),
@@ -1507,6 +1528,46 @@ class CobolTools:
                 "that copies the member",
             }
         )
+
+    def _commented_out(
+        self,
+        member: str,
+        direct: list[dict[str, Any]],
+        response: Response,
+        cap: int,
+    ) -> dict[str, Any]:
+        """``commented_out``: programs in the copying programs' folders whose
+        only COPY / INCLUDE of *member* is on a comment line. They are not
+        affected, and a text search finds them, so the answer says so."""
+        copying = {str(row["file"]) for row in direct if row.get("file")}
+        folders = {str(Path(f).parent) for f in copying}
+        pattern = re.compile(
+            rf"\b(?:COPY|INCLUDE|\+\+INCLUDE|-INC)\s+['\"]?{re.escape(member)}\b",
+            re.IGNORECASE,
+        )
+        rows = []
+        for path in self.workspace.program_files():
+            shown = self.workspace.display(path)
+            if shown in copying or str(Path(shown).parent) not in folders:
+                continue
+            try:
+                lines = split_source_lines(Workspace.read_text(path))
+            except (ToolError, OSError):
+                continue
+            for number, line in enumerate(lines, 1):
+                found = pattern.search(line)
+                if found is None:
+                    continue
+                inline = line.find("*>")
+                if line[6:7] in ("*", "/") or 0 <= inline < found.start():
+                    rows.append({"file": shown, "line": number, "text": line.strip()})
+        if not rows:
+            return {}
+        return {
+            "commented_out": response.cap(rows, cap, "commented_out"),
+            "commented_out_note": "these name the member only on a comment "
+            "line: they do not copy it and need no recompile",
+        }
 
     def _lineage(
         self,
@@ -2897,6 +2958,64 @@ def _file_facts(parsed: ParsedProgram, unit: CobolProgram) -> dict[str, Any]:
     return result
 
 
+def _call_type(language: str, row: dict[str, Any], resolved_from: Any) -> str | None:
+    """How a CALL links to its target, said so a reader need not guess:
+    a COBOL CALL literal is static unless the DYNAM compiler option is on,
+    a CALL identifier is always dynamic, a PL/I CALL to an ENTRY declared
+    OPTIONS(FETCHABLE) fetches the module at run time."""
+    via = str(row.get("via") or "")
+    if via.startswith("EXEC CICS"):
+        return "dynamic: CICS loads the program it LINKs or XCTLs to"
+    if via != "CALL":
+        return None
+    if language == "COBOL":
+        if resolved_from is not None or row.get("dynamic"):
+            return "dynamic: CALL of a data item, its value traced"
+        return "CALL literal: static, unless compiled with the DYNAM option"
+    if language == "PL/I":
+        if row.get("fetchable"):
+            return (
+                "dynamic: the ENTRY is declared OPTIONS(FETCHABLE), so the "
+                "module is fetched at run time on the first CALL"
+            )
+        if row.get("dynamic"):
+            return "dynamic: CALL of an ENTRY variable"
+        return "static: an EXTERNAL ENTRY without FETCHABLE, resolved when linked"
+    return None
+
+
+def _label_runs_as(
+    workspace: Workspace,
+    answer: dict[str, Any],
+    rows: list[dict[str, Any]],
+    response: Response,
+) -> None:
+    """Each row's ``runs_as`` (online (CICS), batch, IMS) and, once per
+    program, why: so "the batch layer" is not read off a program's name."""
+    from .codebase_index import RunsAs
+
+    labels = _attempt(response, "online or batch", lambda: RunsAs(workspace))
+    if labels is None:
+        return
+    evidence: dict[str, str] = {}
+    for row in rows:
+        program = str(row.get("program") or "")
+        found = labels.of(program) if program else None
+        if found is None:
+            continue
+        row["runs_as"] = found["runs_as"]
+        evidence.setdefault(program, found["because"])
+    if evidence:
+        answer["runs_as_because"] = evidence
+
+
+def _call_targets(values: list[str]) -> list[str]:
+    """Traced CALL / LINK / XCTL targets as the program names they reach:
+    trailing blanks dropped (``MOVE 'SUBY    ' TO WS-P`` of a PIC X(8)
+    calls SUBY, #754), duplicates after that merged."""
+    return list(dict.fromkeys(v.rstrip() for v in values))
+
+
 def _calls(
     parsed: ParsedProgram, unit: CobolProgram, flow: Any, response: Response
 ) -> list[dict[str, Any]]:
@@ -2916,6 +3035,7 @@ def _calls(
                     tracker = DynamicCallAnalyzer()
                     tracker.analyze(unit)
                 values, incomplete = tracker.resolve_variable(target)
+                values = _call_targets(values)
                 row["candidates"] = values
                 row["candidates_complete"] = bool(values) and not incomplete
                 nested = [v for v in values if unit.nested_program_called(v)]
@@ -2956,6 +3076,7 @@ def _calls(
                     tracker = DynamicCallAnalyzer()
                     tracker.analyze(unit)
                 values, incomplete = tracker.resolve_variable(linked)
+                values = _call_targets(values)
                 row["candidates"] = values
                 row["candidates_complete"] = bool(values) and not incomplete
             rows[(linked.upper(), command)] = row
