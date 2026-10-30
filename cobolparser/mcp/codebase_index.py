@@ -63,6 +63,11 @@ class UnitFacts:
     #: ``COBOL``, or ``PL/I`` / ``assembler`` for a source read through a
     #: sibling parser (:mod:`.languages`).
     language: str = "COBOL"
+    #: The services it requests itself (``CICS``, ``DB2 SQL``, ``IMS``,
+    #: ``MQ``), and whether its LINKAGE SECTION declares DFHCOMMAREA:
+    #: what ``RunsAs`` reads.
+    services: list[str] = field(default_factory=list)
+    commarea: bool = False
 
     @property
     def is_call_target(self) -> bool:
@@ -254,6 +259,7 @@ def _absorb_other_languages(
                 entries=list(source.entries),
                 calls=source.calls,
                 language=source.language,
+                services=sorted({str(s.get("kind")) for s in source.services}),
             )
         )
         for include in source.includes:
@@ -609,3 +615,122 @@ def call_chain(
                 "programs below that are not listed"
             )
     return rows, notes
+
+
+#: DL/I call interfaces: a CALL to one is an IMS request, not a program.
+_DLI_INTERFACES = frozenset({"CBLTDLI", "AIBTDLI", "CEETDLI", "AERTDLI"})
+
+
+def unit_services(unit: Any) -> list[str]:
+    """The services a COBOL unit requests itself: ``CICS``, ``DB2 SQL``,
+    ``IMS`` (EXEC DLI or a CALL to a DL/I interface), the vocabulary of a
+    PL/I or assembler source's ``services``."""
+    from .tools import _own_statements
+
+    found: set[str] = set()
+    for statement in _own_statements(unit):
+        kind = type(statement).__name__
+        if kind == "ExecCicsStatement":
+            found.add("CICS")
+        elif kind == "ExecSQLStatement":
+            found.add("DB2 SQL")
+        elif kind == "ExecImsStatement":
+            found.add("IMS")
+        elif kind == "CallStatement":
+            target = str(getattr(statement, "called_program", "") or "").upper()
+            if target.strip("'\"") in _DLI_INTERFACES:
+                found.add("IMS")
+    return sorted(found)
+
+
+def unit_commarea(unit: Any) -> bool:
+    """Whether the unit's LINKAGE SECTION declares DFHCOMMAREA: a program
+    CICS LINKs or XCTLs to, whether or not it issues EXEC CICS itself."""
+    from .tools import _walk_data_items
+
+    return any(
+        found.section == "LINKAGE" and found.item.name.upper() == "DFHCOMMAREA"
+        for found in _walk_data_items(unit)
+    )
+
+
+class RunsAs:
+    """Whether a program runs online under CICS, in batch, or under IMS,
+    from what the index and the JCL know, with the evidence: its own EXEC
+    CICS or DFHCOMMAREA, a JCL step that runs it, else what its callers
+    are. Absent when nothing says, never guessed from a name."""
+
+    def __init__(self, workspace: Workspace) -> None:
+        self.workspace = workspace
+        self.index = programs_index(workspace)
+        self._callers: dict[str, set[str]] | None = None
+        self._jcl: set[str] | None = None
+        self._held: dict[str, dict[str, str] | None] = {}
+
+    def callers(self) -> dict[str, set[str]]:
+        if self._callers is None:
+            self._callers = {}
+            for unit in self.index.units:
+                for row in unit.calls:
+                    targets = {str(row.get("program") or "").upper()}
+                    if row.get("dynamic"):
+                        targets = {str(c).upper() for c in row.get("candidates") or []}
+                    for target in targets - {""}:
+                        self._callers.setdefault(target, set()).add(
+                            unit.program_id.upper()
+                        )
+        return self._callers
+
+    def jcl(self) -> set[str]:
+        if self._jcl is None:
+            from .jcl_tools import programs_run_by_jcl
+
+            self._jcl = programs_run_by_jcl(self.workspace)
+        return self._jcl
+
+    def own(self, program: str) -> dict[str, str] | None:
+        """What the program itself says: EXEC CICS, DFHCOMMAREA, a JCL
+        step, DL/I calls."""
+        units = self.index.units_named(program)
+        services = {s for u in units for s in u.services}
+        if "CICS" in services:
+            return {"runs_as": "online (CICS)", "because": "it issues EXEC CICS"}
+        if any(u.commarea for u in units):
+            return {
+                "runs_as": "online (CICS)",
+                "because": "its LINKAGE SECTION declares DFHCOMMAREA, the "
+                "COMMAREA a CICS LINK or XCTL passes",
+            }
+        if program.upper() in self.jcl():
+            return {"runs_as": "batch", "because": "a JCL step runs it"}
+        if "IMS" in services:
+            return {"runs_as": "IMS", "because": "it issues DL/I calls"}
+        return None
+
+    def of(self, program: str) -> dict[str, str] | None:
+        name = program.upper()
+        if name not in self._held:
+            self._held[name] = self._find(name)
+        return self._held[name]
+
+    def _find(self, name: str) -> dict[str, str] | None:
+        found = self.own(name)
+        if found is not None:
+            return found
+        by_kind: dict[str, list[str]] = {}
+        for caller in sorted(self.callers().get(name, set()) - {name}):
+            theirs = self.own(caller)
+            if theirs is not None:
+                by_kind.setdefault(theirs["runs_as"], []).append(caller)
+        if not by_kind:
+            return None
+        kinds = sorted(by_kind)
+        named = "; ".join(
+            f"{kind}: {', '.join(by_kind[kind][:5])}"
+            + (f" and {len(by_kind[kind]) - 5} more" if len(by_kind[kind]) > 5 else "")
+            for kind in kinds
+        )
+        return {
+            "runs_as": " and ".join(kinds),
+            "because": f"a subroutine; its callers run {named}",
+        }

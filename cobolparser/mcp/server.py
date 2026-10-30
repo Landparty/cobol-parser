@@ -454,7 +454,10 @@ def build_server(
     ) -> dict[str, Any]:
         """Every PERFORM / GO TO / fall-through into a paragraph, and whether
         it is reachable; for a PROGRAM-ID, every CALL / LINK / XCTL to it
-        under the root."""
+        under the root, each caller with how the call links (call_type:
+        static, dynamic, PL/I FETCHABLE) and whether it runs online, in
+        batch or under IMS (runs_as, evidence in runs_as_because): quote
+        those rather than infer them from program names."""
         return await off_loop(
             "callers_of", lambda: tools.callers_of(file, name, program, limit), ctx
         )
@@ -488,7 +491,8 @@ def build_server(
     ) -> dict[str, Any]:
         """What a change reaches: for a copybook, every program COPYing it
         (each site says COPY or EXEC SQL INCLUDE: only the INCLUDEs go
-        through the DB2 precompiler); for a field, everything its value
+        through the DB2 precompiler; commented_out lists programs whose only
+        COPY of it is on a comment line, so they are not affected); for a field, everything its value
         flows into across programs, files, CALLs and DB2 columns."""
         return await off_loop(
             "impact_of_change",

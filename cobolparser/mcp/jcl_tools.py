@@ -1605,6 +1605,21 @@ def run_by(workspace: Workspace, names: set[str]) -> list[dict[str, Any]] | None
     return rows
 
 
+def programs_run_by_jcl(workspace: Workspace) -> set[str]:
+    """Every program name a JCL step under the root runs (``PGM=``, or a
+    launcher's ``RUN PROGRAM`` / ``PARM``), procedures expanded; empty
+    without the ``[jcl]`` extra."""
+    if not jcl_available():
+        return set()
+    names: set[str] = set()
+    for jfile in jcl_index(workspace).parsed():
+        assert jfile.result is not None
+        for job in jfile.result.jobs:
+            for step in job.steps:
+                names.update(p.upper() for p in step.effective_programs())
+    return names
+
+
 def step_dds(
     workspace: Workspace, names: set[str]
 ) -> list[tuple[str, dict[str, str | None]]]:
