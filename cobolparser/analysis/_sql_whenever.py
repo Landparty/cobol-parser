@@ -35,6 +35,10 @@ _NON_EXECUTABLE_SQL_TYPES = frozenset(
     {"DECLARE CURSOR", "DECLARE TABLE", "INCLUDE", "WHENEVER"}
 )
 _NON_EXECUTABLE_PREFIXES = ("BEGIN DECLARE SECTION", "END DECLARE SECTION")
+#: ``DECLARE GLOBAL TEMPORARY TABLE`` is an executable statement (it sets
+#: SQLCODE, so WHENEVER covers it) even though the parser files it under
+#: ``DECLARE TABLE`` with the DCLGEN declarations.
+_EXECUTABLE_DECLARE_PREFIXES = ("DECLARE GLOBAL TEMPORARY TABLE",)
 
 
 def _directive(stmt: Any) -> tuple[str, str | None] | None:
@@ -59,9 +63,11 @@ def whenever_goto_target(stmt: Any) -> str | None:
 
 
 def _is_executable(stmt: ExecSQLStatement) -> bool:
+    text = " ".join((stmt.sql_text or "").upper().split())
+    if text.startswith(_EXECUTABLE_DECLARE_PREFIXES):
+        return True
     if (stmt.sql_type or "").upper() in _NON_EXECUTABLE_SQL_TYPES:
         return False
-    text = " ".join((stmt.sql_text or "").upper().split())
     return not text.startswith(_NON_EXECUTABLE_PREFIXES)
 
 

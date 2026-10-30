@@ -131,3 +131,25 @@ class TestTableFunctionDetection:
             result = analyze_sql(f"SELECT C INTO :WS-C FROM {spelling}", {})
             assert result.flows == []
             assert "a table function in FROM is not traced" in result.caveats
+
+
+class TestFromClauseShapes:
+    """``FROM FINAL TABLE (INSERT ...)`` is not a table named FINAL, and
+    ``BANK . CUST`` (blanks around the dot) is one qualified table name."""
+
+    def test_data_change_table_reference_is_not_a_table(self) -> None:
+        for keyword in ("FINAL", "NEW", "OLD"):
+            sql = (
+                f"SELECT ID INTO :WS-ID FROM {keyword} TABLE "
+                "(INSERT INTO CUST (NAME) VALUES (:WS-NM))"
+            )
+            result = analyze_sql(sql, {})
+            assert all(flow.table != keyword for flow in result.flows)
+            assert (
+                "a data-change table reference in FROM is not traced" in result.caveats
+            )
+
+    def test_blanks_around_the_qualifier_dot(self) -> None:
+        sql = "SELECT A.NAME INTO :WS-NM FROM BANK . CUST A WHERE A.ID = :WS-ID"
+        assert _flows(sql) == [("WS-NM", "BANK.CUST", "NAME", "in", "sql")]
+        assert _keys(sql) == [("WS-ID", "BANK.CUST", "ID")]

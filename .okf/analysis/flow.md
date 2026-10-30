@@ -94,7 +94,9 @@ step deliberately.
   puts a `GO TO p` after every *executable* SQL statement that follows it in
   source order (line, column) until a later WHENEVER for the same condition
   replaces it (`CONTINUE` switches it off; DECLARE / INCLUDE / BEGIN|END
-  DECLARE SECTION are not covered). `whenever_coverage()` maps each covered
+  DECLARE SECTION are not covered, but `DECLARE GLOBAL TEMPORARY TABLE` is:
+  it is executable and sets SQLCODE, although the parser files it as a
+  `DECLARE TABLE`). `whenever_coverage()` maps each covered
   SQL statement (by `id`) to its targets, once per analysis, and both
   consumers read it so they cannot disagree:
   `DeadCodeAnalyzer._collect_sql_whenever_refs` adds a GO TO-shaped reference

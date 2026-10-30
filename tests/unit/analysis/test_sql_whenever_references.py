@@ -255,3 +255,32 @@ class TestCoverageIsSourceOrder:
             for e in flow.edges
             if e.edge_type is FlowEdgeType.SQL_WHENEVER
         ] == [("MAIN-PARA", "SQL-ERR")]
+
+
+DGTT_SOURCE = """\
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. WHDGTT.
+       DATA DIVISION.
+       WORKING-STORAGE SECTION.
+           EXEC SQL INCLUDE SQLCA END-EXEC.
+       PROCEDURE DIVISION.
+       MAIN-PARA.
+           EXEC SQL WHENEVER SQLERROR GO TO ERR-PARA END-EXEC.
+           EXEC SQL
+             DECLARE GLOBAL TEMPORARY TABLE SESSION.T1 (C1 INT)
+           END-EXEC.
+           STOP RUN.
+       ERR-PARA.
+           DISPLAY 'ERR'.
+           STOP RUN.
+"""
+
+
+def test_declare_global_temporary_table_is_covered() -> None:
+    """DECLARE GLOBAL TEMPORARY TABLE is executable SQL (it sets SQLCODE),
+    so the WHENEVER SQLERROR handler is reached from it, unlike a DCLGEN
+    DECLARE TABLE."""
+    ast = parse_cobol(DGTT_SOURCE).ast
+    assert ast is not None
+    assert [d.name for d in DeadCodeAnalyzer().analyze(ast).dead_items] == []
+    assert ProgramFlowAnalyzer().analyze(ast).unreachable_nodes == []

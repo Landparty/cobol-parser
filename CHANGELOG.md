@@ -118,6 +118,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+* **`dead-code` / `program-flow`: `DECLARE GLOBAL TEMPORARY TABLE` is covered
+  by `EXEC SQL WHENEVER`.** The parser files it as a `DECLARE TABLE`, so it
+  was skipped with the DCLGEN declarations and a handler reached only from it
+  was reported dead / unreachable. It is executable SQL and sets SQLCODE.
+
+* **`lineage` / `field-impact`: no phantom `FINAL` table, no `BANK..COL`.**
+  `SELECT ... FROM FINAL TABLE (INSERT ...)` (also `NEW` / `OLD TABLE`) traced
+  the SELECT list into a table named `FINAL`; it is now a caveat ("a
+  data-change table reference in FROM is not traced"). A qualified table
+  written with blanks around the dot (`FROM BANK . CUST A`) is one table,
+  `BANK.CUST`, instead of `BANK` with a garbled `BANK..NAME` port.
+
 * **A `#` in a copybook comment no longer fails the parse when the member
   has numbered blank lines.** An export that strips trailing blanks leaves
   each empty record as its sequence number alone (`000300`); the
