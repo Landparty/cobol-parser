@@ -413,3 +413,82 @@ class TestReviewFixes:
         missing = graph.impact("NO-SUCH-FIELD")
         assert not missing.start_found
         assert missing.to_dict()["start_found"] is False
+
+
+def _opaque_caller(fields: int) -> dict:
+    """A program passing a *fields*-field record BY REFERENCE to a callee
+    that is not in the scan, then writing it out."""
+    parms = "\n".join(f"          05 WS-P{i} PIC X(4)." for i in range(fields))
+    outs = "\n".join(f"          05 OUT-F{i} PIC X(4)." for i in range(fields))
+    moves = "\n".join(f"           MOVE WS-P{i} TO OUT-F{i}." for i in range(fields))
+    source = f"""\
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. CALLER.
+       ENVIRONMENT DIVISION.
+       INPUT-OUTPUT SECTION.
+       FILE-CONTROL.
+           SELECT OUTF ASSIGN TO OUTDD.
+       DATA DIVISION.
+       FILE SECTION.
+       FD OUTF.
+       01 OUT-REC.
+{outs}
+       WORKING-STORAGE SECTION.
+       01 WS-IN PIC X(4).
+       01 WS-PARM.
+{parms}
+       PROCEDURE DIVISION.
+           MOVE WS-IN TO WS-P0.
+           CALL 'EXTSUB' USING WS-PARM.
+           CALL 'EXTSUB' USING WS-PARM.
+{moves}
+           WRITE OUT-REC.
+           GOBACK.
+"""
+    result = parse_cobol(source, "CALLER.cbl")
+    assert result.ast is not None
+    return FieldFlowAnalyzer().analyze(result.ast).to_dict()
+
+
+class TestOpaqueCallHub:
+    def test_join_is_linear_in_the_arguments(self) -> None:
+        fields = 40
+        graph = LineageGraph([_opaque_caller(fields)])
+        edges = [e for e in graph.join_edges() if e["kind"] == "opaque-call"]
+        # One hub per program and callee: an edge per argument slice sent and
+        # one per slice handed back, not one per pair.
+        assert len(edges) <= 4 * fields
+        assert {tuple(e["target"]) for e in edges} >= {("O", "CALLER", "EXTSUB")}
+        assert graph.opaque_callees == ["EXTSUB"]
+
+    def test_every_argument_still_reaches_every_returned_one(self) -> None:
+        graph = LineageGraph([_opaque_caller(6)])
+        result = graph.impact("WS-IN", program="CALLER")
+        hits = _hits(result)
+        for i in range(6):
+            assert ("CALLER", f"OUT-REC.OUT-F{i}") in hits
+        # The hub is neither a hit nor a hop: the path reads as the CALL.
+        assert all(h.node_kind != "call" for h in result.hits)
+        path = hits[("CALLER", "OUT-REC.OUT-F5")].path
+        assert "opaque-call" in [hop.kind for hop in path]
+        assert all(not hop.node.startswith("CALL ") for hop in path)
+        # Through the callee costs no depth: it stays in the program.
+        shallow = graph.impact("WS-IN", program="CALLER", depth=0)
+        assert ("CALLER", "OUT-REC.OUT-F5") in _hits(shallow)
+        assert any("EXTSUB" in c for c in result.caveats)
+
+    def test_backward_through_the_hub(self) -> None:
+        graph = LineageGraph([_opaque_caller(6)])
+        result = graph.impact("OUT-F5", program="CALLER", direction="backward")
+        assert ("CALLER", "WS-IN") in _hits(result)
+
+    def test_hub_survives_the_round_trip(self) -> None:
+        import json
+
+        report = _opaque_caller(6)
+        first = LineageGraph([report])
+        stored = json.loads(json.dumps(first.join_edges()))
+        again = LineageGraph([report], join_edges=stored)
+        assert again.opaque_callees == ["EXTSUB"]
+        query = lambda g: g.impact("WS-IN", program="CALLER").to_dict()  # noqa: E731
+        assert query(again) == query(first)

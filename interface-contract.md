@@ -115,7 +115,15 @@ graph = LineageGraph(reports, join_edges=state["edges"],
   the start field / table / dataset).
 - `join_edges()` entries: `{source, target, kind, line, statement,
   confidence, cross}`, node keys as lists (`["P", program, kind, name,
-  offset, length]`, `["D", dataset, offset, length]`, `["T", "TABLE.COLUMN"]`).
+  offset, length]`, `["D", dataset, offset, length]`, `["T", "TABLE.COLUMN"]`,
+  and (2026-10-30) `["O", program, callee]`: the hub of a program's
+  `opaque-call` edges to one callee, which replaces the edge per argument
+  pair. Stored edges of either shape load. An `O` key belongs to `program`
+  but is neither a hit nor a hop of an impact path.
+- Additive, `lineage_version` unchanged (2026-10-30): `FieldFlowAnalyzer`
+  takes `summary_limit` (default `DEFAULT_SUMMARY_LIMIT`, 10,000); past it
+  `summary` stops, a caveat says so and `statistics.summary_truncated` is
+  true.
 - `jobs_from_sources` needs jcl-parser importable; it raises `ImportError`
   otherwise.
 

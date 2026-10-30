@@ -121,6 +121,15 @@ from .xref import (
 #: and unique keys for same-named items (``FILLER#2``).
 LINEAGE_VERSION = "2"
 
+#: The default ``FieldFlowAnalyzer(summary_limit=...)``: the most
+#: port-to-port flows a report's ``summary`` lists. Every input port field
+#: can reach every output port field, so a program funnelling hundreds of
+#: fields through one work area has a summary quadratic in its fields (one
+#: program of a real codebase: 604,000 flows, 272 MB of JSON). Past the limit
+#: the summary stops and a caveat says so; ``edges``, which ``LineageGraph``
+#: traces, are never cut.
+DEFAULT_SUMMARY_LIMIT = 10_000
+
 ITEM = "item"
 PORT_FILE = "file"
 PORT_CALL = "call"
@@ -482,6 +491,8 @@ class FieldFlowReport:
     #: INTO): which fields meet depends on both layouts, so a change to one
     #: record's layout moves what the other receives (``field_widening``).
     overlays: list[Overlay] = field(default_factory=list)
+    #: True when ``summary`` stopped at the analyzer's ``summary_limit``.
+    summary_truncated: bool = False
 
     def port(self, kind: str, key: str) -> Port | None:
         for port in self.ports:
@@ -507,6 +518,7 @@ class FieldFlowReport:
                 "ports": len(self.ports),
                 "edges": len(self.edges),
                 "summary": len(self.summary),
+                "summary_truncated": self.summary_truncated,
                 "key_uses": len(self.key_uses),
                 "in_place": len(self.in_place),
             },
@@ -681,9 +693,15 @@ class FieldFlowAnalyzer:
     Follows this package's ``<Analyzer>().analyze(ast) -> <Report>`` shape.
     Single program unit: a contained program's statements are not walked
     (analyze each unit from ``ast.program_units()`` on its own).
+
+    ``summary_limit`` caps the report's port-to-port ``summary`` (see
+    :data:`DEFAULT_SUMMARY_LIMIT`); ``None`` lists every flow, ``0`` none.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, summary_limit: int | None = DEFAULT_SUMMARY_LIMIT) -> None:
+        if summary_limit is not None and summary_limit < 0:
+            raise ValueError("summary_limit must be >= 0 or None")
+        self.summary_limit = summary_limit
         self._xref = XrefAnalyzer()
         self._reset()
 
@@ -808,7 +826,18 @@ class FieldFlowAnalyzer:
             self._in_place.values(),
             key=lambda e: (e.line, e.source.sort_key(), e.kind),
         )
-        report.summary = self._summarize(report.edges, report.in_place)
+        report.summary, report.summary_truncated = self._summarize(
+            report.edges, report.in_place, self.summary_limit
+        )
+        if report.summary_truncated and not self.summary_limit:
+            self._caveat("the port-to-port summary was not computed (summary_limit=0)")
+        elif report.summary_truncated:
+            self._caveat(
+                f"the port-to-port summary stops at {self.summary_limit} flows "
+                "(summary_limit): more input fields reach more output fields "
+                "than that; the edges, and the lineage traced from them, are "
+                "complete"
+            )
         report.overlays = sorted(
             self._overlays.values(), key=lambda o: (o.line, o.source, o.target)
         )
@@ -2226,12 +2255,20 @@ class FieldFlowAnalyzer:
 
     @staticmethod
     def _summarize(
-        edges: list[LineageEdge], in_place: Sequence[LineageEdge] = ()
-    ) -> list[PortFlow]:
+        edges: list[LineageEdge],
+        in_place: Sequence[LineageEdge] = (),
+        limit: int | None = None,
+    ) -> tuple[list[PortFlow], bool]:
         """Every input-port field -> every output-port field it reaches,
         through item nodes only (a port is a boundary, never a pass-through
         inside one program). A path through an item changed in place
-        (``in_place``) also carries that change's kind (#748)."""
+        (``in_place``) also carries that change's kind (#748).
+
+        Stops once *limit* flows are found (the input ports in sort order,
+        each one's flows complete up to the limit); the flag says whether it
+        did."""
+        if limit == 0:
+            return [], True
         changed: dict[LineageNode, list[str]] = {}
         for edge in in_place:
             changed.setdefault(edge.source, []).append(edge.kind)
@@ -2248,7 +2285,10 @@ class FieldFlowAnalyzer:
         # field of a record to an unrelated one through the alias covering
         # both, two occurrence edges one occurrence into another.
         State = tuple[LineageNode, int]
+        truncated = False
         for start in starts:
+            if truncated:
+                break
             parent: dict[State, tuple[State, LineageEdge]] = {}
             first: State = (start, 0)
             queue: deque[State] = deque([first])
@@ -2268,6 +2308,10 @@ class FieldFlowAnalyzer:
                     if edge.target.is_port:
                         if (start, edge.target) in flows:
                             continue
+                        if limit is not None and len(flows) >= limit:
+                            truncated = True
+                            queue.clear()
+                            break
                         path: list[LineageEdge] = []
                         cursor = nxt
                         while cursor != first:
@@ -2287,6 +2331,7 @@ class FieldFlowAnalyzer:
                         )
                         continue
                     queue.append(nxt)
-        return sorted(
+        ordered = sorted(
             flows.values(), key=lambda f: (f.source.sort_key(), f.target.sort_key())
         )
+        return ordered, truncated
