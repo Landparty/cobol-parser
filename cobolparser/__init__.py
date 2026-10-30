@@ -231,7 +231,7 @@ from .scan import (
 CobolParseError = ParseError
 
 # Version info
-__version__ = "3.1.1"  # x-release-please-version
+__version__ = "3.2.0"  # x-release-please-version
 __author__ = "Samuel Dion"
 __license__ = "AGPL-3.0-or-later"
 
