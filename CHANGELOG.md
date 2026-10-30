@@ -118,6 +118,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+* **Lineage no longer invents a table from a correlation name** (#782).
+  `SELECT X.BAL ... FROM (SELECT ...) X`, `TABLE(F(...)) AS Q` and
+  `FINAL TABLE (INSERT ...) F` gave ports on tables `X`, `Q` and `F`. A
+  column qualified by an untraced FROM item, or by a name that matches no
+  FROM table or alias, now gives no flow (the latter with a caveat), and an
+  unqualified column beside an untraced item is inexact.
 * **Field lineage no longer grows quadratically on wide programs.** A
   program funnelling hundreds of fields through one work area produced a
   port-to-port `summary` of fields x fields flows (604,000 flows, 272 MB of

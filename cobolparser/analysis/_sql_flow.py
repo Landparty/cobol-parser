@@ -306,8 +306,29 @@ def _columns_in(expr: str) -> list[tuple[str | None, str]]:
     return out
 
 
+def _skipped_correlation(piece: str) -> str | None:
+    """The correlation name after a parenthesised FROM item (a sub-select,
+    ``TABLE(...)`` or ``FINAL TABLE (...)``): ``(...) AS X`` -> ``X``."""
+    _inner, after = _balanced(piece, piece.index("("))
+    words = piece[after:].split()
+    if words and words[0] == "AS":
+        words = words[1:]
+    if (
+        words
+        and words[0] not in _SQL_WORDS
+        and re.fullmatch(r"[A-Z0-9_#@$-]+", words[0])
+    ):
+        return words[0]
+    return None
+
+
 def _from_tables(from_body: str) -> tuple[dict[str, str], list[str], list[str]]:
-    """alias -> table, the table list in order, and caveats."""
+    """alias -> table, the table list in order, and caveats.
+
+    A FROM item that is not traced (a sub-select, a table function, a
+    data-change reference) maps its correlation name to ``""``, so a column
+    qualified by it is not mistaken for a column of a table of that name.
+    """
     caveats: list[str] = []
     aliases: dict[str, str] = {}
     tables: list[str] = []
@@ -318,16 +339,21 @@ def _from_tables(from_body: str) -> tuple[dict[str, str], list[str], list[str]]:
         piece = re.split(r"\bON\b", piece, maxsplit=1)[0].strip()
         if not piece:
             continue
+        skipped = None
         if piece.startswith("("):
-            caveats.append("a sub-select in FROM is not traced")
-            continue
-        if re.match(r"(?:FINAL|NEW|OLD)\s+TABLE\s*\(", piece):
+            skipped = "a sub-select in FROM is not traced"
+        elif re.match(r"(?:FINAL|NEW|OLD)\s+TABLE\s*\(", piece):
             # SELECT ... FROM FINAL TABLE (INSERT ...): the rows come from
             # the data-change statement inside, not from a table named FINAL.
-            caveats.append("a data-change table reference in FROM is not traced")
-            continue
-        if re.match(r"TABLE\s*\(", piece):
-            caveats.append("a table function in FROM is not traced")
+            skipped = "a data-change table reference in FROM is not traced"
+        elif re.match(r"TABLE\s*\(", piece):
+            skipped = "a table function in FROM is not traced"
+        if skipped is not None:
+            caveats.append(skipped)
+            name = _skipped_correlation(piece)
+            # Even with no correlation name the item's columns are in scope,
+            # so an unqualified column may come from it: "" marks that.
+            aliases[name or ""] = ""
             continue
         # ``BANK . ACCOUNT`` is one qualified name: join it before splitting
         # the piece into table and correlation name.
@@ -349,11 +375,14 @@ def _resolve_column(
 ) -> list[tuple[str, str, bool]]:
     if qualifier is not None:
         table = aliases.get(qualifier)
-        if table is not None:
+        if table:
             return [(table, column, True)]
-        return [(qualifier, column, False)]
+        # An untraced FROM item's correlation name (""), or a qualifier that
+        # names no FROM item: no table of that name is invented.
+        return []
+    untraced = "" in aliases.values()
     if len(tables) == 1:
-        return [(tables[0], column, True)]
+        return [(tables[0], column, not untraced)]
     return [(table, column, False) for table in tables]
 
 
@@ -405,6 +434,11 @@ def _select_flows(
             result.caveats.append("SELECT * INTO is not traced column by column")
             continue
         for qualifier, column in _columns_in(expr):
+            if qualifier is not None and qualifier not in aliases:
+                result.caveats.append(
+                    f"{qualifier}.{column} names no table or correlation name "
+                    "in FROM; not traced"
+                )
             for table, col, exact in _resolve_column(
                 qualifier, column, aliases, tables
             ):

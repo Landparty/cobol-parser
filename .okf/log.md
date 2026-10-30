@@ -32,6 +32,16 @@ executable SQL although the parser files it as `DECLARE TABLE`, so a handler
 reached only from it is no longer dead. Tests:
 `tests/unit/analysis/test_sql_whenever_references.py`.
 
+## 2026-10-30 -- lineage: correlation names of untraced FROM items (#782)
+
+[analysis/lineage.md](analysis/lineage.md) (`sql` port row): `_from_tables`
+maps the correlation name of a skipped FROM item (sub-select, `TABLE(...)`,
+`FINAL TABLE (...)`) to `""`, and `_resolve_column` returns nothing for it or
+for a qualifier that names no FROM item, instead of inventing a table of that
+name (`X.BAL` -> table `X`). An unqualified column beside a skipped item is
+inexact. Tests: `TestUntracedCorrelationNames` in
+`tests/unit/analysis/test_sql_flow.py`.
+
 ## 2026-10-30 -- lineage: FROM FINAL TABLE (...) and `BANK . CUST`
 
 [analysis/lineage.md](analysis/lineage.md) (`sql` port row): `_from_tables`
