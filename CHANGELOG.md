@@ -118,6 +118,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+* **MCP `check_claims` no longer confirms false claims** (#776, #778).
+  `flows_to` matched the target as a substring, so `CUSTOMER-ID` was
+  "reached" through `WS-CUSTOMER-ID` and `BANK.CUST` through
+  `BANK.CUST.HIST`; it now matches whole names only (a GDG base and an
+  unqualified table name still count). `writes_field` and `sets_only_in`
+  counted only statements naming the field; a MOVE / INITIALIZE / READ INTO
+  of a parent group, or a write to a REDEFINES item covering it, now counts
+  too, and a partial overlap makes the claim not checkable.
 * **Lineage no longer invents a table from a correlation name** (#782).
   `SELECT X.BAL ... FROM (SELECT ...) X`, `TABLE(F(...)) AS Q` and
   `FINAL TABLE (INSERT ...) F` gave ports on tables `X`, `Q` and `F`. A
