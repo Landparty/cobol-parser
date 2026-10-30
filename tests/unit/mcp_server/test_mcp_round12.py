@@ -135,10 +135,15 @@ class TestJobsByEffect:
         assert effect == {
             "change_it": {
                 "count": 1,
-                "jobs": {"LOAD": ["COPY: write", "DEL: DELETE"]},
+                "jobs": {
+                    "LOAD": ["DEL: DELETE", "COPY: write by IEBGENER from PROD.IN"]
+                },
             },
             "only_read_it": {"count": 1, "jobs": ["REPORT"]},
         }
+        uses = tools.dataset_users("PROD.**")["answer"]["uses"]
+        (copy,) = [u for u in uses if u["dataset"] == "PROD.IN"]
+        assert copy["copied_to"] == ["PROD.MASTER"]
 
 
 class TestMemberFilesToChange:
