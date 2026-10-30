@@ -1973,6 +1973,31 @@ def _idcams_named(step: JobStep) -> list[tuple[str, str, str]]:
     return found
 
 
+def _jobs_by_effect(found: list[dict[str, Any]]) -> dict[str, Any]:
+    """The jobs that change the dataset (any use but a read: a write,
+    load, delete, define, or DISP=OLD with nothing more known), each with
+    its steps and what they do, and the jobs that only read it. Counted,
+    so an answer's "N jobs change it" is never a guess."""
+    changes: dict[str, list[str]] = {}
+    readers: set[str] = set()
+    for row in found:
+        job = str(row["job"])
+        if row["access"] == "read":
+            readers.add(job)
+            continue
+        what = row.get("command") or row["access"]
+        said = f"{row['step'] or 'JOB'}: {what}"
+        if row["access"] not in what.lower():
+            said += f" ({row['access']})"
+        if said not in changes.setdefault(job, []):
+            changes[job].append(said)
+    only_read = sorted(readers - set(changes))
+    return {
+        "change_it": {"count": len(changes), "jobs": dict(sorted(changes.items()))},
+        "only_read_it": {"count": len(only_read), "jobs": only_read},
+    }
+
+
 def _combine(use: str, disposition_access: str) -> str:
     """A program's *use* of a file, said with what DISP adds: a written
     dataset DISP=NEW is created; DISP=MOD with OUTPUT or EXTEND extends."""
@@ -2192,6 +2217,7 @@ def dataset_users(
         "use_count": len(found),
         "by_access": by_access,
         "jobs": sorted({row["job"] for row in found}),
+        "jobs_by_effect": _jobs_by_effect(found),
         "uses": response.cap(found, clamp_limit(limit), "uses"),
         "jcl_files": len(index.files),
         "access_legend": "access_from program: the COBOL program's OPEN mode "

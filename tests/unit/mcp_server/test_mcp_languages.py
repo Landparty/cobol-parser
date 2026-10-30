@@ -168,6 +168,8 @@ class TestCallGraph:
                 "include_sites": [{"file": "PAYDRV.pli", "line": 3}],
             }
         ]
+        # No COBOL program copies PAYREC.cpy: one file spells the layout.
+        assert "member_files_to_change" not in answer
         assert answer["coverage"]["files_read"] == {
             "COBOL": 1,
             "PL/I": 1,

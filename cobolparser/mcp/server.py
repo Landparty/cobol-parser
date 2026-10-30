@@ -334,7 +334,9 @@ def build_server(
         ctx: MCPContext | None = None,
     ) -> dict[str, Any]:
         """Parsed statements matching every filter given (copybook code
-        included, comments not), in one file or under the root."""
+        included, comments not), in one file or under the root. With
+        operand, programs_by_role counts the programs that change it and
+        those that only read it."""
         return await off_loop(
             "find_statements",
             lambda: tools.find_statements(
@@ -759,7 +761,8 @@ def build_server(
         limit: Limit = None,
     ) -> dict[str, Any]:
         """Every job, step and program that uses a dataset, and whether it
-        reads, creates, extends or writes it."""
+        reads, creates, extends or writes it; jobs_by_effect counts the
+        jobs that change it and those that only read it."""
         return await off_loop(
             "dataset_users", lambda: tools.dataset_users(dataset, limit)
         )

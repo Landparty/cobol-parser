@@ -1514,13 +1514,12 @@ class CobolTools:
                 "fields": response.cap(report.fields, cap, "fields"),
                 "coverage": _coverage(self.workspace, index),
                 **(
-                    {
-                        "included_by_other_languages": response.cap(
-                            self._included_rows(index, included, member),
-                            cap,
-                            "included_by_other_languages",
-                        )
-                    }
+                    _other_language_members(
+                        [self.workspace.display(p) for p in report.paths],
+                        self._included_rows(index, included, member),
+                        response,
+                        cap,
+                    )
                     if included
                     else {}
                 ),
@@ -2824,6 +2823,31 @@ def _statement_counts(direct: list[dict[str, Any]]) -> dict[str, Any]:
     return {
         "brought_in_by": {k: {"count": len(v), "programs": v} for k, v in by.items()}
     }
+
+
+def _other_language_members(
+    resolved: list[str],
+    rows: list[dict[str, Any]],
+    response: Response,
+    cap: int,
+) -> dict[str, Any]:
+    """``included_by_other_languages`` and, when those programs include
+    their own file of the member, ``member_files_to_change``: every file
+    that spells the layout. A copybook and a PL/I or assembler include
+    of the same name are separate files, so a change is made in each."""
+    out: dict[str, Any] = {
+        "included_by_other_languages": response.cap(
+            rows, cap, "included_by_other_languages"
+        )
+    }
+    others = [f for r in rows for f in r.get("member_files", []) if f not in resolved]
+    if others:
+        out["member_files_to_change"] = {
+            "files": list(dict.fromkeys([*resolved, *others])),
+            "note": "each language includes its own file of this member: a "
+            "layout change has to be made in every one of them",
+        }
+    return out
 
 
 _NEIGHBOURS_SHOWN = 25

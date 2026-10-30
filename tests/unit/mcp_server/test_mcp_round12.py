@@ -1,6 +1,8 @@
-"""What the twelfth benchmark round asked of the server: a recompile answer
-that names the programs next door that need no recompile, and a job flow
-that says how many steps run, in what order and under what condition."""
+"""What benchmark rounds 12 to 14 asked of the server: a recompile answer
+that names the programs next door that need no recompile, and every file
+of the member to edit; a job flow that says how many steps run, in what
+order and under what condition; and writers and readers counted, for a
+field and for a dataset."""
 
 from __future__ import annotations
 
@@ -74,3 +76,87 @@ class TestJobFlowRunOrder:
             "FIRST (IEFBR14) -> SECOND (REPORT, runs only if every earlier "
             "step's return code is 0)"
         )
+
+
+ACCOUNTS = """\
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. {name}.
+       DATA DIVISION.
+       WORKING-STORAGE SECTION.
+       01  BAL      PIC 9(5).
+       01  OUT      PIC 9(5).
+       PROCEDURE DIVISION.
+           {body}
+           GOBACK.
+"""
+
+
+class TestProgramsByRole:
+    def test_writers_and_readers_counted(self, tmp_path: Path) -> None:
+        write(tmp_path, "POST.cbl", ACCOUNTS.format(name="POST", body="ADD 1 TO BAL"))
+        write(
+            tmp_path, "SHOW.cbl", ACCOUNTS.format(name="SHOW", body="MOVE BAL TO OUT")
+        )
+        tools = CobolTools(Workspace(tmp_path, ProjectConfig()))
+        roles = tools.find_statements(operand="BAL")["answer"]["programs_by_role"]
+        assert roles["changed_by"] == {
+            "count": 1,
+            "programs": {"POST": ["ADD at POST.cbl:8"]},
+        }
+        assert roles["only_read_by"] == {"count": 1, "programs": ["SHOW"]}
+
+
+LOAD = """\
+//LOAD     JOB (A),'X'
+//DEL      EXEC PGM=IDCAMS
+//SYSIN    DD  *
+  DELETE PROD.MASTER CLUSTER
+/*
+//COPY     EXEC PGM=IEBGENER
+//SYSUT1   DD  DSN=PROD.IN,DISP=SHR
+//SYSUT2   DD  DSN=PROD.MASTER,DISP=OLD
+"""
+
+REPORT = """\
+//REPORT   JOB (A),'X'
+//COPY     EXEC PGM=IEBGENER
+//SYSUT1   DD  DSN=PROD.MASTER,DISP=SHR
+//SYSUT2   DD  SYSOUT=*
+"""
+
+
+class TestJobsByEffect:
+    def test_changing_and_reading_jobs_counted(self, tmp_path: Path) -> None:
+        pytest.importorskip("jclparser")
+        write(tmp_path, "LOAD.jcl", LOAD)
+        write(tmp_path, "REPORT.jcl", REPORT)
+        tools = CobolTools(Workspace(tmp_path, ProjectConfig()))
+        effect = tools.dataset_users("PROD.MASTER")["answer"]["jobs_by_effect"]
+        assert effect == {
+            "change_it": {
+                "count": 1,
+                "jobs": {"LOAD": ["COPY: write", "DEL: DELETE"]},
+            },
+            "only_read_it": {"count": 1, "jobs": ["REPORT"]},
+        }
+
+
+class TestMemberFilesToChange:
+    def test_a_copybook_and_a_pli_include_of_one_member(self, tmp_path: Path) -> None:
+        pytest.importorskip("pl1_parser")
+        write(tmp_path, "cpy/PAYREC.cpy", "       01  PAYREC PIC X(10).\n")
+        write(tmp_path, "include/PAYREC.inc", " DCL 1 PAYREC CHAR(10);\n")
+        write(tmp_path, "cbl/PAYCBL.cbl", program("PAYCBL", "PAYREC"))
+        write(
+            tmp_path,
+            "pli/PAYPLI.pli",
+            " PAYPLI: PROC OPTIONS(MAIN);\n   %INCLUDE PAYREC;\n END PAYPLI;\n",
+        )
+        tools = CobolTools(
+            Workspace(tmp_path, ProjectConfig(copybook_path=(str(tmp_path / "cpy"),)))
+        )
+        answer = tools.impact_of_change("PAYREC")["answer"]
+        assert answer["member_files_to_change"]["files"] == [
+            "cpy/PAYREC.cpy",
+            "include/PAYREC.inc",
+        ]
