@@ -234,6 +234,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   section's `min_severity` and `fail_on` also reach `call-check` and
   `widen-check`). A tracked 1.4 MB `coverage.json` is removed and ignored.
 
+## [3.2.1](https://github.com/Landparty/cobol-parser/compare/v3.2.0...v3.2.1) (2026-10-30)
+
+
+### Bug Fixes
+
+* **lineage:** bound the port summary and the opaque-call join ([12fbc30](https://github.com/Landparty/cobol-parser/commit/12fbc3041b25be9a304dda16d1f34e68e668d902))
+* **lineage:** bound the port summary and the opaque-call join ([4d15a72](https://github.com/Landparty/cobol-parser/commit/4d15a72346aa9fc6a1f377b5b3de589abaa37e05))
+
 ## [3.2.0](https://github.com/Landparty/cobol-parser/compare/v3.1.1...v3.2.0) (2026-10-30)
 
 
