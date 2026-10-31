@@ -253,20 +253,145 @@ def _writes(tools: CobolTools, claim: dict[str, Any]) -> list[dict[str, Any]]:
     return rows
 
 
+def _storage_aliases(
+    tools: CobolTools, claim: dict[str, Any]
+) -> tuple[list[tuple[str, bool]], bool]:
+    """The other data items whose writes reach field O's bytes: each name
+    with whether a write of it surely overwrites all of O (an ancestor
+    group, an item covering O's bytes through REDEFINES / RENAMES) or only
+    may (a partial overlap, a table element, a duplicated name). The flag
+    is False when O's layout could not be placed, so the aliases are
+    unknown."""
+    from .envelope import Response
+    from .tools import _layout_for, _layout_index
+
+    wanted = _norm(claim.get("object")).replace(" IN ", " OF ")
+    try:
+        parsed = tools.workspace.program(claim["file"])
+        unit = parsed.unit(claim.get("program"), Response())
+    except ToolError:
+        return [], False
+    layout = _layout_index(unit, Response())
+    items = [i for key, rows in layout.items() if not key.startswith(" ") for i in rows]
+    field = _layout_for(wanted.split(" OF ")[0], wanted, layout)
+    if field is None or field.get("offset_ambiguous"):
+        return [], False
+    by_qname = {str(i["qualified_name"]): i for i in items}
+
+    def root(item: dict[str, Any]) -> str:
+        return str(item["qualified_name"]).split(".")[0]
+
+    # 01 items that share storage through REDEFINES are one area.
+    area: dict[str, str] = {}
+
+    def base(name: str) -> str:
+        while area.get(name, name) != name:
+            name = area[name]
+        return name
+
+    for item in items:
+        if item.get("level") in (1, 77) and item.get("redefines_chain"):
+            area[base(str(item["qualified_name"]))] = base(
+                str(item["redefines_chain"][-1])
+            )
+
+    def in_table(item: dict[str, Any]) -> bool:
+        qname: str | None = str(item["qualified_name"])
+        while qname:
+            current = by_qname.get(qname)
+            if current is None:
+                return False
+            if current.get("occurs"):
+                return True
+            qname = current.get("parent_qualified_name")
+        return False
+
+    f_name = str(field["qualified_name"])
+    f_start = int(field["byte_offset"])
+    f_end = f_start + int(field["byte_length"])
+    f_area = base(root(field))
+    name_counts: dict[str, int] = {}
+    for item in items:
+        name_counts[str(item["name"]).upper()] = (
+            name_counts.get(str(item["name"]).upper(), 0) + 1
+        )
+    aliases: list[tuple[str, bool]] = []
+    for item in items:
+        qname = str(item["qualified_name"])
+        if qname == f_name or base(root(item)) != f_area:
+            continue
+        start = int(item["byte_offset"])
+        end = start + int(item["byte_length"])
+        if end <= f_start or start >= f_end:
+            continue
+        ancestor = f_name.startswith(qname + ".")
+        covers = start <= f_start and end >= f_end
+        exact = (
+            covers
+            and not item.get("offset_ambiguous")
+            and (ancestor or not (in_table(item) or in_table(field)))
+            and name_counts[str(item["name"]).upper()] == 1
+        )
+        aliases.append((str(item["name"]).upper(), exact))
+    return aliases, True
+
+
+def _alias_writes(
+    tools: CobolTools, claim: dict[str, Any]
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]], bool]:
+    """Writes of field O through its storage: (sure, possible, placed).
+    Each row carries ``via``, the item it names."""
+    aliases, placed = _storage_aliases(tools, claim)
+    sure: list[dict[str, Any]] = []
+    possible: list[dict[str, Any]] = []
+    for name, exact in aliases:
+        for row in _writes(tools, {**claim, "object": name}):
+            row = {**row, "via": name}
+            # INITIALIZE ... REPLACING sets only the named categories.
+            replacing = row.get("verb") == "INITIALIZE" and "REPLACING" in _norm(
+                row.get("text")
+            )
+            (sure if exact and not replacing else possible).append(row)
+    return sure, possible, placed
+
+
 def _writes_field(tools: CobolTools, claim: dict[str, Any]) -> _Verdict:
     field_name = _norm(claim.get("object"))
-    rows = _writes(tools, claim)
+    direct = _writes(tools, claim)
+    sure, possible, _placed = _alias_writes(tools, claim)
     paragraph = _norm(claim.get("subject"))
-    if paragraph:
-        hits = [r for r in rows if _norm(r.get("paragraph")) == paragraph]
-    else:
-        hits = rows
-    if hits:
+
+    def here(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        if not paragraph:
+            return rows
+        return [r for r in rows if _norm(r.get("paragraph")) == paragraph]
+
+    where = ("in " + paragraph) if paragraph else ""
+    if here(direct):
         return (
             CONFIRMED,
-            f"{field_name} is written {'in ' + paragraph if paragraph else ''}".strip(),
-            [r["location"] for r in hits],
+            f"{field_name} is written {where}".strip(),
+            [r["location"] for r in here(direct)],
         )
+    if here(sure):
+        via = sorted({r["via"] for r in here(sure)})
+        return (
+            CONFIRMED,
+            f"{field_name} is written {where} through {', '.join(via)}, "
+            "which holds all of its bytes".replace("  ", " "),
+            [r["location"] for r in here(sure)],
+        )
+    if here(possible):
+        via = sorted({r["via"] for r in here(possible)})
+        return (
+            NOT_CHECKABLE,
+            f"{', '.join(via)} shares storage with {field_name} and is written "
+            f"{where}, but whether that write covers {field_name} is not "
+            "settled (a partial overlap, a table element, a duplicated name or "
+            "INITIALIZE REPLACING)".replace("  ", " "),
+            [r["location"] for r in here(possible)],
+        )
+    rows = direct + sure
     elsewhere = sorted({str(r.get("paragraph")) for r in rows})
     return (
         CONTRADICTED,
@@ -280,22 +405,51 @@ def _sets_only_in(tools: CobolTools, claim: dict[str, Any]) -> _Verdict:
     _need(claim, "subject")
     field_name = _norm(claim.get("object"))
     allowed = {_norm(p) for p in str(claim["subject"]).split(",") if p.strip()}
-    rows = _writes(tools, claim)
+    direct = _writes(tools, claim)
+    sure, possible, placed = _alias_writes(tools, claim)
+    rows = direct + sure
     outside = [r for r in rows if _norm(r.get("paragraph")) not in allowed]
     if outside:
         return (
             CONTRADICTED,
             f"{field_name} is also written in "
-            + ", ".join(sorted({str(r.get("paragraph")) for r in outside})),
+            + ", ".join(
+                sorted(
+                    {
+                        str(r.get("paragraph"))
+                        + (f" (through {r['via']})" if r.get("via") else "")
+                        for r in outside
+                    }
+                )
+            ),
             [r["location"] for r in outside],
+        )
+    maybe = [r for r in possible if _norm(r.get("paragraph")) not in allowed]
+    if maybe:
+        return (
+            NOT_CHECKABLE,
+            f"{field_name} may also be written in "
+            + ", ".join(
+                sorted({f"{r['paragraph']} (through {r['via']})" for r in maybe})
+            ),
+            [r["location"] for r in maybe],
         )
     if not rows:
         return CONTRADICTED, f"no statement writes {field_name}", []
+    if not placed:
+        return (
+            NOT_CHECKABLE,
+            f"every statement naming {field_name} is in "
+            f"{', '.join(sorted(allowed))}, but its byte layout could not be "
+            "placed, so writes through a parent group or a REDEFINES are not "
+            "checked",
+            [r["location"] for r in rows],
+        )
     return (
         CONFIRMED,
-        f"every write of {field_name} is in {', '.join(sorted(allowed))} "
-        "(a VALUE clause or a CALL argument passed by reference is not a "
-        "statement write)",
+        f"every write of {field_name} is in {', '.join(sorted(allowed))}, "
+        "through its parent groups and REDEFINES / RENAMES items too (a VALUE "
+        "clause or a CALL argument passed by reference is not a statement write)",
         [r["location"] for r in rows],
     )
 
@@ -310,20 +464,32 @@ def _flows_to(tools: CobolTools, claim: dict[str, Any]) -> _Verdict:
         raise ToolError(f"no field {_norm(claim['subject'])} in any report")
     hits = answer.get("hits") or []
 
+    def node_names(node: str) -> set[str]:
+        # ``PROG:WS-X``, ``PROG:console:SYSOUT@0+7``, ``SCHEMA.TABLE.COL``:
+        # whole names only, never a substring (CUSTOMER-ID is not
+        # WS-CUSTOMER-ID).
+        node = _norm(node)
+        return {node, node.split(".")[-1], node.split(":")[-1].split("@")[0]}
+
     def names(hit: dict[str, Any]) -> set[str]:
-        field = _norm(hit.get("field"))
-        found = {field, field.split(".")[-1], field.split(":")[-1].split("@")[0]}
+        return node_names(hit.get("field") or "")
+
+    def path_names(hit: dict[str, Any]) -> set[str]:
+        found: set[str] = set()
+        for step in hit.get("path") or []:
+            node = str(step).split(" (")[0]
+            found |= node_names(node) | node_names(node.split(":", 1)[-1])
         return found
 
     matched = [h for h in hits if target in names(h)]
-    matched += [
-        h for h in hits if h not in matched and target in _norm(" ".join(h["path"]))
-    ]
+    matched += [h for h in hits if h not in matched and target in path_names(h)]
     for dataset in answer.get("datasets") or []:
-        if target and target in _norm(dataset):
+        # A GDG generation (BASE(+1)) counts for its base.
+        if target and target in {_norm(dataset), _norm(dataset).split("(")[0]}:
             return CONFIRMED, f"the value reaches dataset {dataset}", []
     for table in answer.get("tables") or []:
-        if target and target in _norm(table):
+        # SCHEMA.TABLE counts for TABLE.
+        if target and target in {_norm(table), _norm(table).split(".")[-1]}:
             return CONFIRMED, f"the value reaches {table}", []
     if not matched:
         return (

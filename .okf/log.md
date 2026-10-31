@@ -32,6 +32,28 @@ executable SQL although the parser files it as `DECLARE TABLE`, so a handler
 reached only from it is no longer dead. Tests:
 `tests/unit/analysis/test_sql_whenever_references.py`.
 
+## 2026-10-30 -- MCP check_claims: whole names, writes through storage (#776, #778)
+
+[mcp.md](mcp.md) (`check_claims` row): `flows_to` matches O against whole
+names (a hit's field, a path step's node, a dataset or its GDG base, a table
+or its unqualified name), never a substring, so CUSTOMER-ID is not reached
+through WS-CUSTOMER-ID. `writes_field` / `sets_only_in` also count writes of
+every item sharing O's bytes (`_storage_aliases` over the `data-items`
+layout): an ancestor group or a covering REDEFINES / RENAMES item is a sure
+write; a partial overlap, a table element, a duplicated name or INITIALIZE
+REPLACING gives not_checkable. Tests:
+`tests/unit/mcp_server/test_mcp_claims_storage_and_names.py`.
+
+## 2026-10-30 -- lineage: correlation names of untraced FROM items (#782)
+
+[analysis/lineage.md](analysis/lineage.md) (`sql` port row): `_from_tables`
+maps the correlation name of a skipped FROM item (sub-select, `TABLE(...)`,
+`FINAL TABLE (...)`) to `""`, and `_resolve_column` returns nothing for it or
+for a qualifier that names no FROM item, instead of inventing a table of that
+name (`X.BAL` -> table `X`). An unqualified column beside a skipped item is
+inexact. Tests: `TestUntracedCorrelationNames` in
+`tests/unit/analysis/test_sql_flow.py`.
+
 ## 2026-10-30 -- lineage: FROM FINAL TABLE (...) and `BANK . CUST`
 
 [analysis/lineage.md](analysis/lineage.md) (`sql` port row): `_from_tables`

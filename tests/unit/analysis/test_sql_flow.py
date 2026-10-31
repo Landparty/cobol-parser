@@ -153,3 +153,35 @@ class TestFromClauseShapes:
         sql = "SELECT A.NAME INTO :WS-NM FROM BANK . CUST A WHERE A.ID = :WS-ID"
         assert _flows(sql) == [("WS-NM", "BANK.CUST", "NAME", "in", "sql")]
         assert _keys(sql) == [("WS-ID", "BANK.CUST", "ID")]
+
+
+class TestUntracedCorrelationNames:
+    """A correlation name on an untraced FROM item (sub-select, table
+    function, data-change reference) is not a table (#782)."""
+
+    def test_correlation_name_is_not_invented_as_a_table(self) -> None:
+        for sql in (
+            "SELECT X.BAL INTO :B FROM (SELECT BAL FROM ACCT) X",
+            "SELECT X.BAL INTO :B FROM (SELECT BAL FROM ACCT) AS X",
+            "SELECT Q.BAL INTO :B FROM TABLE(MYFUNC(:K)) AS Q",
+            "SELECT F.ID INTO :I FROM FINAL TABLE (INSERT INTO CUST (NAME) "
+            "VALUES (:K)) F",
+        ):
+            result = analyze_sql(sql, {})
+            assert result.flows == [], sql
+            assert any("is not traced" in c for c in result.caveats), sql
+
+    def test_traced_table_beside_an_untraced_item_still_flows(self) -> None:
+        sql = "SELECT C.NAME, Q.BAL INTO :N, :B FROM CUST C, TABLE(F(:K)) AS Q"
+        assert _flows(sql) == [("N", "CUST", "NAME", "in", "sql")]
+
+    def test_unqualified_column_beside_an_untraced_item_is_not_exact(self) -> None:
+        result = analyze_sql("SELECT BAL INTO :B FROM ACCT A, (SELECT 1 FROM T) X")
+        assert [(f.table, f.exact) for f in result.flows] == [("ACCT", False)]
+
+    def test_unknown_qualifier_is_a_caveat_not_a_table(self) -> None:
+        result = analyze_sql("SELECT Z.BAL INTO :B FROM ACCT A")
+        assert result.flows == []
+        assert "Z.BAL names no table or correlation name in FROM; not traced" in (
+            result.caveats
+        )
