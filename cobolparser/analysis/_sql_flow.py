@@ -309,10 +309,15 @@ def _columns_in(expr: str) -> list[tuple[str | None, str]]:
 def _skipped_correlation(piece: str) -> str | None:
     """The correlation name after a parenthesised FROM item (a sub-select,
     ``TABLE(...)`` or ``FINAL TABLE (...)``): ``(...) AS X`` -> ``X``."""
+    if "(" not in piece:
+        return None
     _inner, after = _balanced(piece, piece.index("("))
     words = piece[after:].split()
     if words and words[0] == "AS":
         words = words[1:]
+    if words:
+        # ``AS T(V)``: a correlation name followed by its column list.
+        words[0] = words[0].split("(", 1)[0]
     if (
         words
         and words[0] not in _SQL_WORDS
@@ -348,6 +353,16 @@ def _from_tables(from_body: str) -> tuple[dict[str, str], list[str], list[str]]:
             skipped = "a data-change table reference in FROM is not traced"
         elif re.match(r"TABLE\s*\(", piece):
             skipped = "a table function in FROM is not traced"
+        elif re.match(r"LATERAL\s*\(", piece):
+            skipped = "a LATERAL sub-select in FROM is not traced"
+        elif re.match(r"(?:XMLTABLE|JSON_TABLE)\s*\(", piece):
+            skipped = "an XMLTABLE / JSON_TABLE item in FROM is not traced"
+        elif re.match(r"UNNEST\s*\(", piece):
+            skipped = "an UNNEST item in FROM is not traced"
+        elif re.match(r"\S*['(]", piece):
+            # Whatever the item is, a first word holding ``(`` or a quote
+            # is never a table name.
+            skipped = "a FROM item that is not a table name is not traced"
         if skipped is not None:
             caveats.append(skipped)
             name = _skipped_correlation(piece)

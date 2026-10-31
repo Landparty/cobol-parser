@@ -185,3 +185,40 @@ class TestUntracedCorrelationNames:
         assert "Z.BAL names no table or correlation name in FROM; not traced" in (
             result.caveats
         )
+
+
+class TestLateralXmltableUnnest:
+    """``LATERAL (...)``, ``XMLTABLE(...)``, ``JSON_TABLE(...)`` and
+    ``UNNEST(...)`` are untraced FROM items, not tables (#787)."""
+
+    def test_no_phantom_table_for_an_unqualified_column(self) -> None:
+        for sql in (
+            "SELECT X INTO :N FROM XMLTABLE('$d/r' PASSING :DOC "
+            "COLUMNS X INT PATH 'x') AS T",
+            "SELECT X INTO :N FROM JSON_TABLE(:DOC, '$' COLUMNS(X INT)) AS T",
+            "SELECT V INTO :N FROM UNNEST(CAST(:ARR AS INTARRAY)) AS T(V)",
+        ):
+            result = analyze_sql(sql, {})
+            assert result.flows == [], sql
+            assert any("is not traced" in c for c in result.caveats), sql
+
+    def test_lateral_beside_a_table_is_inexact_and_keeps_the_table(self) -> None:
+        result = analyze_sql(
+            "SELECT NAME INTO :N FROM CUST C, LATERAL (SELECT MAX(AMT) AS M "
+            "FROM ORD WHERE CID = C.ID) AS L"
+        )
+        assert [(f.table, f.exact) for f in result.flows] == [("CUST", False)]
+        assert "a LATERAL sub-select in FROM is not traced" in result.caveats
+
+    def test_correlation_names_are_known_not_misreported(self) -> None:
+        result = analyze_sql(
+            "SELECT L.M, T.V INTO :A, :B FROM CUST C, LATERAL (SELECT 1 AS M "
+            "FROM ORD) L, UNNEST(CAST(:ARR AS INTARRAY)) AS T(V)"
+        )
+        assert result.flows == []
+        assert not any("names no table" in c for c in result.caveats)
+
+    def test_any_first_word_with_a_parenthesis_is_untraced(self) -> None:
+        result = analyze_sql("SELECT X INTO :N FROM MYFUNC(:K) AS F")
+        assert result.flows == []
+        assert "a FROM item that is not a table name is not traced" in (result.caveats)

@@ -118,6 +118,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+* **MCP `check_claims` sees writes of FILE SECTION records** (#788). The
+  01 records of one FD / SD share one record area, so a `MOVE` to one record
+  now counts as a write of every field of the others it covers. A `READ` /
+  `RETURN` of the file counts as a possible write of its records (end of file
+  leaves them as they were), and `WRITE` / `REWRITE` / `RELEASE` record
+  `FROM` x as a write of that record. `sets_only_in` on such a field was
+  confirmed although another paragraph filled it; it is now contradicted or
+  not checkable.
+* **Lineage no longer invents tables from `LATERAL`, `XMLTABLE`,
+  `JSON_TABLE` or `UNNEST`** (#787). These FROM items gave ports on tables
+  named `LATERAL`, `XMLTABLE(''` or `UNNEST(CAST(:ARR`. They are now
+  untraced, with a caveat, and their correlation names (including
+  `AS T(V)`) are known, so `T.V` is no longer reported as naming nothing in
+  FROM. Any FROM item whose first word holds `(` or a quote is treated the
+  same way.
 * **MCP `check_claims` no longer confirms false claims** (#776, #778).
   `flows_to` matched the target as a substring, so `CUSTOMER-ID` was
   "reached" through `WS-CUSTOMER-ID` and `BANK.CUST` through
