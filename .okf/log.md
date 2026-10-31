@@ -14,6 +14,27 @@ deliberate. Anything else appended to the bottom is a mistake: five
 entries, including both 2026-09-15 sections, were found there on
 2026-09-15 and moved back up.
 
+## 2026-10-31 -- MCP check_claims: FD / SD records and READ / RETURN (#788)
+
+[mcp.md](mcp.md) (`check_claims` row): `_storage_aliases` (now returning a
+`_Storage`) joins the 01 records of one FD / SD into one storage area, as
+implicit redefinitions, so `MOVE X TO REC-B` writes REC-A's fields.
+`_record_io_writes` adds `READ` / `RETURN` of the file whose record area holds
+O as a possible write (end of file leaves the area as it was), and `WRITE` /
+`REWRITE` / `RELEASE` record `FROM` x as a write of that record. A
+`sets_only_in` that missed them is no longer confirmed. Tests:
+`TestFileRecordWrites` in
+`tests/unit/mcp_server/test_mcp_claims_storage_and_names.py`.
+
+## 2026-10-31 -- lineage: LATERAL, XMLTABLE, JSON_TABLE, UNNEST (#787)
+
+[analysis/lineage.md](analysis/lineage.md) (`sql` port row): `_from_tables`
+skips `LATERAL (...)`, `XMLTABLE(...)`, `JSON_TABLE(...)`, `UNNEST(...)` and
+any FROM item whose first word holds `(` or a quote, with a caveat, instead
+of keeping the first word as a table; `_skipped_correlation` reads the name
+of `AS T(V)`. Tests: `TestLateralXmltableUnnest` in
+`tests/unit/analysis/test_sql_flow.py`.
+
 ## 2026-10-30 -- lineage memory: summary limit, opaque-call hub
 
 [analysis/lineage.md](analysis/lineage.md): a LegacyLens upload worker was

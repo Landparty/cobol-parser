@@ -16,6 +16,8 @@ Like :mod:`.tools`, this module imports no SDK.
 from __future__ import annotations
 
 from collections.abc import Callable
+from dataclasses import dataclass
+from dataclasses import field as dc_field
 from typing import TYPE_CHECKING, Any
 
 from .envelope import Response, ToolError
@@ -253,15 +255,41 @@ def _writes(tools: CobolTools, claim: dict[str, Any]) -> list[dict[str, Any]]:
     return rows
 
 
-def _storage_aliases(
-    tools: CobolTools, claim: dict[str, Any]
-) -> tuple[list[tuple[str, bool]], bool]:
-    """The other data items whose writes reach field O's bytes: each name
-    with whether a write of it surely overwrites all of O (an ancestor
-    group, an item covering O's bytes through REDEFINES / RENAMES) or only
-    may (a partial overlap, a table element, a duplicated name). The flag
-    is False when O's layout could not be placed, so the aliases are
-    unknown."""
+@dataclass
+class _Storage:
+    """Where field O's bytes live: the other data items whose writes reach
+    them, each with whether a write of it surely overwrites all of O (an
+    ancestor group, an item covering O's bytes through REDEFINES / RENAMES
+    or as another record of the same FD / SD) or only may (a partial
+    overlap, a table element, a duplicated name); the FD / SD files whose
+    record area holds O; and whether O could be placed at all (when not,
+    the aliases are unknown)."""
+
+    aliases: list[tuple[str, bool]] = dc_field(default_factory=list)
+    files: set[str] = dc_field(default_factory=set)
+    placed: bool = False
+    unit: Any = None
+    parsed: Any = None
+
+
+def _file_records(unit: Any) -> dict[str, str]:
+    """FILE SECTION 01 record name -> the FD / SD file it describes."""
+    from ..models.program import CobolSection
+
+    records: dict[str, str] = {}
+    data = unit.get_division("DATA")
+    section = data.get_section_by_name("FILE") if data is not None else None
+    if not isinstance(section, CobolSection):
+        return records
+    for item in section.data_items:
+        owner = item.get_metadata("fd_file_name")
+        if owner and item.name:
+            records[item.name.upper()] = str(owner).upper()
+    return records
+
+
+def _storage_aliases(tools: CobolTools, claim: dict[str, Any]) -> _Storage:
+    """Field O's storage (see :class:`_Storage`)."""
     from .envelope import Response
     from .tools import _layout_for, _layout_index
 
@@ -270,12 +298,12 @@ def _storage_aliases(
         parsed = tools.workspace.program(claim["file"])
         unit = parsed.unit(claim.get("program"), Response())
     except ToolError:
-        return [], False
+        return _Storage()
     layout = _layout_index(unit, Response())
     items = [i for key, rows in layout.items() if not key.startswith(" ") for i in rows]
     field = _layout_for(wanted.split(" OF ")[0], wanted, layout)
     if field is None or field.get("offset_ambiguous"):
-        return [], False
+        return _Storage(unit=unit, parsed=parsed)
     by_qname = {str(i["qualified_name"]): i for i in items}
 
     def root(item: dict[str, Any]) -> str:
@@ -294,6 +322,25 @@ def _storage_aliases(
             area[base(str(item["qualified_name"]))] = base(
                 str(item["redefines_chain"][-1])
             )
+    # The 01 records of one FD / SD share its record area: COBOL treats
+    # them as implicit redefinitions of each other.
+    records = _file_records(unit)
+    first_of: dict[str, str] = {}
+    file_of_root: dict[str, str] = {}
+    for item in items:
+        if item.get("level") != 1 or item.get("parent_qualified_name"):
+            continue
+        owner = records.get(str(item["name"]).upper())
+        if owner is None:
+            continue
+        qname = str(item["qualified_name"])
+        file_of_root[qname] = owner
+        if owner in first_of:
+            mine, theirs = base(qname), base(first_of[owner])
+            if mine != theirs:
+                area[mine] = theirs
+        else:
+            first_of[owner] = qname
 
     def in_table(item: dict[str, Any]) -> bool:
         qname: str | None = str(item["qualified_name"])
@@ -333,18 +380,78 @@ def _storage_aliases(
             and name_counts[str(item["name"]).upper()] == 1
         )
         aliases.append((str(item["name"]).upper(), exact))
-    return aliases, True
+    files = {f for qname, f in file_of_root.items() if base(qname) == f_area}
+    return _Storage(aliases, files, True, unit, parsed)
+
+
+def _record_io_writes(
+    storage: _Storage, field_name: str
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Writes of field O that name no data item of O's storage as a
+    target: ``READ`` / ``RETURN`` of the file whose record area holds O
+    (possible: at end of file the area is left as it was), and ``WRITE`` /
+    ``REWRITE`` / ``RELEASE`` record ``FROM`` x, which moves x into the
+    record first (sure or possible as a MOVE to that record would be).
+    Returns (sure, possible) rows like :func:`_writes`' with ``via``."""
+    from .envelope import Response
+    from .navigation import _procedure_of, statement_verb
+    from .tools import _own_statements
+
+    if storage.unit is None or not storage.placed:
+        return [], []
+    exact_of = dict(storage.aliases)
+    exact_of[field_name.split(" OF ")[0]] = True
+    sure: list[dict[str, Any]] = []
+    possible: list[dict[str, Any]] = []
+    for statement in _own_statements(storage.unit):
+        verb = statement_verb(statement)
+        exact: bool | None = None
+        via = ""
+        if verb in ("READ", "RETURN"):
+            owner = str(getattr(statement, "file_name", None) or "").upper()
+            if owner in storage.files:
+                exact, via = False, f"the record area of {owner}"
+        elif verb in ("WRITE", "REWRITE", "RELEASE"):
+            record = str(getattr(statement, "record_name", None) or "").upper()
+            source = getattr(statement, "from_clause", None) or getattr(
+                statement, "from_source", None
+            )
+            if source and record in exact_of:
+                # Naming O itself is a direct write: no ``via``.
+                exact = exact_of[record]
+                via = "" if record == field_name.split(" OF ")[0] else record
+        if exact is None:
+            continue
+        location = getattr(statement, "location", None)
+        if location is None or not location.line:
+            continue
+        located = storage.parsed.locate(location.line, None, Response())
+        if located is None:
+            continue
+        paragraph, _section = _procedure_of(statement)
+        row = {
+            "location": {"file": located["file"], "line": located["line"]},
+            "verb": verb,
+            "paragraph": paragraph,
+            "text": verb,
+            "via": via,
+        }
+        (sure if exact else possible).append(row)
+    return sure, possible
 
 
 def _alias_writes(
     tools: CobolTools, claim: dict[str, Any]
-) -> tuple[list[dict[str, Any]], list[dict[str, Any]], bool]:
-    """Writes of field O through its storage: (sure, possible, placed).
-    Each row carries ``via``, the item it names."""
-    aliases, placed = _storage_aliases(tools, claim)
-    sure: list[dict[str, Any]] = []
-    possible: list[dict[str, Any]] = []
-    for name, exact in aliases:
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]], bool]:
+    """Writes of field O that a ``role="write"`` search for O misses:
+    (direct, sure, possible, placed). ``direct`` rows write O by name
+    (``WRITE O FROM x``); the others carry ``via``, the item or record
+    area they write O through."""
+    storage = _storage_aliases(tools, claim)
+    io_sure, possible = _record_io_writes(storage, _norm(claim.get("object")))
+    direct = [r for r in io_sure if not r["via"]]
+    sure = [r for r in io_sure if r["via"]]
+    for name, exact in storage.aliases:
         for row in _writes(tools, {**claim, "object": name}):
             row = {**row, "via": name}
             # INITIALIZE ... REPLACING sets only the named categories.
@@ -352,13 +459,13 @@ def _alias_writes(
                 row.get("text")
             )
             (sure if exact and not replacing else possible).append(row)
-    return sure, possible, placed
+    return direct, sure, possible, storage.placed
 
 
 def _writes_field(tools: CobolTools, claim: dict[str, Any]) -> _Verdict:
     field_name = _norm(claim.get("object"))
-    direct = _writes(tools, claim)
-    sure, possible, _placed = _alias_writes(tools, claim)
+    extra, sure, possible, _placed = _alias_writes(tools, claim)
+    direct = _writes(tools, claim) + extra
     paragraph = _norm(claim.get("subject"))
 
     def here(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -387,8 +494,10 @@ def _writes_field(tools: CobolTools, claim: dict[str, Any]) -> _Verdict:
             NOT_CHECKABLE,
             f"{', '.join(via)} shares storage with {field_name} and is written "
             f"{where}, but whether that write covers {field_name} is not "
-            "settled (a partial overlap, a table element, a duplicated name or "
-            "INITIALIZE REPLACING)".replace("  ", " "),
+            "settled (a partial overlap, a table element, a duplicated name, "
+            "INITIALIZE REPLACING, or a READ / RETURN that may meet end of file)".replace(
+                "  ", " "
+            ),
             [r["location"] for r in here(possible)],
         )
     rows = direct + sure
@@ -405,8 +514,8 @@ def _sets_only_in(tools: CobolTools, claim: dict[str, Any]) -> _Verdict:
     _need(claim, "subject")
     field_name = _norm(claim.get("object"))
     allowed = {_norm(p) for p in str(claim["subject"]).split(",") if p.strip()}
-    direct = _writes(tools, claim)
-    sure, possible, placed = _alias_writes(tools, claim)
+    extra, sure, possible, placed = _alias_writes(tools, claim)
+    direct = _writes(tools, claim) + extra
     rows = direct + sure
     outside = [r for r in rows if _norm(r.get("paragraph")) not in allowed]
     if outside:
@@ -448,8 +557,10 @@ def _sets_only_in(tools: CobolTools, claim: dict[str, Any]) -> _Verdict:
     return (
         CONFIRMED,
         f"every write of {field_name} is in {', '.join(sorted(allowed))}, "
-        "through its parent groups and REDEFINES / RENAMES items too (a VALUE "
-        "clause or a CALL argument passed by reference is not a statement write)",
+        "through its parent groups, REDEFINES / RENAMES items and the other "
+        "records of its FD / SD too, and no READ / RETURN fills its record area "
+        "elsewhere (a VALUE clause or a CALL argument passed by reference is not "
+        "a statement write)",
         [r["location"] for r in rows],
     )
 
