@@ -36,7 +36,7 @@ jcl = ["jcl-parser>=2.0.0"]
 # through the sibling parsers (cobolparser/mcp/languages.py), so a mixed
 # codebase is one call graph. Neither is needed by the rest of the library.
 pl1 = ["landparty-pl1-parser>=2.0.0"]
-hlasm = ["hlasmparser>=0.2.0"]
+hlasm = ["hlasm-parser>=0.2.2"]
 # `cobol-parser mcp`: the MCP server (cobolparser/mcp/server.py). Pinned below
 # 2, whose SDK renames FastMCP; only server.py imports it.
 mcp = ["mcp>=1.10,<2"]

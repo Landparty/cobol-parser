@@ -354,7 +354,7 @@ rather than running its own.
   registered with `add_tool()` rather than decorators, which
   `disallow_untyped_decorators` would reject when the SDK is untyped.
 - `cobol-parser mcp` without the extra exits 1 naming the install command.
-- `[pl1]` (`landparty-pl1-parser>=2.0.0`) and `[hlasm]` (`hlasmparser>=0.2.0`)
+- `[pl1]` (`landparty-pl1-parser>=2.0.0`) and `[hlasm]` (`hlasm-parser>=0.2.2`)
   are read only by `languages.py`, imported per language on first use; not
   in `[dev]` until they are on PyPI, so CI skips
   `test_mcp_languages.py` (`importorskip`). mypy ignores their imports.
