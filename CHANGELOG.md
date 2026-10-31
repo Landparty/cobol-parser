@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+* **Dynamic `EXEC CICS LINK / XCTL / LOAD PROGRAM(data-name)` targets are
+  resolved.** `DynamicCallAnalyzer` now treats the operand like a dynamic
+  `CALL` variable and records `possible_values` (and
+  `possible_values_incomplete`) on the statement, in its metadata and its
+  `to_dict()`. Subscripted operands (`PROGRAM(OPT-PGM(IDX))`) resolve, and an
+  item laid by `REDEFINES` over a FILLER / VALUE table (the CardDemo
+  `COMEN02Y` menu) takes the program name of every table entry, so
+  `COMEN01C`'s `XCTL PROGRAM(CDEMO-MENU-OPT-PGMNAME(WS-OPTION))` reaches
+  `COACTVWC` ... `COPAUS0C` instead of the variable name.
+
 * **Cross-record scenarios in `gen-fixtures`.** A branch that compares a
   record with the one before it (`IF TXN-BRANCH = WS-PREV-BRANCH`, with
   `MOVE TXN-BRANCH TO WS-PREV-BRANCH` later in the same paragraph) is now

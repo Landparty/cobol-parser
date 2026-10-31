@@ -52,6 +52,18 @@ analyzer.analyze(parse_result.ast)   # mutates AST nodes in-place
 ```
 - If `DynamicCallAnalyzer` does not exist the adapter falls back silently.
 - Call is wrapped in try/except — failure does not block the parse.
+- What it writes: a dynamic `CallStatement` gets `possible_values` (sorted
+  `list[str]`) and, when that list is not exhaustive,
+  `get_metadata("possible_values_incomplete") is True`. An `ExecCicsStatement`
+  for `LINK` / `XCTL` / `LOAD` whose `PROGRAM(...)` is a data-name (not in
+  `literal_options`) gets the same two answers as metadata,
+  `get_metadata("possible_values")` and
+  `get_metadata("possible_values_incomplete")`, also emitted by its
+  `to_dict()` (keys absent on every other EXEC CICS node). The operand may be
+  subscripted (`PROGRAM(OPT-PGM(IDX))`): every occurrence of the table is a
+  candidate, including the entries of a FILLER/VALUE table it `REDEFINES`.
+  Candidates keep figurative sentinels (`" "`, `"\x00"`); filter them as
+  `_names.callee_names` does.
 
 ### 4. Program flow analysis (optional, fault-isolated)
 ```python
