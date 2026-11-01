@@ -116,6 +116,7 @@ tests/
   samples/                     # shared COBOL fixtures: 48 *.cbl at top level
     copybook_programs/         # programs with COPY statements
     copybooks/                 # .CPY files
+    definitions/               # ACCTSET.bms, BANKCSD.csd, BANKPCT.asm, BANKDDL.ddl, CUSTDBD.dbd, CUSTPSB.psb (cobolparser.definitions)
     enterprise/                # 22 programs, one per IBM Enterprise COBOL program type, + copybooks/
     io/positive/, io/negative/ # valid / invalid IO patterns
     jcl/                       # invupdt.jcl, payproc.jcl

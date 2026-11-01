@@ -43,6 +43,7 @@ generators) are folders with a short routing page in front.
 | Mermaid / DOT flowcharts | [generators/flowchart.md](generators/flowchart.md) |
 | `parse_files`, `scan_files`, batch fault isolation, cross-file clones | [batch.md](batch.md) |
 | z/OS JCL: jobs, steps, DD → dataset bindings (via jcl-parser) | [jcl.md](jcl.md) |
+| CICS CSD and BMS maps, DB2 DDL, IMS DBD/PSB (`cobolparser.definitions`) | [definitions.md](definitions.md) |
 | CLI subcommands and flags, exit codes, the `cobol.yml` project config | [cli.md](cli.md) |
 | The MCP server for AI agents (`cobol-parser mcp`): tools, prompts, envelope, caveats, workspace guard and cache | [mcp.md](mcp.md) |
 | Test layout, markers, fixtures, coverage floor, where behaviour is pinned | [tests.md](tests.md) |

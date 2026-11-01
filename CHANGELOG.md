@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+* **`cobolparser.definitions`: the members beside the COBOL.** New parsers
+  for CICS resource definitions (DFHCSDUP `DEFINE` / `ALTER` / `ADD`, with
+  abbreviations, and the older `DFHPCT` / `DFHPPT` / `DFHFCT` tables), BMS
+  maps (mapsets, maps, fields with row/column, input/output/constant), DB2
+  DDL (tables, columns, keys, foreign keys, indexes, views and their base
+  tables, aliases, `COMMENT ON` / `LABEL ON`), IMS DBDGEN (segments,
+  hierarchy, key fields) and PSBGEN (PCBs, sensitive segments, PROCOPT).
+  `detect_definition_kind` routes a member by content. See
+  `.okf/definitions.md`.
 * **Dynamic `EXEC CICS LINK / XCTL / LOAD PROGRAM(data-name)` targets are
   resolved.** `DynamicCallAnalyzer` now treats the operand like a dynamic
   `CALL` variable and records `possible_values` (and
