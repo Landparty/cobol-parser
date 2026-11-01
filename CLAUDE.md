@@ -29,6 +29,7 @@ This repo uses a structured knowledge base at `.okf/`. **Load `.okf/index.md` at
 | Flowcharts, copybook → CSV/record-image data (`CopybookDataGenerator`), decode/compare, `gen-fixtures` bundles and scenarios | `.okf/generators.md` (routing page for `.okf/generators/`) |
 | `parse_files`, `parse_files_with_copybooks`, `scan_files`, batch fault isolation | `.okf/batch.md` |
 | z/OS JCL: jobs/steps, DD → dataset bindings (read by jcl-parser) | `.okf/jcl.md` |
+| CICS CSD and BMS maps, DB2 DDL, IMS DBD/PSB (`cobolparser.definitions`) | `.okf/definitions.md` |
 | CLI subcommands and flags, the `cobol.yml` project config | `.okf/cli.md` |
 | The MCP server for AI agents (`cobol-parser mcp`), its tools, envelope and caveats | `.okf/mcp.md` |
 | Test layout, markers, coverage floor | `.okf/tests.md` |
@@ -107,6 +108,7 @@ COBOL source (.cbl/.cob)
 | `cobolparser/generators/` | flowcharts, copybook data and record images, decode/compare, `gen-fixtures` bundles and scenarios | `.okf/generators.md` |
 | `cobolparser/batch.py`, `scan.py`, `_facts_cache.py` | parallel parsing, multi-file analysis with per-file fault isolation, the on-disk cache | `.okf/batch.md` |
 | `cobolparser/jcl/` | JCL jobs, steps, DD bindings (through the `[jcl]` extra) | `.okf/jcl.md` |
+| `cobolparser/definitions/` | CICS CSD and BMS maps, DB2 DDL, IMS DBD and PSB | `.okf/definitions.md` |
 | `cobolparser/cli/`, `config/` | the CLI and the `cobol.yml` reader | `.okf/cli.md` |
 | `cobolparser/mcp/` | the MCP server ([`docs/mcp-server.md`](docs/mcp-server.md)) | `.okf/mcp.md` |
 

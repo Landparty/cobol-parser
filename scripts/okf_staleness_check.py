@@ -277,6 +277,7 @@ OKF_MAP = [
     ),
     ("cobolparser/dialects/", [".okf/dialects.md"]),
     ("cobolparser/jcl/", [".okf/jcl.md"]),
+    ("cobolparser/definitions/", [".okf/definitions.md"]),
     ("cobolparser/__init__.py", [".okf/index.md"]),
     ("tests/", [".okf/tests.md"]),
 ]
