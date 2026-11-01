@@ -267,8 +267,12 @@ class DynamicCallAnalyzer:
                     # (e.g. both "SPACES" and " " for the same variable).
                     value = self._extract_literal_value(str(node.value_clause))
                     if value is None:
-                        value = str(node.value_clause).strip("\"'")
-                    self._variable_values[var_name].add(value)
+                        # A VALUE this does not read (X'..', N'..', ALL ..):
+                        # no made-up candidate, the value is just unknown,
+                        # as for a MOVE of the same literal.
+                        self._incomplete_variables.add(var_name)
+                    else:
+                        self._variable_values[var_name].add(value)
         elif isinstance(node, ConditionNameItem) and node.name:
             self._conditions.setdefault(node.name.upper(), []).append(node)
 
@@ -304,10 +308,17 @@ class DynamicCallAnalyzer:
             if base is None:
                 continue
             image = self._value_image(base)
-            if image is None or all(cell is None for cell in image):
-                continue
             occurrences = self._occurrence_offsets(item)
-            if occurrences is None:
+            if (
+                image is None
+                or all(cell is None for cell in image)
+                or occurrences is None
+            ):
+                # Storage a VALUE initialises but whose bytes are not read
+                # here: the redefining items hold something unknown, not
+                # nothing (#793).
+                if self._has_value(base):
+                    self._mark_tree_incomplete(item)
                 continue
             for sub, starts in occurrences:
                 if sub.is_filler or not sub.name or sub.value_clause is not None:
@@ -324,6 +335,25 @@ class DynamicCallAnalyzer:
                         continue
                     value = "".join(c for c in cells if c is not None).rstrip()
                     self._variable_values.setdefault(name, set()).add(value or " ")
+
+    @classmethod
+    def _has_value(cls, item: CobolDataItem) -> bool:
+        """True when *item* or an item under it has a VALUE clause."""
+        if item.value_clause is not None:
+            return True
+        return any(
+            cls._has_value(c)
+            for c in item.children
+            if isinstance(c, CobolDataItem) and not c.redefines
+        )
+
+    def _mark_tree_incomplete(self, item: CobolDataItem) -> None:
+        """Mark *item* and every named item under it incomplete."""
+        if item.name and not item.is_filler:
+            self._incomplete_variables.add(item.name.upper())
+        for child in item.children:
+            if isinstance(child, CobolDataItem):
+                self._mark_tree_incomplete(child)
 
     @staticmethod
     def _redefined_item(item: CobolDataItem) -> CobolDataItem | None:

@@ -181,8 +181,16 @@ def host_var_name(raw: str) -> str:
     return " OF ".join(reversed(parts))
 
 
+#: A DB2 delimited identifier that is an ordinary name once unquoted.
+_SIMPLE_DELIMITED_RE = re.compile(r'"([A-Z#@$][A-Z0-9_#@$]*)"')
+
+
 def _normalize(sql: str) -> str:
     text = _STRING_RE.sub("''", sql.upper())
+    # ``"TAB4"`` is the table TAB4, as ExecSQLStatement.tables reads it. A
+    # delimited name that is no ordinary name (``"MY TAB"``) keeps its
+    # quotes, so it is skipped with a caveat rather than cut at its blank.
+    text = _SIMPLE_DELIMITED_RE.sub(r"\1", text)
     return " ".join(text.split())
 
 
@@ -359,9 +367,9 @@ def _from_tables(from_body: str) -> tuple[dict[str, str], list[str], list[str]]:
             skipped = "an XMLTABLE / JSON_TABLE item in FROM is not traced"
         elif re.match(r"UNNEST\s*\(", piece):
             skipped = "an UNNEST item in FROM is not traced"
-        elif re.match(r"\S*['(]", piece):
+        elif re.match(r"\S*['\"(]", piece):
             # Whatever the item is, a first word holding ``(`` or a quote
-            # is never a table name.
+            # is never a table name (a delimited ``"MY TAB"`` is not read).
             skipped = "a FROM item that is not a table name is not traced"
         if skipped is not None:
             caveats.append(skipped)

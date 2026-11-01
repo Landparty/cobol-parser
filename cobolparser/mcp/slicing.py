@@ -87,8 +87,8 @@ def slice_field(
     program_id = (report.program_id or "").upper()
     wanted = " ".join(field_name.upper().replace(" IN ", " OF ").split())
     groups, matched = graph._start_groups(wanted, [program_id])
-    starts = sorted({n for group in groups for n in group}, key=repr)
-    if not starts:
+    start_names = sorted(n for names in matched.values() for n in names)
+    if not start_names:
         names = sorted(
             {str(item["qualified_name"]).split(".")[-1] for item in report.items}
         )
@@ -105,78 +105,125 @@ def slice_field(
         )
 
     adjacency = graph._out if direction == "forward" else graph._in
+    item_nodes = [
+        n
+        for n in {*graph._out, *graph._in}
+        if n[0] == "P" and n[1] == program_id and n[2] == overlay_item_kind()
+    ]
+    statements = _statements_by_line(unit)
+    xref = _XrefIndex(unit)
     rows: dict[int, _Row] = {}
     fields: set[str] = set()
     ports: set[str] = set()
     seen: set[tuple[Any, int]] = set()
-    queue: deque[tuple[Any, int]] = deque((s, 0) for s in starts)
-    seen.update(queue)
     skipped: set[str] = set()
-    while queue:
-        node, arrived = queue.popleft()
-        for nxt, info in adjacency.get(node, []):
-            overlay = overlay_class(info.kind)
-            if overlay and overlay == arrived:
-                continue
-            src, dst = (node, nxt) if direction == "forward" else (nxt, node)
-            if overlay and info.confidence != "exact" and not aliases:
-                skipped.add(
-                    f"{_label(graph, src)} -> {_label(graph, dst)} ({info.kind})"
-                )
-                continue
-            if info.seq_line:
-                row = rows.setdefault(
-                    info.seq_line,
-                    _Row(
-                        info.seq_line,
-                        info.statement or info.kind,
-                        info.paragraph,
-                        "data",
-                    ),
-                )
-                row.flows.add(f"{_label(graph, src)} -> {_label(graph, dst)}")
-            _p, name, kind = graph._describe(nxt)
-            if kind == "port":
-                ports.add(name)
-                continue  # a boundary, never a pass-through
-            fields.add(name)
-            state = (nxt, overlay)
-            if state not in seen:
-                seen.add(state)
-                queue.append(state)
+    done_names: set[str] = set()
+    pending: deque[str] = deque(start_names)
 
-    statements = _statements_by_line(unit)
-    for line in list(rows):
+    def add_row(line: int, statement: Any, role: str) -> _Row:
+        held = rows.get(line)
+        if held is None:
+            paragraph, _section = _procedure_of(statement)
+            held = rows[line] = _Row(line, statement_verb(statement), paragraph, role)
+        return held
+
+    def follow_graph(name: str) -> None:
+        """The field-flow edges from (forward) or into (backward) *name*."""
+        queue: deque[tuple[Any, int]] = deque()
+        for node in item_nodes:
+            if node[3] == name or node[3].startswith((name + ".", name + "(")):
+                if (node, 0) not in seen:
+                    seen.add((node, 0))
+                    queue.append((node, 0))
+        while queue:
+            node, arrived = queue.popleft()
+            for nxt, info in adjacency.get(node, []):
+                overlay = overlay_class(info.kind)
+                if overlay and overlay == arrived:
+                    continue
+                src, dst = (node, nxt) if direction == "forward" else (nxt, node)
+                if overlay and info.confidence != "exact" and not aliases:
+                    skipped.add(
+                        f"{_label(graph, src)} -> {_label(graph, dst)} ({info.kind})"
+                    )
+                    continue
+                if info.seq_line:
+                    row = rows.setdefault(
+                        info.seq_line,
+                        _Row(
+                            info.seq_line,
+                            info.statement or info.kind,
+                            info.paragraph,
+                            "data",
+                        ),
+                    )
+                    row.flows.add(f"{_label(graph, src)} -> {_label(graph, dst)}")
+                _p, reached, kind = graph._describe(nxt)
+                if kind == "port":
+                    ports.add(reached)
+                    continue  # a boundary, never a pass-through
+                fields.add(reached)
+                if reached not in done_names:
+                    pending.append(reached)
+                state = (nxt, overlay)
+                if state not in seen:
+                    seen.add(state)
+                    queue.append(state)
+
+    def add_controls(line: int) -> None:
+        """The statements a data statement runs under; backward, the fields
+        their conditions test decide the value too (#796)."""
         for ancestor in _enclosing(statements.get(line)):
             a_line = ancestor.location.line
-            if a_line and a_line not in rows:
-                paragraph, _section = _procedure_of(ancestor)
-                rows[a_line] = _Row(
-                    a_line, statement_verb(ancestor), paragraph, "control"
-                )
-    if direction == "forward":
-        tested = _condition_lines(
-            unit, fields | {n for _p, n, _k in map(graph._describe, starts)}
-        )
-        for line, tested_names in tested.items():
-            statement = statements.get(line)
-            if statement is None:
+            if not a_line:
                 continue
-            held = rows.get(line)
-            if held is None:
-                paragraph, _section = _procedure_of(statement)
-                held = rows[line] = _Row(
-                    line, statement_verb(statement), paragraph, "decision"
-                )
-            held.flows.update(f"tests {n}" for n in sorted(tested_names))
-            # What runs only when the test goes one way is affected too.
-            for inner in _statements_under(statement):
-                i_line = inner.location.line
-                if i_line and i_line not in rows:
-                    paragraph, _section = _procedure_of(inner)
-                    rows[i_line] = _Row(
-                        i_line, statement_verb(inner), paragraph, "controlled"
-                    )
+            if a_line not in rows:
+                add_row(a_line, ancestor, "control")
+            if direction == "backward":
+                for tested in xref.tested_on(a_line):
+                    fields.add(tested)
+                    if tested not in done_names:
+                        pending.append(tested)
+
+    while pending:
+        name = pending.popleft()
+        if name in done_names:
+            continue
+        done_names.add(name)
+        before = set(rows)
+        follow_graph(name)
+        if direction == "backward":
+            # Writes from no field (a literal, a figurative constant, SET
+            # ... TO TRUE, INITIALIZE) make no field-flow edge.
+            for line in xref.writes_of(name):
+                statement = statements.get(line)
+                if statement is None:
+                    continue
+                row = add_row(line, statement, "data")
+                row.role = "data"
+                if not any(f.endswith(f"-> {name}") for f in row.flows):
+                    row.flows.add(f"sets {name}")
+        for line in set(rows) - before:
+            add_controls(line)
+        if direction == "forward":
+            for line in xref.tests_of(name):
+                statement = statements.get(line)
+                if statement is None:
+                    continue
+                held = add_row(line, statement, "decision")
+                held.flows.add(f"tests {name}")
+                # What runs only when the test goes one way is affected too,
+                # and so is whatever it writes (#796).
+                for inner in _statements_under(statement):
+                    i_line = inner.location.line
+                    if not i_line:
+                        continue
+                    if i_line not in rows:
+                        add_row(i_line, inner, "controlled")
+                    for written in xref.written_on(i_line):
+                        fields.add(written)
+                        if written not in done_names:
+                            pending.append(written)
 
     lines = _Lines(workspace)
     shown: list[dict[str, Any]] = []
@@ -204,7 +251,6 @@ def slice_field(
         if not paragraphs or paragraphs[-1]["paragraph"] != name:
             paragraphs.append({"paragraph": name, "statements": []})
         paragraphs[-1]["statements"].append(entry)
-    start_names = sorted(n for names in matched.values() for n in names)
     answer: dict[str, Any] = {
         "field": wanted,
         "matched": start_names,
@@ -213,6 +259,19 @@ def slice_field(
         "statement_count": len(shown),
         "by_role": _by_role(shown),
         "fields": sorted(fields - set(start_names)),
+        **(
+            {
+                "note": (
+                    "nothing in this program writes the field from another "
+                    "field; the statements listed set it from literals or "
+                    "conditions"
+                    if rows
+                    else "nothing in this program writes or tests the field"
+                )
+            }
+            if not ports and not (fields - set(start_names)) and direction == "backward"
+            else {}
+        ),
         "ports": sorted(ports),
         "paragraphs": paragraphs,
         **(
@@ -228,9 +287,12 @@ def slice_field(
             "the statements that can affect the field (backward) or that it "
             "affects (forward), in source order under their paragraphs. role "
             "data: the statement moves a value (flows: from -> to); control: "
-            "a data statement runs only inside it; decision (forward): it "
+            "a data statement runs only inside it (backward, the fields its "
+            "condition tests join the slice); decision (forward): it "
             "tests a field of the slice; controlled: it runs only on one "
-            "outcome of such a test. ports: the files, DB2 columns, CALL "
+            "outcome of such a test, and the fields it writes join the "
+            "slice. A write from a literal or SET ... TO TRUE is a data "
+            "statement with flow 'sets <field>'. ports: the files, DB2 columns, CALL "
             "arguments and console the values "
             + ("come from" if direction == "backward" else "go to")
             + "; where_from / impact_of_change follow them across programs. "
@@ -291,28 +353,67 @@ def _enclosing(statement: Any) -> list[Any]:
     return found
 
 
-def _condition_lines(unit: CobolProgram, names: set[str]) -> dict[int, set[str]]:
-    """Parsed line -> the fields of *names* (qualified, as the field-flow
-    report spells them) a condition on that line tests."""
-    from ..analysis.xref import ROLE_CONDITION, XrefAnalyzer
-    from .workspace import stdout_to_stderr
+class _XrefIndex:
+    """Where each field of a unit is written and tested, keyed by the
+    qualified name the field-flow report spells (outermost first, ``.``).
 
-    wanted = {n.upper() for n in names}
-    with stdout_to_stderr():
-        report = XrefAnalyzer().analyze(unit)
-    lines: dict[int, set[str]] = {}
-    for entry in report.entries:
-        if entry.kind not in ("data-item", "condition-name"):
-            continue
-        # Spelled as the field-flow report spells it: outermost first; a
-        # level-88 tests the item it is declared under.
-        chain = [a.upper() for a in reversed(entry.ancestors)]
-        if entry.kind == "data-item":
-            chain.append(entry.name.upper())
-        qualified = ".".join(chain)
-        if qualified not in wanted:
-            continue
-        for ref in entry.references:
-            if ref.role == ROLE_CONDITION and ref.location.line:
-                lines.setdefault(ref.location.line, set()).add(qualified)
-    return lines
+    A level-88 is read as the item it is declared under: ``SET FLAG-ON TO
+    TRUE`` writes it, ``IF FLAG-ON`` tests it.
+    """
+
+    def __init__(self, unit: CobolProgram) -> None:
+        from ..analysis.xref import ROLE_CONDITION, ROLE_WRITE, XrefAnalyzer
+        from .workspace import stdout_to_stderr
+
+        with stdout_to_stderr():
+            report = XrefAnalyzer().analyze(unit)
+        self._writes: dict[str, set[int]] = {}
+        self._tests: dict[str, set[int]] = {}
+        self._written_on: dict[int, set[str]] = {}
+        self._tested_on: dict[int, set[str]] = {}
+        for entry in report.entries:
+            if entry.kind not in ("data-item", "condition-name"):
+                continue
+            chain = [a.upper() for a in reversed(entry.ancestors)]
+            if entry.kind == "data-item":
+                chain.append(entry.name.upper())
+            if not chain:
+                continue
+            qualified = ".".join(chain)
+            for ref in entry.references:
+                line = ref.location.line
+                if not line:
+                    continue
+                if ref.role == ROLE_WRITE:
+                    self._writes.setdefault(qualified, set()).add(line)
+                    self._written_on.setdefault(line, set()).add(qualified)
+                elif ref.role == ROLE_CONDITION:
+                    self._tests.setdefault(qualified, set()).add(line)
+                    self._tested_on.setdefault(line, set()).add(qualified)
+
+    def _under(self, table: dict[str, set[int]], name: str) -> set[int]:
+        """Lines of *name* and of every field under it (a group's writes)."""
+        out: set[int] = set()
+        for key, lines in table.items():
+            if key == name or key.startswith((name + ".", name + "(")):
+                out |= lines
+        return out
+
+    def writes_of(self, name: str) -> list[int]:
+        return sorted(self._under(self._writes, name))
+
+    def tests_of(self, name: str) -> list[int]:
+        return sorted(self._under(self._tests, name))
+
+    def written_on(self, line: int) -> set[str]:
+        return self._written_on.get(line, set())
+
+    def tested_on(self, line: int) -> set[str]:
+        return self._tested_on.get(line, set())
+
+
+def overlay_item_kind() -> str:
+    """The node kind of a data item in the lineage graph."""
+    from ..analysis.lineage_graph import ITEM
+
+    return str(ITEM)

@@ -930,6 +930,14 @@ so a consumer knows `possible_values` (even when non-empty) is not exhaustive.
 The `analyze` CLI emits the flag. Pinned by
 `tests/regression/test_audit_2026_08_12_analysis.py::TestB3UntrackedIdentifierSourceIsNotAValue`.
 
+**A VALUE it cannot read is unknown, not a candidate (#793).** A VALUE
+clause `_extract_literal_value` does not read (`X'..'`, `N'..'`, `ALL ..`)
+marks the item INCOMPLETE instead of adding its quote-stripped text as a
+program name. Likewise a REDEFINES of storage that a VALUE initialises but
+whose byte image or occurrences are not read (`_has_value()`) marks the whole
+redefining tree incomplete (`_mark_tree_incomplete()`), rather than leaving it
+with no values. Pinned by `tests/unit/test_issues_790_796.py`.
+
 **`possible_values` is deterministic**: `CallStatement.set_possible_values`
 sorts the deduplicated list (a bare `list(set(...))` varies per process under
 hash randomization). Pinned by
