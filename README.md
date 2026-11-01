@@ -239,8 +239,8 @@ python -m black .
 python -m mypy cobolparser/
 ```
 
-CI is currently switched off (`.github/workflows/ci.yml` is commented out), so
-run lint, types and the full suite locally before pushing. Measure coverage on
+CI runs only on manual dispatch (`.github/workflows/ci.yml` has no push or PR
+trigger), so run lint, types and the full suite locally before pushing. Measure coverage on
 the pure-Python build: with `COBOLPARSER_ACCEL=1`, coverage.py cannot see the
 code the compiled modules replace. Test layout and markers:
 [.okf/tests.md](.okf/tests.md).
