@@ -14,6 +14,21 @@ deliberate. Anything else appended to the bottom is a mistake: five
 entries, including both 2026-09-15 sections, were found there on
 2026-09-15 and moved back up.
 
+## 2026-11-01 -- open-issue sweep: #790, #793, #794, #795, #796
+
+- [analysis/lineage.md](analysis/lineage.md) (`sql` row): `_sql_flow` unquotes
+  a simple delimited identifier; a non-simple one (`"MY TAB"`) is skipped with
+  a caveat (#790).
+- [analysis/data-use.md](analysis/data-use.md) (DynamicCallAnalyzer): an
+  unreadable VALUE, and a REDEFINES of VALUE-initialised storage it cannot
+  read, mark the items incomplete instead of inventing or dropping values (#793).
+- [mcp.md](mcp.md): `link_decks.parse_decks()` gives one deck per NAME (#794);
+  `sort_layout` reads INCLUDE / OMIT quote-aware with field-to-field tests and
+  reports OUTFIL as not mapped (#795); `slice` follows literal / SET writes,
+  tested fields and controlled writes, and finds a field with no edges (#796).
+  Tests: `tests/unit/test_issues_790_796.py`; `test_mcp_slice.py`'s BATCHSEQ
+  backward slice now includes the loop-deciding SET / MOVE rows.
+
 ## 2026-10-31 -- MCP check_claims: FD / SD records and READ / RETURN (#788)
 
 [mcp.md](mcp.md) (`check_claims` row): `_storage_aliases` (now returning a

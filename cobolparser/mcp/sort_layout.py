@@ -37,10 +37,15 @@ class Segment:
 class SortControl:
     sort_keys: list[tuple[int, int, str, str]]
     sort_verb: str | None
-    tests: list[tuple[str, int, int, str, str]]
+    #: ``(verb, p, m, op, value)``: *value* is the constant as coded, or
+    #: ``(p2, m2)`` when the test compares with other bytes of the record.
+    tests: list[tuple[str, int, int, str, str | tuple[int, int]]]
     inrec: list[Segment] | None
     outrec: list[Segment] | None
     not_mapped: list[str]
+    #: True when an OUTFIL statement reformats an output (BUILD=, OUTREC=,
+    #: OVERLAY=, IFTHEN=, ...): the output layout is not the one mapped.
+    outfil_reformat: bool = False
 
 
 _STATEMENT = re.compile(
@@ -48,9 +53,34 @@ _STATEMENT = re.compile(
     r"(FIELDS|COND|BUILD|OVERLAY|FINDREP|IFTHEN)\s*=\s*",
 )
 _FORMAT = re.compile(r"\bFORMAT\s*=\s*([A-Z]{2})")
-_TEST = re.compile(
-    r"(\d+)\s*,\s*(\d+)\s*,\s*(?:([A-Z]{2})\s*,\s*)?(EQ|NE|GT|GE|LT|LE)\s*,"
-    r"\s*([^,()]+(?:\([^()]*\))?)"
+_OPERATORS = frozenset({"EQ", "NE", "GT", "GE", "LT", "LE"})
+_CONNECTORS = frozenset({"AND", "OR", "&", "|"})
+_OUTFIL = re.compile(r"\bOUTFIL\b")
+_OUTFIL_PARAM = re.compile(r"\s*([A-Z][A-Z0-9]*)\s*=\s*")
+#: OUTFIL parameters that select records or reformat them.
+_OUTFIL_FILTERS = frozenset({"INCLUDE", "OMIT", "SAVE"})
+_OUTFIL_REFORMATS = frozenset(
+    {
+        "OUTREC",
+        "BUILD",
+        "OVERLAY",
+        "IFTHEN",
+        "IFOUTLEN",
+        "FINDREP",
+        "PARSE",
+        "VTOF",
+        "FTOV",
+        "CONVERT",
+        "HEADER1",
+        "HEADER2",
+        "HEADER3",
+        "TRAILER1",
+        "TRAILER2",
+        "TRAILER3",
+        "SECTIONS",
+        "REMOVECC",
+        "NODETAIL",
+    }
 )
 
 
@@ -96,6 +126,101 @@ def _split(text: str) -> list[str]:
     if current.strip():
         items.append(current.strip())
     return items
+
+
+def _flat(text: str) -> list[str]:
+    """Comma-separated items with every parenthesised group opened up:
+    ``(1,2,CH,EQ,C'A'),AND,(3,1,CH,EQ,C'B')`` reads as one flat list."""
+    out: list[str] = []
+    for item in _split(text):
+        inner = _balanced(item, 0) if item.startswith("(") else None
+        if inner is not None and len(inner) == len(item) - 2:
+            out.extend(_flat(inner))
+        else:
+            out.append(item)
+    return out
+
+
+def _tests(
+    verb: str, body: str, not_mapped: list[str]
+) -> list[tuple[str, int, int, str, str | tuple[int, int]]]:
+    """The ``p,m[,f],op,value`` comparisons of an INCLUDE / OMIT COND=.
+
+    *value* is a constant (quotes respected: ``C'N,'``) or another field,
+    ``p2,m2[,f2]``. A condition this does not read goes to *not_mapped*
+    whole, rather than a part of it being reported.
+    """
+    tokens = _flat(body)
+    tests: list[tuple[str, int, int, str, str | tuple[int, int]]] = []
+    i = 0
+    while i < len(tokens):
+        if not (
+            i + 2 < len(tokens) and tokens[i].isdigit() and tokens[i + 1].isdigit()
+        ):
+            not_mapped.append(f"{verb} COND=({body})")
+            return []
+        start, length = int(tokens[i]), int(tokens[i + 1])
+        i += 2
+        if re.fullmatch(r"[A-Z]{2}", tokens[i]) and tokens[i] not in _OPERATORS:
+            i += 1
+        if i >= len(tokens) or tokens[i] not in _OPERATORS or i + 1 >= len(tokens):
+            not_mapped.append(f"{verb} COND=({body})")
+            return []
+        op = tokens[i]
+        i += 1
+        value: str | tuple[int, int]
+        if tokens[i].isdigit() and i + 1 < len(tokens) and tokens[i + 1].isdigit():
+            value = (int(tokens[i]), int(tokens[i + 1]))
+            i += 2
+            if (
+                i < len(tokens)
+                and re.fullmatch(r"[A-Z]{2}", tokens[i])
+                and tokens[i] not in _CONNECTORS
+            ):
+                i += 1
+        else:
+            value = tokens[i]
+            i += 1
+        tests.append((verb, start, length, op, value))
+        if i < len(tokens):
+            if tokens[i] not in _CONNECTORS:
+                not_mapped.append(f"{verb} COND=({body})")
+                return []
+            i += 1
+    return tests
+
+
+def _outfil(text: str, control: SortControl) -> None:
+    """OUTFIL statements: their record selection and reformatting are not
+    mapped (each FNAMES= output may have its own); name them."""
+    for found in _OUTFIL.finditer(text):
+        pos = found.end()
+        params: list[tuple[str, str]] = []
+        while True:
+            param = _OUTFIL_PARAM.match(text, pos)
+            if param is None:
+                break
+            pos = param.end()
+            if pos < len(text) and text[pos] == "(":
+                inner = _balanced(text, pos)
+                if inner is None:
+                    break
+                value = f"({inner})"
+            else:
+                value = re.match(r"[^,\s]*", text[pos:]).group(0)  # type: ignore[union-attr]
+            pos += len(value)
+            params.append((param.group(1), value))
+            if pos < len(text) and text[pos] == ",":
+                pos += 1
+                continue
+            break
+        names = next((v for k, v in params if k in ("FNAMES", "FILES")), None)
+        label = f"OUTFIL FNAMES={names}" if names else "OUTFIL"
+        for key, value in params:
+            if key in _OUTFIL_FILTERS or key in _OUTFIL_REFORMATS:
+                control.not_mapped.append(f"{label}: {key}={value}")
+            if key in _OUTFIL_REFORMATS:
+                control.outfil_reformat = True
 
 
 def _join(lines: list[str]) -> str:
@@ -193,16 +318,7 @@ def parse_sort_control(lines: list[str]) -> SortControl:
                     (int(group[0]), int(group[1]), kind, group[-1])
                 )
         elif verb in ("INCLUDE", "OMIT"):
-            for test in _TEST.finditer(body):
-                control.tests.append(
-                    (
-                        verb,
-                        int(test.group(1)),
-                        int(test.group(2)),
-                        test.group(4),
-                        test.group(5).strip(),
-                    )
-                )
+            control.tests.extend(_tests(verb, body, control.not_mapped))
         elif operand in ("FIELDS", "BUILD"):
             segments = _segments(body, f"{verb} {operand}", control.not_mapped)
             if verb == "INREC":
@@ -211,6 +327,7 @@ def parse_sort_control(lines: list[str]) -> SortControl:
                 control.outrec = segments
         else:
             control.not_mapped.append(f"{verb} {operand}=")
+    _outfil(text, control)
     return control
 
 
@@ -324,7 +441,11 @@ def map_sort(
                 "positions": _span(start, length),
                 # INCLUDE / OMIT run before INREC: input positions.
                 "fields": fields_at(fields, start, length),
-                "test": f"{op} {value}",
+                "test": (
+                    f"{op} {value}"
+                    if isinstance(value, str)
+                    else f"{op} bytes {_span(*value)} " f"({fields_at(fields, *value)})"
+                ),
             }
             for verb, start, length, op, value in control.tests
         ]
@@ -367,7 +488,18 @@ def read_back(
     control: SortControl, fields: list[Field], read_as: list[Field]
 ) -> list[dict[str, Any]] | None:
     """Each field of the layout the output is read through (*read_as*),
-    with the input fields its bytes come from; None without a reformat."""
+    with the input fields its bytes come from; None without a reformat.
+
+    When OUTFIL reformats the output, each field says it is not mapped."""
+    if control.outfil_reformat:
+        return [
+            {
+                "field": name,
+                "positions": _span(offset + 1, length),
+                "gets": "not mapped: an OUTFIL statement reformats the output",
+            }
+            for name, offset, length in read_as
+        ]
     segments = control.outrec if control.outrec is not None else control.inrec
     if segments is None:
         return None

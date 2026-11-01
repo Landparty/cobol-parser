@@ -38,10 +38,13 @@ class TestBackward:
         answer = _tools().slice("BATCHSEQ.cbl", "WS-DEBIT-TOTAL")["answer"]
         assert answer["found"] is True
         # READ -> MOVE TRAN-REC TO SORT-REC -> ADD SORT-AMOUNT TO the total,
-        # and the IF / PERFORM / READ AT END they run under.
-        assert _lines(answer, "data") == [120, 125, 142]
-        assert set(_lines(answer, "control")) == {119, 124, 141}
-        assert answer["ports"] == ["file:TRANIN@11+6"]
+        # and the IF / PERFORM / READ AT END they run under. The literal and
+        # SET writes of the fields those tests read are data rows too: the
+        # SET END-OF-TRANS (121) and MOVE 'E' TO WS-EOF-FLAG (133) decide
+        # the loops, and IF TRAN-DEBIT reads TRAN-TYPE off the file.
+        assert _lines(answer, "data") == [120, 121, 125, 133, 142]
+        assert set(_lines(answer, "control")) == {119, 124, 131, 132, 141}
+        assert answer["ports"] == ["file:TRANIN@10+1", "file:TRANIN@11+6"]
         assert "SORT-REC.SORT-AMOUNT" in answer["fields"]
         # The other fields of the record the total is not computed from.
         assert 138 not in _lines(answer)

@@ -1286,7 +1286,13 @@ def _sort_layout(
     if (step.program or "").upper() not in _SORT_PROGRAMS or not lines:
         return None
     control = parse_sort_control(lines)
-    if not (control.sort_keys or control.tests or control.inrec or control.outrec):
+    if not (
+        control.sort_keys
+        or control.tests
+        or control.inrec
+        or control.outrec
+        or control.not_mapped
+    ):
         return None
     sortin = next(
         (

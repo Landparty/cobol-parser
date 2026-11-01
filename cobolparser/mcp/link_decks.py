@@ -58,50 +58,82 @@ class LinkDeck:
         return row
 
 
-def parse_deck(text: str, file: str) -> LinkDeck:
-    """The INCLUDE, NAME and ENTRY statements of one deck (columns 2-71;
-    ``*`` comment lines skipped)."""
-    from .._lines import split_source_lines
+def parse_decks(text: str, file: str) -> list[LinkDeck]:
+    """The load modules one deck builds (columns 2-71; ``*`` comment lines
+    skipped).
 
-    name: str | None = None
+    Each ``NAME`` statement closes the load module built so far: it gets
+    the INCLUDE and ENTRY statements read since the previous ``NAME``.
+    Statements after the last ``NAME`` (or in a deck with none) form a load
+    module named after the file's stem. A statement whose operand field
+    ends with a comma continues on the next record (``INCLUDE
+    SYSLIB(MODA,`` / ``MODB)``).
+    """
+    decks: list[LinkDeck] = []
     entry: str | None = None
     includes: list[dict[str, Any]] = []
-    for number, line in enumerate(split_source_lines(text), start=1):
-        card = line[:72].strip().upper()
-        if not card or card.startswith("*"):
-            continue
+    for number, card in _statements(text):
         found = _INCLUDE_RE.match(card)
         if found:
-            for item in _INCLUDED_RE.finditer(found.group(1).split(" ")[0]):
-                library, members = item.group(1), item.group(2)
-                if members is None:
-                    includes.append(
-                        {"member": library, "library": None, "line": number}
-                    )
-                    continue
-                for member in members.split(","):
-                    if member.strip():
-                        includes.append(
-                            {
-                                "member": member.strip(),
-                                "library": library,
-                                "line": number,
-                            }
-                        )
+            includes.extend(_included(found.group(1).split(" ")[0], number))
             continue
         found = _NAME_RE.match(card)
         if found:
-            name = found.group(1)
+            decks.append(LinkDeck(file, found.group(1), entry, includes))
+            entry, includes = None, []
             continue
         found = _ENTRY_RE.match(card)
         if found:
             entry = found.group(1)
-    return LinkDeck(
-        file=file,
-        load_module=name or Path(file).stem.upper(),
-        entry=entry,
-        includes=includes,
-    )
+    if includes or entry or not decks:
+        decks.append(LinkDeck(file, Path(file).stem.upper(), entry, includes))
+    return decks
+
+
+def parse_deck(text: str, file: str) -> LinkDeck:
+    """The first load module of a deck (see :func:`parse_decks`)."""
+    return parse_decks(text, file)[0]
+
+
+def _statements(text: str) -> list[tuple[int, str]]:
+    """``(line of its first record, statement text)`` per control statement,
+    continuation records joined on."""
+    from .._lines import split_source_lines
+
+    statements: list[tuple[int, str]] = []
+    pending: tuple[int, str] | None = None
+    for number, line in enumerate(split_source_lines(text), start=1):
+        card = line[:72].strip().upper()
+        if not card or card.startswith("*"):
+            continue
+        if pending is not None:
+            card = pending[1] + card.split(" ")[0]
+            number = pending[0]
+            pending = None
+        operand = card.split(None, 1)[1].split(" ")[0] if " " in card else ""
+        if operand.endswith(","):
+            pending = (number, card)
+            continue
+        statements.append((number, card))
+    if pending is not None:
+        statements.append(pending)
+    return statements
+
+
+def _included(operand: str, number: int) -> list[dict[str, Any]]:
+    """The members an INCLUDE operand field names."""
+    out: list[dict[str, Any]] = []
+    for item in _INCLUDED_RE.finditer(operand):
+        library, members = item.group(1), item.group(2)
+        if members is None:
+            out.append({"member": library, "library": None, "line": number})
+            continue
+        for member in members.split(","):
+            if member.strip():
+                out.append(
+                    {"member": member.strip(), "library": library, "line": number}
+                )
+    return out
 
 
 def link_decks(workspace: Workspace) -> list[LinkDeck]:
@@ -119,7 +151,7 @@ def link_decks(workspace: Workspace) -> list[LinkDeck]:
                     text = Workspace.read_text(path)
                 except OSError:
                     continue
-                decks.append(parse_deck(text, workspace.display(path)))
+                decks.extend(parse_decks(text, workspace.display(path)))
         return decks, workspace.tree_stamps()
 
     held: list[LinkDeck] = workspace.index("link-decks", build)
