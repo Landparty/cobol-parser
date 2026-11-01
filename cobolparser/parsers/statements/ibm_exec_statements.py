@@ -221,13 +221,21 @@ class ExecCicsStatement(CobolStatement):
         self._cics_command = value
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        result: dict[str, Any] = {
             "node_type": self.node_type,
             "cics_command": self.cics_command,
             "cics_text": self.cics_text,
             "options": dict(self.options),
             "location": self.location.to_dict(),
         }
+        # Set by DynamicCallAnalyzer on LINK / XCTL / LOAD PROGRAM(data-name):
+        # the programs the operand can hold, as on a dynamic CALL.
+        possible = self.get_metadata("possible_values")
+        if possible is not None:
+            result["possible_values"] = list(possible)
+            if self.get_metadata("possible_values_incomplete"):
+                result["possible_values_incomplete"] = True
+        return result
 
 
 class ExecSqlStatementParser(IStatementParser):

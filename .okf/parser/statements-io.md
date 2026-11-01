@@ -139,6 +139,11 @@ skips statement separators in its body.
   (`statement_type` `"EXEC CICS"` / `"EXEC IMS"`; `node_type` `"EXEC_CICS"` /
   `"EXEC_IMS"`; `cics_command` / `ims_command` are read-write properties), so
   `get_all_statements()` -- where every analyzer starts -- returns them.
+  `ExecCicsStatement.to_dict()` adds `possible_values` (and
+  `possible_values_incomplete` when True) only once `DynamicCallAnalyzer` has
+  set them, on a LINK / XCTL / LOAD with a data-name `PROGRAM(...)` (see
+  [../analysis/data-use.md](../analysis/data-use.md#dynamiccallanalyzer));
+  every other EXEC CICS node keeps its historical shape.
 - Dispatch: the registry cache key includes the first meaningful token after
   `EXEC`, so `EXEC <newline> CICS` and `EXEC <newline> SQL` reach different
   parsers (see [orchestration.md](orchestration.md)).

@@ -30,6 +30,14 @@ _SQL_ASSIGNED_HOST_VAR_RE = re.compile(
 _CICS_RECEIVING_OPTIONS = frozenset({"INTO", "SET", "RESP", "RESP2"})
 #: EXEC CICS commands every data-name option of which is a receiver.
 _CICS_ALL_RECEIVING_COMMANDS = frozenset({"ASSIGN"})
+#: EXEC CICS commands whose ``PROGRAM(...)`` names the program they reach:
+#: a data-name there is a dynamic program reference, like ``CALL WS-PGM``.
+CICS_PROGRAM_COMMANDS = frozenset({"LINK", "XCTL", "LOAD"})
+#: The data-name a reference starts with, before any subscript, reference
+#: modification or ``OF`` / ``IN`` qualifier.
+_REFERENCE_NAME_RE = re.compile(r"\s*([A-Za-z0-9][A-Za-z0-9_-]*)(.*)", re.DOTALL)
+#: How many table occurrences a REDEFINES table is read for, at most.
+_MAX_TABLE_OCCURRENCES = 4096
 
 
 class DynamicCallAnalyzer:
@@ -124,6 +132,9 @@ class DynamicCallAnalyzer:
 
         # First pass: collect initial values from data definitions
         self._collect_initial_values(ast)
+        # ... and the values a REDEFINES gives the items it lays over storage
+        # initialised by VALUE clauses (a FILLER-built program table).
+        self._collect_redefines_values(self._walk(ast))
 
         # Storage the program does not fill itself -- the caller's (LINKAGE),
         # a READ/RETURN's (FD/SD records), DB2's (SQL INTO) or CICS's (INTO /
@@ -265,6 +276,221 @@ class DynamicCallAnalyzer:
         if hasattr(node, "children"):
             for child in node.children:
                 self._collect_initial_values(child)
+
+    # -- REDEFINES tables ---------------------------------------------------
+
+    def _collect_redefines_values(self, nodes: list[ASTNode]) -> None:
+        """Values of the items a ``REDEFINES`` lays over VALUE-initialised
+        storage: the FILLER-built program table.
+
+        ``05 OPTS-DATA. 10 FILLER PIC X(08) VALUE 'PGMA'. ...`` followed by
+        ``05 OPTS REDEFINES OPTS-DATA. 10 OPT OCCURS n. 15 OPT-PGM PIC
+        X(08).`` gives every ``OPT-PGM`` occurrence the bytes the VALUE
+        clauses put at its offset, so ``CALL OPT-PGM(IDX)`` (or ``EXEC CICS
+        XCTL PROGRAM(OPT-PGM(IDX))``) can reach each of them. An occurrence
+        whose bytes no VALUE clause fixes (a FILLER without VALUE, a non-
+        DISPLAY item, past the end of the redefined item) marks the item
+        incomplete instead. Layouts this does not size exactly (SYNC, OCCURS
+        DEPENDING ON, a nested REDEFINES) are left alone.
+        """
+        for item in nodes:
+            if (
+                not isinstance(item, CobolDataItem)
+                or not item.redefines
+                or item.value_clause is not None
+            ):
+                continue
+            base = self._redefined_item(item)
+            if base is None:
+                continue
+            image = self._value_image(base)
+            if image is None or all(cell is None for cell in image):
+                continue
+            occurrences = self._occurrence_offsets(item)
+            if occurrences is None:
+                continue
+            for sub, starts in occurrences:
+                if sub.is_filler or not sub.name or sub.value_clause is not None:
+                    continue
+                name = sub.name.upper()
+                if (sub.usage or "DISPLAY").upper() != "DISPLAY":
+                    self._incomplete_variables.add(name)
+                    continue
+                length = self._item_length(sub)
+                for start in starts:
+                    cells = image[start : start + length]
+                    if len(cells) < length or any(c is None for c in cells):
+                        self._incomplete_variables.add(name)
+                        continue
+                    value = "".join(c for c in cells if c is not None).rstrip()
+                    self._variable_values.setdefault(name, set()).add(value or " ")
+
+    @staticmethod
+    def _redefined_item(item: CobolDataItem) -> CobolDataItem | None:
+        """The item whose storage *item* redefines -- the original one, at
+        the end of a ``REDEFINES`` chain -- or None when it is not found."""
+        current: CobolDataItem = item
+        for _ in range(16):
+            siblings = [
+                c
+                for c in getattr(current.parent, "children", None) or []
+                if isinstance(c, CobolDataItem)
+            ]
+            if current not in siblings or not current.redefines:
+                return None
+            index = siblings.index(current)
+            target = next(
+                (
+                    c
+                    for c in reversed(siblings[:index])
+                    if (c.name or "").upper() == current.redefines.upper()
+                ),
+                None,
+            )
+            if target is None:
+                return None
+            if not target.redefines:
+                return target
+            current = target
+        return None
+
+    @staticmethod
+    def _item_length(item: CobolDataItem) -> int:
+        """One occurrence's storage length of an elementary item."""
+        # Imported here: the generators package imports the analysis one.
+        from ..generators.data.layout_offsets import _elementary_byte_length
+
+        return _elementary_byte_length(item)
+
+    @classmethod
+    def _item_size(cls, item: CobolDataItem) -> int | None:
+        """*item*'s storage size, every occurrence included, or None for a
+        layout not sized exactly here (SYNC, OCCURS DEPENDING ON, a nested
+        REDEFINES)."""
+        occurs = item.occurs_clause
+        if item.synchronized or (occurs is not None and occurs.depending_on):
+            return None
+        children = [c for c in item.children if isinstance(c, CobolDataItem)]
+        if children:
+            one = 0
+            for child in children:
+                size = None if child.redefines else cls._item_size(child)
+                if size is None:
+                    return None
+                one += size
+        else:
+            one = cls._item_length(item)
+        if occurs is not None:
+            one *= occurs.max_times or occurs.min_times or 1
+        return one
+
+    @classmethod
+    def _occurrence_offsets(
+        cls, root: CobolDataItem
+    ) -> list[tuple[CobolDataItem, list[int]]] | None:
+        """``(elementary item, byte offset of every occurrence)`` for every
+        elementary item under *root*, offsets relative to *root*'s start;
+        None when the layout is not sized exactly."""
+        found: list[tuple[CobolDataItem, list[int]]] = []
+
+        def walk(item: CobolDataItem, starts: list[int]) -> bool:
+            occurs = item.occurs_clause
+            if occurs is not None:
+                size = cls._item_size(item)
+                if size is None:
+                    return False
+                times = occurs.max_times or occurs.min_times or 1
+                one = size // times
+                starts = [s + k * one for s in starts for k in range(times)]
+                if len(starts) > _MAX_TABLE_OCCURRENCES:
+                    return False
+            children = [c for c in item.children if isinstance(c, CobolDataItem)]
+            if not children:
+                found.append((item, starts))
+                return True
+            cursor = 0
+            for child in children:
+                size = None if child.redefines else cls._item_size(child)
+                if size is None or not walk(child, [s + cursor for s in starts]):
+                    return False
+                cursor += size
+            return True
+
+        if root.occurs_clause is not None or cls._item_size(root) is None:
+            return None
+        return found if walk(root, [0]) else None
+
+    @classmethod
+    def _value_image(cls, base: CobolDataItem) -> list[str | None] | None:
+        """The bytes *base*'s VALUE clauses initialise, one character per
+        byte (None where no VALUE fixes it), or None when *base* is not
+        laid out exactly here."""
+        cells: list[str | None] = []
+
+        def fill(item: CobolDataItem) -> bool:
+            if item.occurs_clause is not None or item.synchronized:
+                return False
+            children = [c for c in item.children if isinstance(c, CobolDataItem)]
+            start = len(cells)
+            if children:
+                for child in children:
+                    if child.redefines or not fill(child):
+                        return False
+                if item.value_clause is not None:
+                    text = cls._value_text(item, len(cells) - start, group=True)
+                    cells[start:] = (
+                        list(text)
+                        if text is not None
+                        else [None] * (len(cells) - start)
+                    )
+                return True
+            length = cls._item_length(item)
+            text = cls._value_text(item, length, group=False)
+            cells.extend(list(text) if text is not None else [None] * length)
+            return True
+
+        return cells if fill(base) else None
+
+    @staticmethod
+    def _value_text(item: CobolDataItem, length: int, group: bool) -> str | None:
+        """The *length* DISPLAY characters *item*'s VALUE clause stores, or
+        None when they are not known exactly here."""
+        raw = (item.value_clause or "").strip()
+        if not raw or item.justified:
+            return None
+        if not group and (item.usage or "DISPLAY").upper() != "DISPLAY":
+            return None
+        picture = None if group else item.picture_clause
+        if picture is not None and (picture.is_national or picture.is_edited):
+            return None
+        upper = raw.upper()
+        figuratives = {
+            "SPACE": " ",
+            "SPACES": " ",
+            "ZERO": "0",
+            "ZEROS": "0",
+            "ZEROES": "0",
+            "LOW-VALUE": "\x00",
+            "LOW-VALUES": "\x00",
+            "HIGH-VALUE": "\xff",
+            "HIGH-VALUES": "\xff",
+        }
+        if upper in figuratives:
+            return figuratives[upper] * length
+        repeat = upper.startswith("ALL ")
+        literal = raw[4:].strip() if repeat else raw
+        quoted = len(literal) >= 2 and literal[0] == literal[-1] and literal[0] in "'\""
+        numeric_picture = picture is not None and bool(
+            re.fullmatch(r"(?:9(?:\(\d+\))?)+", picture.pattern.upper())
+        )
+        if quoted and not numeric_picture:
+            text = literal[1:-1]
+            if repeat and text:
+                text = text * (length // len(text) + 1)
+            return text.ljust(length)[:length]
+        if numeric_picture and not repeat and literal.isdigit():
+            return literal.zfill(length) if len(literal) <= length else None
+        return None
 
     def _track_move_statements(self, node: ASTNode) -> None:
         """Track MOVE statements to collect possible values for variables."""
@@ -504,12 +730,18 @@ class DynamicCallAnalyzer:
         one through a chain of MOVEs: a write this analyzer cannot track to
         any of them leaves the CALL's candidate list incomplete (#511)."""
         names = {
-            call.called_program.upper()
+            self.reference_name(call.called_program)[0]
             for call in nodes
             if isinstance(call, CallStatement)
             and call.is_dynamic
             and call.called_program
         }
+        # EXEC CICS LINK / XCTL / LOAD PROGRAM(data-name) reaches a program
+        # through its operand exactly as a dynamic CALL does.
+        names.update(
+            self.reference_name(operand)[0]
+            for _, operand in self._cics_program_operands(nodes)
+        )
         moves = self._identifier_moves(nodes)
         changed = bool(names)
         while changed:
@@ -795,10 +1027,47 @@ class DynamicCallAnalyzer:
             related.discard(name)
         return overlapping
 
+    @staticmethod
+    def _cics_program_operand(node: ASTNode) -> str | None:
+        """The data-name operand of an ``EXEC CICS LINK | XCTL | LOAD
+        PROGRAM(...)``, or None (another command, or a literal program)."""
+        if getattr(node, "node_type", None) != "EXEC_CICS":
+            return None
+        command = (getattr(node, "cics_command", "") or "").upper()
+        if command not in CICS_PROGRAM_COMMANDS:
+            return None
+        options = getattr(node, "options", None) or {}
+        operand = next((v for k, v in options.items() if k.upper() == "PROGRAM"), None)
+        literal = {o.upper() for o in getattr(node, "literal_options", None) or ()}
+        if not isinstance(operand, str) or not operand.strip() or "PROGRAM" in literal:
+            return None
+        return operand.strip()
+
+    @classmethod
+    def _cics_program_operands(cls, nodes: list[ASTNode]) -> list[tuple[ASTNode, str]]:
+        """``(statement, operand)`` of every dynamic EXEC CICS program
+        reference among *nodes*."""
+        found: list[tuple[ASTNode, str]] = []
+        for node in nodes:
+            operand = cls._cics_program_operand(node)
+            if operand is not None:
+                found.append((node, operand))
+        return found
+
     def _populate_dynamic_calls(self, node: ASTNode) -> None:
         """Find dynamic CALL statements and populate their possible values."""
         if self._is_other_unit(node):
             return
+        operand = self._cics_program_operand(node)
+        if operand is not None:
+            # EXEC CICS XCTL PROGRAM(WS-PGM): the same candidates a
+            # ``CALL WS-PGM`` would get, on the statement's metadata.
+            values, incomplete = self.resolve_variable(operand)
+            node.set_metadata("possible_values", values)
+            if incomplete:
+                node.set_metadata("possible_values_incomplete", True)
+            else:
+                node.metadata.pop("possible_values_incomplete", None)
         if isinstance(node, CallStatement):
             if node.is_dynamic and node.called_program:
                 # Look up the variable name in our tracked values
@@ -828,11 +1097,29 @@ class DynamicCallAnalyzer:
         (a container's GLOBAL item): the values, even when present, are then
         not exhaustive.
         """
-        var_name = variable_name.upper()
+        var_name, partial = self.reference_name(variable_name)
+        if partial:
+            # ``PROGRAM(WS-PGM(1:5))`` reads part of the item: its values
+            # are not the operand's.
+            return [], True
         incomplete = var_name in self._incomplete_variables or (
             self._declared_names is not None and var_name not in self._declared_names
         )
         return sorted(self._variable_values.get(var_name, ())), incomplete
+
+    @staticmethod
+    def reference_name(reference: str) -> tuple[str, bool]:
+        """``(data-name, partial)`` of an operand as a statement spells it.
+
+        ``OPT-PGM(WS-IDX)``, ``OPT-PGM ( WS-IDX )`` and ``OPT-PGM OF GRP``
+        all name ``OPT-PGM`` (upper-cased); every occurrence of a table item
+        is a candidate. *partial* is True for a reference-modified operand
+        (``WS-PGM(1:5)``), which reads part of the item only.
+        """
+        match = _REFERENCE_NAME_RE.match(reference or "")
+        if match is None:
+            return (reference or "").strip().upper(), False
+        return match.group(1).upper(), ":" in match.group(2)
 
     @staticmethod
     def _is_definite_literal(source: str) -> bool:

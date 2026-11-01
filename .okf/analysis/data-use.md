@@ -1002,6 +1002,34 @@ item still marks it incomplete. Pinned by
 `tests/unit/test_issue_593_set_entry_dynamic_call.py` (also the
 codebase-graph edge).
 
+**EXEC CICS LINK / XCTL / LOAD `PROGRAM(data-name)` is a dynamic call.**
+`_cics_program_operands()` adds each such operand (not in `literal_options`)
+to `_value_sources()`, so every untracked-write and incompleteness rule above
+applies to it as to a `CALL` variable, and `_populate_dynamic_calls()` sets
+`possible_values` / `possible_values_incomplete` metadata on the statement
+(emitted by `ExecCicsStatement.to_dict()`). `resolve_variable()` (used by the
+codebase graph and the MCP tools for the same operands) reads an operand
+through `reference_name()`: `OPT-PGM(IDX)`, `OPT-PGM ( IDX )` and `OPT-PGM OF
+GRP` all name `OPT-PGM`, every occurrence a candidate; a reference-modified
+operand (`WS-PGM(1:5)`) resolves to nothing, incomplete. Pinned by
+`tests/unit/test_dynamic_program_tables.py::TestCicsProgramOperand`.
+
+**A REDEFINES over VALUE-initialised storage gives its items values.**
+`_collect_redefines_values()` (after `_collect_initial_values()`) builds the
+byte image the original item's VALUE clauses initialise (`_value_image()`:
+quoted literals space-padded, unsigned `9(n)` integers zero-filled,
+figuratives and `ALL` repeated; anything else, a FILLER without VALUE, JUST,
+non-DISPLAY or edited, is unknown bytes) and reads each elementary item of
+the redefining side at every OCCURS occurrence (`_occurrence_offsets()`). The
+CardDemo menu (`COMEN02Y`: FILLER entries, `CDEMO-MENU-OPTIONS REDEFINES
+CDEMO-MENU-OPTIONS-DATA` with `OCCURS 12`) so gives
+`CDEMO-MENU-OPT-PGMNAME` its eleven program names; an occurrence over unknown
+bytes (the twelfth, past the redefined item) marks the item incomplete.
+Layouts not sized exactly here (SYNC, OCCURS DEPENDING ON, a nested
+REDEFINES, more than 4096 occurrences) are skipped. A write to either side is
+caught by the REDEFINES cluster of `_overlapping_names()`. Pinned by
+`tests/unit/test_dynamic_program_tables.py::TestRedefinesTable`.
+
 ## IO coverage and diagnostics helpers
 
 `io_coverage_reporter.py` (`IOCoverageReporter`, `CoverageStatus`, `TestType`,
