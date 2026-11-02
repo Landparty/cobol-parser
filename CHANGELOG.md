@@ -282,6 +282,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   section's `min_severity` and `fail_on` also reach `call-check` and
   `widen-check`). A tracked 1.4 MB `coverage.json` is removed and ignored.
 
+## [3.3.0](https://github.com/Landparty/cobol-parser/compare/v3.2.1...v3.3.0) (2026-11-02)
+
+
+### Features
+
+* **analysis:** resolve dynamic EXEC CICS PROGRAM operands and REDEFINES tables ([b2125b7](https://github.com/Landparty/cobol-parser/commit/b2125b736d5f64a520cecab390e44a31e0ce9bae))
+* **analysis:** resolve dynamic EXEC CICS PROGRAM operands and REDEFINES tables ([02de2b0](https://github.com/Landparty/cobol-parser/commit/02de2b010593c2564d0629354f038326f2ca9a2d))
+* **constraints:** class and sign tests in EVALUATE TRUE selector text ([c7ac6df](https://github.com/Landparty/cobol-parser/commit/c7ac6dfd8e621841a671855851700e42ec70941f))
+* **definitions:** parse CICS CSD, BMS maps, DB2 DDL, IMS DBD and PSB ([#797](https://github.com/Landparty/cobol-parser/issues/797)) ([9b0605a](https://github.com/Landparty/cobol-parser/commit/9b0605ac903759164b52738b172d1ede33165ea3))
+* **scenarios:** CICS COMMAREA and EIB as scenario inputs, named constants, edge scenarios ([a9ca5a7](https://github.com/Landparty/cobol-parser/commit/a9ca5a79434ae3b4090dd87f7d03ecb47d45f0e8))
+* **scenarios:** FILE STATUS scenarios for VSAM programs ([5b7a808](https://github.com/Landparty/cobol-parser/commit/5b7a8089831aa5b759334300e7af8c4546adcfad))
+* **scenarios:** FILE STATUS scenarios for VSAM programs ([36adff6](https://github.com/Landparty/cobol-parser/commit/36adff6e318b7ba2f54cc917e8d83d42b37b2773))
+* **scenarios:** reach CICS, COMMAREA-limit and class-test branches in generated fixtures ([0c91e25](https://github.com/Landparty/cobol-parser/commit/0c91e259111f76634b32d4aae9022eac8e9594c9))
+
+
+### Bug Fixes
+
+* **definitions:** JCL is never a definition member, DDL view tables and defaults, PSB NAME= ([#800](https://github.com/Landparty/cobol-parser/issues/800), [#801](https://github.com/Landparty/cobol-parser/issues/801), [#802](https://github.com/Landparty/cobol-parser/issues/802)) ([63e2e9d](https://github.com/Landparty/cobol-parser/commit/63e2e9de70526edcac2f7a933113c25671db7619))
+* **definitions:** JCL is never a definition member, DDL view tables and defaults, PSB NAME= ([#800](https://github.com/Landparty/cobol-parser/issues/800), [#801](https://github.com/Landparty/cobol-parser/issues/801), [#802](https://github.com/Landparty/cobol-parser/issues/802)) ([0c42c26](https://github.com/Landparty/cobol-parser/commit/0c42c26cacc265c01e6ceb347ca5918611e1c637))
+* **deps:** the [hlasm] extra installs hlasm-parser ([7719009](https://github.com/Landparty/cobol-parser/commit/7719009979a8e2b1b0a177277463e51cfb468a34))
+* **deps:** the [hlasm] extra installs hlasm-parser ([0763cb4](https://github.com/Landparty/cobol-parser/commit/0763cb4ad1bcaa1b34148ec65f336db5208905f0))
+* **deps:** the [hlasm] extra installs hlasm-parser ([6010df5](https://github.com/Landparty/cobol-parser/commit/6010df5682935242d80749482323eec95020bef9))
+* lineage skips LATERAL/XMLTABLE/UNNEST FROM items; check_claims sees FD record writes ([0316d41](https://github.com/Landparty/cobol-parser/commit/0316d41df5a9fb8b181e377bd27478cfe4d65267)), closes [#787](https://github.com/Landparty/cobol-parser/issues/787) [#788](https://github.com/Landparty/cobol-parser/issues/788)
+* lineage skips LATERAL/XMLTABLE/UNNEST; check_claims sees FD record writes ([#787](https://github.com/Landparty/cobol-parser/issues/787), [#788](https://github.com/Landparty/cobol-parser/issues/788)) ([2b78373](https://github.com/Landparty/cobol-parser/commit/2b78373c203b504d98699fc318bb0d5bfcc12fbe))
+* **lineage:** no phantom table from an untraced FROM item's correlation name ([b944e24](https://github.com/Landparty/cobol-parser/commit/b944e24e20755789b8e91d3ea7e3c9ec005ba05e)), closes [#782](https://github.com/Landparty/cobol-parser/issues/782)
+* **mcp:** check_claims matches whole names and counts writes through storage ([5dbacfa](https://github.com/Landparty/cobol-parser/commit/5dbacfa7b1cdb7bb48b5d755356909b15225c3ce)), closes [#776](https://github.com/Landparty/cobol-parser/issues/776) [#778](https://github.com/Landparty/cobol-parser/issues/778)
+* no phantom SQL tables from correlation names; check_claims whole names and storage writes ([01389e6](https://github.com/Landparty/cobol-parser/commit/01389e6be858da6bc9e10448a2e535dfe091a837))
+* **scenarios:** no FILE STATUS 02 case for a READ by the prime key ([52290ea](https://github.com/Landparty/cobol-parser/commit/52290eab22662a78bdcc5a02027d46a1b499716c))
+
 ## [3.2.1](https://github.com/Landparty/cobol-parser/compare/v3.2.0...v3.2.1) (2026-10-30)
 
 
