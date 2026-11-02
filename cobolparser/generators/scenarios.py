@@ -27,7 +27,7 @@ from __future__ import annotations
 import itertools
 import re
 from dataclasses import dataclass, field, replace
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 from typing import Any
 
 from ..analysis.boundary_inventory import BoundaryReport
@@ -288,6 +288,9 @@ class ScenarioPlanner:
         details: list[ArmOutcome] = []
         unresolved: list[str] = []
         candidates: list[tuple[str, PlannedScenario]] = []  # (sort_key, candidate)
+        #: Each targeted arm again with a numeric comparison at its edge
+        #: (`_edge_scenarios`): never merged, no outcome of their own.
+        edges: list[tuple[str, PlannedScenario]] = []
         shared_areas = _shared_record_areas(boundary_report)
 
         for branch in constraint_report.branches:
@@ -433,6 +436,11 @@ class ScenarioPlanner:
                     continue
                 sort_key = f"{branch.line or 0:010d}:{branch.column or 0:010d}:{arm_id}"
                 candidates.append((sort_key, scenario))
+                if not correlations:
+                    edges.extend(
+                        (sort_key, edge)
+                        for edge in _edge_scenarios(scenario, path, branch.arms[arm_id])
+                    )
 
             # A base arm the control-flow graph expects (e.g. "ELSE") with no
             # representation at all in branch.arms -- neither bare nor any
@@ -451,6 +459,8 @@ class ScenarioPlanner:
         candidates.sort(key=lambda pair: pair[0])
         scenarios, merge_outcomes = _merge_candidates(candidates, shared_areas)
         details.extend(merge_outcomes)
+        edges.sort(key=lambda pair: pair[0])
+        scenarios.extend(edge for _, edge in edges)
 
         if mode == "all":
             scenarios.extend(_fixed_families(constraint_report, boundary_report))
@@ -865,6 +875,73 @@ def _solve_with_path(
         witnesses, reason = _solve_arm(own)
         return witnesses, reason, []
     return {}, reason, []
+
+
+#: Relational ops whose edge is a value the arm still takes: the literal
+#: itself for `<=`/`>=`, one step inside it for `<`/`>`.
+_EDGE_OPS = frozenset({"lt", "le", "gt", "ge"})
+
+
+def _edge_scenarios(
+    base: PlannedScenario,
+    path: list[FieldConstraint],
+    own: list[FieldConstraint],
+) -> list[PlannedScenario]:
+    """`base` again once per numeric comparison of the arm's own conjuncts,
+    with that field pinned to the comparison's edge: `ID NOT > MAX-ID`
+    is also run at exactly `MAX-ID`, so a change to the limit (or to `>`
+    vs `>=`) moves a case from one arm to the other. Edges the base
+    witness already sits on, or that no longer solve with the rest of the
+    arm, are skipped."""
+    out: list[PlannedScenario] = []
+    seen: set[tuple[str, str]] = set()
+    for constraint in own:
+        if (
+            constraint.op not in _EDGE_OPS
+            or constraint.negated
+            or not constraint.values
+        ):
+            continue
+        spec = constraint.field.spec
+        if spec.category not in (FieldCategory.NUMERIC, FieldCategory.NUMERIC_EDITED):
+            continue
+        try:
+            literal = Decimal(str(constraint.values[0]).replace(" ", ""))
+        except InvalidOperation:
+            continue
+        step = (
+            Decimal(1).scaleb(-spec.decimal_digits)
+            if spec.decimal_digits
+            else Decimal(1)
+        )
+        edge = {
+            "le": literal,
+            "ge": literal,
+            "lt": literal - step,
+            "gt": literal + step,
+        }[constraint.op]
+        name = spec.qualified_name
+        pin = FieldConstraint(constraint.field, "eq", (str(edge),), constraint.origin)
+        witnesses, reason = _solve_arm([*path, *own, pin])
+        if reason is not None or witnesses.get(name) == base.witnesses.get(name):
+            continue
+        if (name, witnesses[name]) in seen:
+            continue
+        seen.add((name, witnesses[name]))
+        out.append(
+            replace(
+                base,
+                name=f"{base.name} at {spec.name} = {witnesses[name]}",
+                intent=f"{base.intent}; {spec.name} at the edge of its comparison",
+                witnesses=witnesses,
+                field_constraints={
+                    key: list(value) for key, value in base.field_constraints.items()
+                },
+                arm_keys=list(base.arm_keys),
+                path_gaps=list(base.path_gaps),
+            )
+        )
+    return out
 
 
 def _solve_arm(

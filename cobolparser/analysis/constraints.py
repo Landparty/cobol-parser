@@ -473,6 +473,7 @@ class ConstraintExtractor:
 
         fed_names = _boundary_fed_names(boundary_report)
         fed_names.update(name.upper() for name in extra_fed_names)
+        index.named_constants = _named_constants(ast, index)
         eof_flags = _collect_eof_flags(ast)
         carriers = _Carriers(ast, procedure, index, fed_names)
 
@@ -1302,8 +1303,18 @@ def _build_relational_constraint(
     if not left_text:
         unsupported.append(f"{origin}: comparison missing left operand")
         return None
+    left_text = _fold_cics_value(left_text)
+    right_text = _fold_cics_value(right_text) if right_text else right_text
     left_field = index.resolve(left_text)
     right_field = index.resolve(right_text) if right_text else None
+    if left_field is not None and right_field is not None:
+        # A WORKING-STORAGE item the program never changes is its VALUE.
+        right_constant = _constant_of(right_field, index)
+        left_constant = _constant_of(left_field, index)
+        if right_constant is not None and left_constant is None:
+            right_text, right_field = right_constant, None
+        elif left_constant is not None and right_constant is None:
+            left_text, left_field = left_constant, None
 
     if left_field is not None and right_field is not None:
         if site is not None:
@@ -1888,6 +1899,105 @@ def _holds_losslessly(carrier: Any, source: Any) -> bool:
             return False
         return bool(carrier.size) and carrier.size >= (source.size or 0)
     return False
+
+
+#: ``DFHRESP(condition)`` values (the EIBRESP code the CICS translator
+#: substitutes), for a comparison of a RESP field against one.
+_DFHRESP_VALUES: dict[str, int] = {
+    "NORMAL": 0,
+    "ERROR": 1,
+    "RDATT": 2,
+    "WRBRK": 3,
+    "EOF": 4,
+    "EODS": 5,
+    "EOC": 6,
+    "INBFMH": 7,
+    "ENDINPT": 8,
+    "NONVAL": 9,
+    "NOSTART": 10,
+    "TERMIDERR": 11,
+    "FILENOTFOUND": 12,
+    "DSIDERR": 12,
+    "NOTFND": 13,
+    "DUPREC": 14,
+    "DUPKEY": 15,
+    "INVREQ": 16,
+    "IOERR": 17,
+    "NOSPACE": 18,
+    "NOTOPEN": 19,
+    "ENDFILE": 20,
+    "ILLOGIC": 21,
+    "LENGERR": 22,
+    "QZERO": 23,
+    "SIGNAL": 24,
+    "QBUSY": 25,
+    "ITEMERR": 26,
+    "PGMIDERR": 27,
+    "TRANSIDERR": 28,
+    "ENDDATA": 29,
+    "EXPIRED": 31,
+    "MAPFAIL": 36,
+    "INVMPSZ": 38,
+    "QIDERR": 44,
+    "SYSIDERR": 53,
+    "NOTAUTH": 70,
+    "DISABLED": 84,
+}
+_DFHRESP_RE = re.compile(r"^DFHRESP\s*\(\s*([A-Z0-9]+)\s*\)$", re.IGNORECASE)
+
+
+def _fold_cics_value(text: str) -> str:
+    """``DFHRESP(NOTFND)`` as the number the CICS translator puts there."""
+    match = _DFHRESP_RE.match(text.strip())
+    if match is None:
+        return text
+    value = _DFHRESP_VALUES.get(match.group(1).upper())
+    return text if value is None else str(value)
+
+
+#: xref roles that never change the referenced item.
+_READ_ONLY_ROLES = frozenset({"read", "condition", "subscript"})
+
+
+def _named_constants(ast: CobolProgram, index: ProgramLayoutIndex) -> dict[str, str]:
+    """``{qualified name: VALUE literal}`` of every WORKING-STORAGE
+    elementary item with a literal VALUE that nothing in the program writes,
+    neither the item nor a group above it (a MOVE to the group, a READ INTO
+    it, an INITIALIZE, a CALL that may change it all count as writes)."""
+    from .xref import XrefAnalyzer
+
+    try:
+        entries = XrefAnalyzer().analyze(ast).entries
+    except Exception:  # noqa: BLE001 - best effort: no constants
+        return {}
+    changed = {
+        entry.name.upper()
+        for entry in entries
+        if any(ref.role not in _READ_ONLY_ROLES for ref in entry.references)
+    }
+    constants: dict[str, str] = {}
+    for entry in entries:
+        if entry.section != "WORKING-STORAGE" or entry.level in (None, 66, 88):
+            continue
+        resolved = index.resolve(entry.name)
+        if resolved is None or resolved.section != "working_storage":
+            continue
+        spec = resolved.spec
+        if spec.redefines or spec.subscripts or not spec.value_clause:
+            continue
+        if any(part.upper() in changed for part in (*spec.path, spec.name)):
+            continue
+        if resolved.record.name.upper() in changed:
+            continue
+        value = str(spec.value_clause).strip()
+        if not _is_literal_operand(value) or _figurative_name(value) is not None:
+            continue
+        constants[spec.qualified_name.upper()] = value
+    return constants
+
+
+def _constant_of(resolved: ResolvedField, index: ProgramLayoutIndex) -> str | None:
+    return index.named_constants.get(resolved.spec.qualified_name.upper())
 
 
 def _boundary_fed_names(report: BoundaryReport) -> set[str]:

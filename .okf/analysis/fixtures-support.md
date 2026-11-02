@@ -260,6 +260,12 @@ turns a field's constraints into a concrete witness value.
 `extract(..., extra_fed_names=[...])` (2026-10-21) adds data names to treat
 as boundary-fed on top of the report's: `ProgramFixtureGenerator(
 entry_parameters=True)` passes the program's own USING items.
+Since 2026-11-02 `_build_relational_constraint` also folds `DFHRESP(<cond>)`
+to its EIBRESP number (`_fold_cics_value`) and treats a WORKING-STORAGE item
+with a literal VALUE that nothing writes (xref roles other than read /
+condition / subscript, on the item, a group above it or its record) as that
+literal (`_named_constants`, kept on `ProgramLayoutIndex.named_constants`),
+so `IF ID NOT > WS-MAX-ID` is a comparison against `899999`.
 
 ```python
 from cobolparser.analysis.constraints import ConstraintExtractor
