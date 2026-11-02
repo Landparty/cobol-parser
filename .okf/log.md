@@ -14,6 +14,19 @@ deliberate. Anything else appended to the bottom is a mistake: five
 entries, including both 2026-09-15 sections, were found there on
 2026-09-15 and moved back up.
 
+## 2026-11-02 -- FILE STATUS codes follow file organization and OPEN mode
+
+- [generators/fixtures.md](generators/fixtures.md),
+  [analysis/fixtures-support.md](analysis/fixtures-support.md): integrated
+  testing review. `StatementSite` gains `organization` and `open_modes`; the
+  file-status family drops codes the file's organization never returns, so
+  an ESDS / QSAM WRITE fails with `"34"` (was `"22"`, a key error), and an
+  OPEN OUTPUT is never given `"35"`. A sequential READ (READ NEXT /
+  PREVIOUS) gets its `"02"` case when its key of reference is an alternate
+  key WITH DUPLICATES (`_KeyOfReference`: tracked per paragraph from START /
+  keyed READ). REWRITE can return `"23"` (random access, record gone).
+  Tests: `tests/unit/generators/test_vsam_status_scenarios.py`.
+
 ## 2026-11-02 -- definition detection skips JCL, DDL view tables, PSB NAME=
 
 - [definitions.md](definitions.md): `detect_definition_kind` returns None for a

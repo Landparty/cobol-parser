@@ -46,7 +46,13 @@ from ..models.statements.control import (
     SearchStatement,
 )
 from ..models.statements.data import MoveStatement
-from ..models.statements.io import IOReadStatement
+from ..models.statements.io import (
+    IOOpenStatement,
+    IOReadStatement,
+    IORewriteStatement,
+    IOStartStatement,
+    IOWriteStatement,
+)
 from ..models.statements.misc import ReturnStatement
 from .boundary_inventory import (
     BoundaryRef,
@@ -460,11 +466,20 @@ class StatementSite:
     paragraph: str
     enclosing: tuple[tuple[str, str], ...] = ()
     handlers: tuple[tuple[int, str], ...] = ()
-    #: A READ that can return FILE STATUS "02" (another record has the same
-    #: alternate key): one by ``KEY IS`` an ALTERNATE RECORD KEY WITH
-    #: DUPLICATES. A READ by the prime key never can; a sequential one can
-    #: when its key of reference is such a key, which is not tracked.
+    #: A statement that can return FILE STATUS "02" (another record has the
+    #: same alternate key): a READ by ``KEY IS`` an ALTERNATE RECORD KEY WITH
+    #: DUPLICATES, a sequential READ whose key of reference is such a key
+    #: (`_KeyOfReference`), and a WRITE / REWRITE of a file that has one. A
+    #: READ by the prime key never can.
     duplicate_key: bool = False
+    #: The organization of the one file the statement acts on (READ, WRITE,
+    #: REWRITE, DELETE, START): ``INDEXED``, ``RELATIVE`` or ``SEQUENTIAL``
+    #: (also LINE SEQUENTIAL, and a SELECT with no ORGANIZATION clause and
+    #: no key). ``None`` when the file's SELECT is not in the program.
+    organization: str | None = None
+    #: OPEN only: ``(file, mode)`` of each file it opens, uppercased, the
+    #: mode one of ``INPUT``, ``OUTPUT``, ``I-O``, ``EXTEND``.
+    open_modes: tuple[tuple[str, str], ...] = ()
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -472,6 +487,8 @@ class StatementSite:
             "enclosing": [list(pair) for pair in self.enclosing],
             "handlers": [list(pair) for pair in self.handlers],
             "duplicate_key": self.duplicate_key,
+            "organization": self.organization,
+            "open_modes": [list(pair) for pair in self.open_modes],
         }
 
 
@@ -2422,21 +2439,146 @@ def _record_transfer_site(
         )
 
 
-def _duplicate_key_read(statement: Any, index: ProgramLayoutIndex) -> bool:
-    if not isinstance(statement, IOReadStatement) or not statement.file_name:
-        return False
-    facts = index.file_facts(statement.file_name)
+def _file_organization(facts: Any) -> str | None:
+    """`StatementSite.organization` of one file's `FileFacts`."""
     if facts is None:
-        return False
-    duplicates = {
+        return None
+    organization = " ".join(str(facts.organization or "").upper().split())
+    if "INDEXED" in organization:
+        return "INDEXED"
+    if "RELATIVE" in organization:
+        return "RELATIVE"
+    if "SEQUENTIAL" in organization:
+        return "SEQUENTIAL"
+    if not organization and not facts.record_key and not facts.relative_key:
+        # No ORGANIZATION clause: the COBOL default, sequential.
+        return "SEQUENTIAL"
+    return None
+
+
+def _duplicate_keys(facts: Any) -> set[str]:
+    return {
         str(key.get("key", "")).upper()
         for key in facts.alternate_keys
         if key.get("duplicates_allowed")
     }
-    # A sequential READ returns "02" only when the key of reference (set by
-    # an earlier START / READ ... KEY) is such a key, which is not tracked:
-    # left out rather than guessed.
-    return bool(statement.key_name) and statement.key_name.upper() in duplicates
+
+
+def _is_sequential_read(statement: IOReadStatement, facts: Any) -> bool:
+    """A READ NEXT / PREVIOUS, or a READ of a file accessed sequentially."""
+    mode = str(statement.access_mode or "").upper()
+    if mode in ("NEXT", "PREVIOUS"):
+        return True
+    return not statement.key_name and (
+        str(facts.access_mode or "").upper() == "SEQUENTIAL"
+    )
+
+
+class _KeyOfReference:
+    """Which key each sequential READ of an indexed file reads by.
+
+    The key of reference is the prime key after an OPEN, and whatever key
+    the last ``START`` (``KEY IS``, the prime key when omitted) or random
+    ``READ ... KEY IS`` named. Tracked in source order within a paragraph;
+    a sequential READ with none before it in its paragraph takes the one
+    key every START / keyed READ of the file in the program names (the
+    prime key when there are none), and is left untracked (`None`) when
+    they name different keys."""
+
+    def __init__(self, procedure: CobolDivision, index: ProgramLayoutIndex) -> None:
+        self._index = index
+        named: dict[str, set[str]] = {}
+        for _, statement, _ in _walk_statements(procedure):
+            setting = self._sets(statement)
+            if setting is not None:
+                named.setdefault(setting[0], set()).add(setting[1])
+        self._program_wide = named
+        self._current: dict[str, str] = {}
+
+    def _prime(self, file_name: str) -> str:
+        facts = self._index.file_facts(file_name)
+        return str(facts.record_key or "").upper() if facts is not None else ""
+
+    def _sets(self, statement: Any) -> tuple[str, str] | None:
+        """``(file, key)`` when the statement sets the key of reference."""
+        if isinstance(statement, IOStartStatement) and statement.file_name:
+            file_name = statement.file_name.upper()
+            key = str(statement.key_name or "").upper() or self._prime(file_name)
+            return file_name, key
+        if (
+            isinstance(statement, IOReadStatement)
+            and statement.file_name
+            and statement.key_name
+            and str(statement.access_mode or "").upper() not in ("NEXT", "PREVIOUS")
+        ):
+            return statement.file_name.upper(), statement.key_name.upper()
+        return None
+
+    def start_paragraph(self) -> None:
+        self._current = {}
+
+    def key_for(self, statement: IOReadStatement) -> str | None:
+        """The key of reference of a sequential READ, or None untracked."""
+        file_name = str(statement.file_name or "").upper()
+        if file_name in self._current:
+            return self._current[file_name]
+        named = self._program_wide.get(file_name)
+        if not named:
+            return self._prime(file_name)
+        return next(iter(named)) if len(named) == 1 else None
+
+    def visit(self, statement: Any) -> None:
+        """Record a statement walked in source order."""
+        setting = self._sets(statement)
+        if setting is not None:
+            self._current[setting[0]] = setting[1]
+
+
+def _statement_file(statement: Any, index: ProgramLayoutIndex) -> str | None:
+    """The file a READ / WRITE / REWRITE / DELETE / START acts on."""
+    file_name = getattr(statement, "file_name", None)
+    if isinstance(file_name, str) and file_name:
+        return file_name.upper()
+    record_name = getattr(statement, "record_name", None)
+    if isinstance(record_name, str) and record_name:
+        record = record_name.upper()
+        for name in index.file_names():
+            facts = index.file_facts(name)
+            if facts is not None and record in (r.upper() for r in facts.record_names):
+                return name.upper()
+    return None
+
+
+def _duplicate_key_status(
+    statement: Any, index: ProgramLayoutIndex, keys: _KeyOfReference
+) -> bool:
+    """`StatementSite.duplicate_key` of one statement."""
+    file_name = _statement_file(statement, index)
+    facts = index.file_facts(file_name) if file_name else None
+    if facts is None:
+        return False
+    duplicates = _duplicate_keys(facts)
+    if not duplicates:
+        return False
+    if not isinstance(statement, IOReadStatement):
+        # A WRITE / REWRITE that adds a duplicate alternate key value.
+        return isinstance(statement, (IOWriteStatement, IORewriteStatement))
+    if _is_sequential_read(statement, facts):
+        key = keys.key_for(statement)
+        return key is not None and key in duplicates
+    return str(statement.key_name or "").upper() in duplicates
+
+
+def _open_modes(statement: Any) -> tuple[tuple[str, str], ...]:
+    if not isinstance(statement, IOOpenStatement):
+        return ()
+    modes = {str(k).upper(): str(v).upper() for k, v in statement.file_modes.items()}
+    default = str(statement.open_mode or "").upper()
+    return tuple(
+        (name.upper(), modes.get(name.upper(), default))
+        for name in statement.file_names
+        if name
+    )
 
 
 def _statement_sites(
@@ -2450,6 +2592,7 @@ def _statement_sites(
     sites: dict[int, StatementSite] = {}
     if not lines:
         return sites
+    keys = _KeyOfReference(procedure_division, index)
 
     def walk(
         paragraph: str,
@@ -2461,12 +2604,18 @@ def _statement_sites(
             location = getattr(statement, "location", None)
             line = location.line if location is not None else None
             if line in lines and line not in sites:
+                file_name = _statement_file(statement, index)
                 sites[line] = StatementSite(
                     paragraph,
                     enclosing,
                     handlers,
-                    _duplicate_key_read(statement, index),
+                    _duplicate_key_status(statement, index, keys),
+                    _file_organization(
+                        index.file_facts(file_name) if file_name else None
+                    ),
+                    _open_modes(statement),
                 )
+            keys.visit(statement)
             is_branch = isinstance(
                 statement, (IfStatement, EvaluateStatement, SearchStatement)
             )
@@ -2491,6 +2640,7 @@ def _statement_sites(
                 walk(paragraph, nested, deeper, outer)
 
     for paragraph in _all_paragraphs(procedure_division):
+        keys.start_paragraph()
         walk(paragraph.paragraph_name, paragraph.statements, (), ())
     return sites
 

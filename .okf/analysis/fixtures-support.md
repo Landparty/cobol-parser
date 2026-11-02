@@ -306,12 +306,19 @@ so the planner's file-status family knows which FILE STATUS codes each
 statement's status field is checked for. It is never a branch constraint:
 the file operation sets the field, not the data. `statement_sites` maps the
 line of each boundary statement to a `StatementSite(paragraph, enclosing,
-handlers, duplicate_key)`: its arm chain like a branch's `enclosing`, the
-`(outer line, clause)` handler clauses (`INVALID_KEY`, `NOT_INVALID_KEY`,
-`AT_END`, `NOT_AT_END`) of other file statements it is nested in, and, for
-a READ, whether it can return `"02"` (by `KEY IS` an alternate key WITH
-DUPLICATES; a sequential READ's key of reference is not tracked, so it is
-never given `"02"`).
+handlers, duplicate_key, organization, open_modes)`: its arm chain like a
+branch's `enclosing`, the `(outer line, clause)` handler clauses
+(`INVALID_KEY`, `NOT_INVALID_KEY`, `AT_END`, `NOT_AT_END`) of other file
+statements it is nested in; whether it can return `"02"` (a READ by `KEY
+IS` an alternate key WITH DUPLICATES, a sequential READ whose key of
+reference is such a key, a WRITE / REWRITE of a file that has one); the
+organization of the file it acts on (`INDEXED`, `RELATIVE`, `SEQUENTIAL`,
+the last also for no ORGANIZATION clause); and, for an OPEN, the mode of
+each file. The key of reference (`_KeyOfReference`) is the one the last
+START / keyed READ of the file named earlier in the same paragraph, else
+the one every START / keyed READ of the file in the program names (the
+prime key when none does); when they name different keys it is untracked
+and the READ is not given `"02"`.
 
 **`enclosing`: the path condition.** Every `BranchConstraints`
 records the `(branch_id, arm_id)` chain enclosing it. `_walk_list` threads it

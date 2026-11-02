@@ -193,3 +193,158 @@ def test_prime_key_read_never_gets_02():
     # key); among the READs only the one by that key can.
     twos = [s for s in plan.scenarios if s.name.startswith("file status 02: READ")]
     assert len(twos) == 1
+
+
+def _plan_of(source: str, name: str):
+    ast = parse_cobol(source, filename=f"{name}.cbl").ast
+    assert ast is not None
+    index = ProgramLayoutIndex.build(ast)
+    report = BoundaryInventoryAnalyzer().analyze(ast, index)
+    constraints = ConstraintExtractor().extract(ast, index, report)
+    flow = ProgramFlowAnalyzer().analyze(ast)
+    return (
+        report,
+        constraints,
+        ScenarioPlanner().plan(constraints, flow, report, mode="all"),
+    )
+
+
+BROWSE_SOURCE = """\
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. VSBROWSE.
+       ENVIRONMENT DIVISION.
+       INPUT-OUTPUT SECTION.
+       FILE-CONTROL.
+           SELECT CUST-KSDS ASSIGN TO CUSTKS
+               ORGANIZATION IS INDEXED
+               ACCESS MODE IS DYNAMIC
+               RECORD KEY IS CK-ID
+               ALTERNATE RECORD KEY IS CK-BRANCH WITH DUPLICATES
+               FILE STATUS IS WS-FS.
+       DATA DIVISION.
+       FILE SECTION.
+       FD  CUST-KSDS.
+       01  CUST-REC.
+           05 CK-ID           PIC 9(6).
+           05 CK-BRANCH       PIC X(4).
+       WORKING-STORAGE SECTION.
+       01  WS-FS              PIC XX.
+       01  WS-DONE            PIC X VALUE 'N'.
+       PROCEDURE DIVISION.
+       0000-MAIN.
+           OPEN INPUT CUST-KSDS
+           PERFORM 1000-BY-BRANCH
+           PERFORM 2000-BY-ID
+           CLOSE CUST-KSDS
+           GOBACK.
+       1000-BY-BRANCH.
+           MOVE 'B001' TO CK-BRANCH
+           START CUST-KSDS KEY IS EQUAL CK-BRANCH
+               INVALID KEY MOVE 'Y' TO WS-DONE
+           END-START
+           PERFORM UNTIL WS-DONE = 'Y'
+               READ CUST-KSDS NEXT
+                   AT END MOVE 'Y' TO WS-DONE
+                   NOT AT END
+                       IF WS-FS = '02'
+                           DISPLAY 'SAME BRANCH FOLLOWS'
+                       END-IF
+               END-READ
+           END-PERFORM.
+       2000-BY-ID.
+           MOVE 'N' TO WS-DONE
+           MOVE 0 TO CK-ID
+           START CUST-KSDS KEY IS NOT LESS THAN CK-ID
+           PERFORM UNTIL WS-DONE = 'Y'
+               READ CUST-KSDS NEXT
+                   AT END MOVE 'Y' TO WS-DONE
+               END-READ
+           END-PERFORM.
+"""
+
+
+def test_sequential_read_by_a_duplicate_key_of_reference_gets_02():
+    report, constraints, plan = _plan_of(BROWSE_SOURCE, "VSBROWSE")
+    by_branch = _line(report, "READ", "CUST-KSDS", "1000-BY-BRANCH")
+    by_id = _line(report, "READ", "CUST-KSDS", "2000-BY-ID")
+    # The START before it in its paragraph set the key of reference.
+    assert constraints.statement_sites[by_branch].duplicate_key
+    assert not constraints.statement_sites[by_id].duplicate_key
+    scenario = _by_name(plan, "file status 02: READ CUST-KSDS")
+    assert scenario.status_overrides == {f"READ:CUST-KSDS@{by_branch}": "02"}
+    twos = [s for s in plan.scenarios if s.name.startswith("file status 02: READ")]
+    assert len(twos) == 1
+
+
+ESDS_SOURCE = """\
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. VSLOG.
+       ENVIRONMENT DIVISION.
+       INPUT-OUTPUT SECTION.
+       FILE-CONTROL.
+           SELECT AUD-ESDS ASSIGN TO AUDESDS
+               ORGANIZATION IS SEQUENTIAL
+               FILE STATUS IS WS-FS.
+           SELECT SLOT-RRDS ASSIGN TO SLOTS
+               ORGANIZATION IS RELATIVE
+               ACCESS MODE IS RANDOM
+               RELATIVE KEY IS WS-SLOT
+               FILE STATUS IS WS-RFS.
+       DATA DIVISION.
+       FILE SECTION.
+       FD  AUD-ESDS.
+       01  AUD-REC            PIC X(20).
+       FD  SLOT-RRDS.
+       01  SLOT-REC           PIC X(20).
+       WORKING-STORAGE SECTION.
+       01  WS-FS              PIC XX.
+       01  WS-RFS             PIC XX.
+       01  WS-SLOT            PIC 9(4).
+       PROCEDURE DIVISION.
+       0000-MAIN.
+           OPEN EXTEND AUD-ESDS
+           IF WS-FS = '35'
+               OPEN OUTPUT AUD-ESDS
+           END-IF
+           OPEN I-O SLOT-RRDS
+           MOVE 'EVENT' TO AUD-REC
+           WRITE AUD-REC
+           IF WS-FS NOT = '00'
+               DISPLAY 'WRITE FAILED ' WS-FS
+           END-IF
+           MOVE 1 TO WS-SLOT
+           WRITE SLOT-REC
+           IF WS-RFS NOT = '00'
+               DISPLAY 'SLOT FAILED ' WS-RFS
+           END-IF
+           CLOSE AUD-ESDS SLOT-RRDS
+           GOBACK.
+"""
+
+
+def test_sequential_write_fails_with_34_and_relative_with_22():
+    report, constraints, plan = _plan_of(ESDS_SOURCE, "VSLOG")
+    esds_line = _line(report, "WRITE", "AUD-REC", "0000-MAIN")
+    assert constraints.statement_sites[esds_line].organization == "SEQUENTIAL"
+    esds = _by_name(plan, "file status 34: WRITE AUD-REC")
+    assert esds.status_overrides == {f"WRITE:AUD-REC@{esds_line}": "34"}
+    assert not [s for s in plan.scenarios if s.name == "file status 22: WRITE AUD-REC"]
+    rrds_line = _line(report, "WRITE", "SLOT-REC", "0000-MAIN")
+    assert constraints.statement_sites[rrds_line].organization == "RELATIVE"
+    _by_name(plan, "file status 22: WRITE SLOT-REC")
+
+
+def test_open_output_is_never_given_35():
+    report, constraints, plan = _plan_of(ESDS_SOURCE, "VSLOG")
+    opens = [
+        b
+        for b in report.boundaries
+        if b.ref.category == "OPEN" and b.ref.key == "AUD-ESDS"
+    ]
+    modes = [dict(constraints.statement_sites[b.ref.line].open_modes) for b in opens]
+    assert modes == [{"AUD-ESDS": "EXTEND"}, {"AUD-ESDS": "OUTPUT"}]
+    output_line = opens[1].ref.line
+    for scenario in plan.scenarios:
+        assert f"OPEN:AUD-ESDS@{output_line}" not in scenario.status_overrides
+    extend = _by_name(plan, "error status: OPEN AUD-ESDS not found")
+    assert extend.status_overrides == {f"OPEN:AUD-ESDS@{opens[0].ref.line}": "35"}
