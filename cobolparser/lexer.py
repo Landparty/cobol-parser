@@ -139,7 +139,7 @@ def mask_comment_entries(source: str) -> str:
 # ``CURRENCY SIGN IS '£'`` (or ``CURRENCY SIGN IS 'EUR' WITH PICTURE SYMBOL
 # '#'``) makes that character a PICTURE editing symbol exactly like ``$``.
 # Characters that are otherwise not COBOL characters at all (``£``, ``€``,
-# ``#``, ``@``, ...) would hit the lexer's "Invalid character" error inside
+# ``#``, ``@``, ...) would be dropped as stray characters inside
 # the PICTURE string, so the declared symbols are collected up front and
 # lexed as CURRENCY tokens.
 _CURRENCY_CLAUSE_RE = re.compile(
@@ -547,6 +547,9 @@ class TokenType(IntEnum):
     # source; see SINGLE_CHAR_TOKENS.
     SQL_NAME_CHAR = auto()  # '#' / '@', part of a DB2 name (``ACCT#``);
     # merged into the name inside EXEC blocks, see SINGLE_CHAR_TOKENS.
+    STRAY_CHAR = auto()  # any other character COBOL has no use for
+    # (``|`` box art, a codepage-mangled glyph). Kept as opaque text inside
+    # an EXEC block; elsewhere `_drop_stray_chars` drops it with a warning.
 
     # Special tokens
     NEWLINE = auto()
@@ -659,7 +662,7 @@ class _CobolLexerPure:
         # '#' and '@' are letters of a DB2 ordinary identifier (``ACCT#``,
         # ``@ADDR``) -- like '$', which already lexes as CURRENCY. Inside an
         # EXEC block `_merge_exec_name_chars` glues them back into the name
-        # they abut; outside one they stay invalid (`_flag_stray_sql_chars`)
+        # they abut; outside one `_drop_stray_chars` glues or drops them
         # unless SPECIAL-NAMES declared them a currency symbol.
         "#": TokenType.SQL_NAME_CHAR,
         "@": TokenType.SQL_NAME_CHAR,
@@ -1693,8 +1696,10 @@ class _CobolLexerPure:
                 pos += 1
                 continue
 
-            # Unknown character – record an error and advance
-            self.errors.append(LexerError(f"Invalid character: {char}", location, char))
+            # Unknown character: an opaque STRAY_CHAR token. Inside EXEC it is
+            # SQL/CICS text; elsewhere `_drop_stray_chars` drops it with a
+            # warning rather than failing the whole file.
+            tokens.append(Token(TokenType.STRAY_CHAR, char, location))
             pos += 1
 
         return tokens
@@ -2207,7 +2212,7 @@ class _CobolLexerPure:
         self._merge_concatenated_literals()
         self._merge_numeric_procedure_names()
         self._merge_exec_name_chars()
-        self._flag_stray_sql_chars()
+        self._drop_stray_chars()
         self._retype_operator_currency_symbols()
         self._retype_legacy_verb_data_names()
 
@@ -2662,43 +2667,129 @@ class _CobolLexerPure:
             return False
         return loc.column == prev_loc.column + len(prev.value or "")
 
-    def _flag_stray_sql_chars(self) -> None:
-        """Record an "Invalid character" error for '!' / '|' / '¬' / '#' /
-        '@' tokens outside any ``EXEC ... END-EXEC`` block.
+    #: Characters that are no part of COBOL outside an EXEC block.
+    _STRAY_TYPES = frozenset(
+        {
+            TokenType.BANG,
+            TokenType.PIPE,
+            TokenType.NOT_SIGN,
+            TokenType.SQL_NAME_CHAR,
+            TokenType.STRAY_CHAR,
+        }
+    )
 
-        These characters lex to BANG/PIPE/NOT_SIGN tokens solely so embedded
-        EXEC SQL text (``!=``, ``||``, ``¬=``) round-trips instead of
-        failing the whole parse -- see SINGLE_CHAR_TOKENS. Outside an EXEC
-        block they are exactly as invalid as before those tokens existed,
-        and silently folding them into a statement's operand text would turn
-        garbage input into a "successful" parse with no diagnostic at all.
-        A single linear post-pass (shared verbatim by the Cython fast path,
-        which inherits this method) restores the old error for that case.
+    #: How many line numbers one stray-character warning lists.
+    _STRAY_LINES_SHOWN = 10
+
+    def _drop_stray_chars(self) -> None:
+        """Drop the characters COBOL has no use for outside ``EXEC ...
+        END-EXEC`` ('!', '|', '¬', '#', '@', and anything else the lexer
+        does not know), with one warning per character.
+
+        These lex to BANG/PIPE/NOT_SIGN/SQL_NAME_CHAR/STRAY_CHAR tokens so
+        embedded EXEC SQL/CICS text (``!=``, ``||``, ``¬=``, ``ACCT#``)
+        round-trips. Outside an EXEC block they used to be hard "Invalid
+        character" errors, which failed the whole file over a box-drawing
+        '|' in a misplaced comment or a glyph a codepage conversion mangled.
+        Now the parse goes on without them and a warning names each
+        character, how often and on which lines, so the input is not
+        silently "clean".
+
+        A '#' or '@' that abuts a word (``WS-#CPT``, ``@ADDR``) is a letter
+        of that name in some shops' dialects; it is glued into one
+        IDENTIFIER rather than dropped, so every reference to the name stays
+        the same name. A declared PICTURE currency symbol (``CURRENCY SIGN
+        IS 'EUR' WITH PICTURE SYMBOL '#'``) becomes CURRENCY.
+
+        A single linear pass, shared verbatim by the Cython fast path, which
+        inherits this method.
         """
+        tokens = self.tokens
+        if not any(t.type in self._STRAY_TYPES for t in tokens):
+            return
+        kept: list[Token] = []
+        dropped: dict[str, list[int]] = {}
+        glued_names: dict[str, list[int]] = {}
         in_exec = False
-        for token in self.tokens:
+        # Whether kept[-1] is a name already glued around a '#' / '@'.
+        glued = False
+        count = len(tokens)
+        for index, token in enumerate(tokens):
             ttype = token.type
             if ttype == TokenType.EXEC:
                 in_exec = True
             elif ttype == TokenType.END_EXEC:
                 in_exec = False
-            elif not in_exec and ttype == TokenType.SQL_NAME_CHAR:
-                if token.value in self._currency_symbols:
-                    # A declared PICTURE currency symbol (``CURRENCY SIGN
-                    # IS 'EUR' WITH PICTURE SYMBOL '#'``).
-                    token.type = TokenType.CURRENCY
-                else:
-                    self.errors.append(
-                        LexerError(f"Invalid character: {token.value}", token.location)
+            if in_exec or ttype not in self._STRAY_TYPES:
+                if (
+                    glued
+                    and kept
+                    and self._abuts(kept[-1], token)
+                    and self._name_part(token)
+                ):
+                    kept[-1] = Token(
+                        TokenType.IDENTIFIER,
+                        kept[-1].value + token.value,
+                        kept[-1].location,
                     )
-            elif not in_exec and ttype in (
-                TokenType.BANG,
-                TokenType.PIPE,
-                TokenType.NOT_SIGN,
-            ):
-                self.errors.append(
-                    LexerError(f"Invalid character: {token.value}", token.location)
-                )
+                    continue
+                kept.append(token)
+                glued = False
+                continue
+            line = token.location.line if token.location else 0
+            if ttype == TokenType.SQL_NAME_CHAR:
+                if token.value in self._currency_symbols:
+                    token.type = TokenType.CURRENCY
+                    kept.append(token)
+                    glued = False
+                    continue
+                prev = kept[-1] if kept else None
+                nxt = tokens[index + 1] if index + 1 < count else None
+                if (
+                    prev is not None
+                    and self._abuts(prev, token)
+                    and (glued or self._name_part(prev))
+                ):
+                    kept[-1] = Token(
+                        TokenType.IDENTIFIER, prev.value + token.value, prev.location
+                    )
+                    glued = True
+                    glued_names.setdefault(token.value, []).append(line)
+                    continue
+                if (
+                    nxt is not None
+                    and self._abuts(token, nxt)
+                    and self._name_part(nxt)
+                    and nxt.type not in self._STRAY_TYPES
+                ):
+                    kept.append(
+                        Token(TokenType.IDENTIFIER, token.value, token.location)
+                    )
+                    glued = True
+                    glued_names.setdefault(token.value, []).append(line)
+                    continue
+            dropped.setdefault(token.value, []).append(line)
+            glued = False
+        tokens[:] = kept
+        for char, lines in dropped.items():
+            self.warnings.append(
+                f"Ignored invalid character {char!r} ({len(lines)} occurrence"
+                f"{'s' if len(lines) != 1 else ''}, {self._line_list(lines)})"
+            )
+        for char, lines in glued_names.items():
+            self.warnings.append(
+                f"Non-standard character {char!r} read as part of a data name "
+                f"({len(lines)} occurrence{'s' if len(lines) != 1 else ''}, "
+                f"{self._line_list(lines)})"
+            )
+
+    def _line_list(self, lines: list[int]) -> str:
+        """``line 68`` / ``lines 68, 70, 71 and 3 more``, de-duplicated."""
+        unique = sorted(set(lines))
+        shown = ", ".join(str(n) for n in unique[: self._STRAY_LINES_SHOWN])
+        more = len(unique) - self._STRAY_LINES_SHOWN
+        suffix = f" and {more} more" if more > 0 else ""
+        return f"line{'s' if len(unique) != 1 else ''} {shown}{suffix}"
 
     def get_tokens(self) -> list[Token]:
         """Get the list of tokens (tokenize if not already done)."""

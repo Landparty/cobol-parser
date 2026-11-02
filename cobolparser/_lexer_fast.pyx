@@ -573,7 +573,9 @@ class CobolLexer(_CobolLexerBase):
                 continue
 
             # ---- unknown character ---------------------------------
-            self.errors.append(LexerError(f"Invalid character: {char}", location, char))
+            # Mirrors lexer.py: an opaque STRAY_CHAR token, dropped with a
+            # warning outside EXEC by the shared `_drop_stray_chars`.
+            tokens.append(Token(TokenType.STRAY_CHAR, char, location))
             pos += 1
 
         return tokens

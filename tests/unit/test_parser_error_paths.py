@@ -70,9 +70,14 @@ class TestParseTopLevelExceptionHandler:
 
 
 class TestParseLexerErrorFailFast:
-    def test_invalid_chars_fail_fast_returns_none_ast(self):
+    def test_lexer_error_fail_fast_returns_none_ast(self):
         result = parse_cobol(
-            "@@@@ NOT COBOL",
+            (
+                "       IDENTIFICATION DIVISION.\n"
+                "       PROGRAM-ID. BAD.\n"
+                "       PROCEDURE DIVISION.\n"
+                '           DISPLAY "OPEN\n'
+            ),
             error_recovery=ErrorRecoveryMode.FAIL_FAST,
         )
         assert result.ast is None

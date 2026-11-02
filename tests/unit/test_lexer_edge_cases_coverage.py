@@ -174,11 +174,12 @@ class TestInvalidCharacterHandling:
     """Cover unknown character error reporting in free-form lexer."""
 
     def test_invalid_character_recorded(self):
-        """Characters like @ that COBOL doesn't use produce lexer errors."""
+        """'@' abutting a word is read as part of that name, with a warning."""
         lexer = CobolLexer("MOVE @INVALID TO X.", free_form=True)
-        lexer.tokenize()
-        # The lexer should record an error for '@'
-        assert any("Invalid character" in str(e) for e in lexer.errors)
+        tokens = lexer.tokenize()
+        assert not lexer.errors
+        assert any(t.value == "@INVALID" for t in tokens)
+        assert any("Non-standard character '@'" in w for w in lexer.warnings)
 
 
 class TestSkipWhitespace:
