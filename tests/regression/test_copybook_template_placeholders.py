@@ -124,3 +124,97 @@ def test_copybook_impact_notes_paren_placeholders(tmp_path):
     assert fields == []
     assert problem is not None
     assert "(9999-)MOD-DTTX0F" in problem and ":PFX:-CODE" in problem
+
+
+# AWS CardDemo's app/cpy/CSSETATY.cpy: a PROCEDURE DIVISION template whose
+# placeholders sit at the start, in the middle and at the end of names, in
+# conditions and in OF-qualified MOVE targets.
+CSSETATY = (
+    "      *    Set (TESTVAR1) to red if in error and * if blank\n"
+    "           IF (FLG-(TESTVAR1)-NOT-OK\n"
+    "           OR  FLG-(TESTVAR1)-BLANK)\n"
+    "           AND CDEMO-PGM-REENTER\n"
+    "               MOVE DFHRED             TO\n"
+    "                    (SCRNVAR2)C OF (MAPNAME3)O\n"
+    "               IF  FLG-(TESTVAR1)-BLANK\n"
+    "                   MOVE '*'            TO\n"
+    "                    (SCRNVAR2)O OF (MAPNAME3)O\n"
+    "               END-IF\n"
+    "           END-IF\n"
+)
+
+
+def _procedure_wrap(body: str, data: str = "") -> str:
+    return (
+        "       IDENTIFICATION DIVISION.\n"
+        "       PROGRAM-ID. TPLP.\n"
+        "       DATA DIVISION.\n"
+        "       WORKING-STORAGE SECTION.\n" + data + "       PROCEDURE DIVISION.\n"
+        "       MAIN-PARA.\n" + body + "           GOBACK.\n"
+    )
+
+
+def test_carddemo_procedure_template_parses_with_whole_names():
+    source = _procedure_wrap(CSSETATY)
+    result = parse_cobol(source, error_recovery=ErrorRecoveryMode.COLLECT_ALL)
+    assert result.success, result.errors
+    values = [t.value for t in CobolLexer(source).tokenize() if t.value.strip()]
+    # The condition's own parentheses stay separate from the names they abut.
+    assert values[values.index("IF") : values.index("IF") + 6] == [
+        "IF",
+        "(",
+        "FLG-(TESTVAR1)-NOT-OK",
+        "OR",
+        "FLG-(TESTVAR1)-BLANK",
+        ")",
+    ]
+    moves = [m.to_dict() for m in result.ast.find_all_by_type("MoveStatement")]
+    assert [m["targets"] for m in moves] == [
+        ["(SCRNVAR2)C OF (MAPNAME3)O"],
+        ["(SCRNVAR2)O OF (MAPNAME3)O"],
+    ]
+
+
+@pytest.mark.parametrize(
+    "line, expected",
+    [
+        ("           IF ((A-(X)-B))\n", ["(", "(", "A-(X)-B", ")", ")"]),
+        ("           IF (WS-(SFX))\n", ["(", "WS-(SFX)", ")"]),
+        ("           COMPUTE X = (A + B).\n", ["(", "A", "+", "B", ")"]),
+    ],
+)
+def test_parentheses_around_a_template_name_stay_separate(line, expected):
+    values = [t.value for t in CobolLexer(line).tokenize()]
+    assert " ".join(expected) in " ".join(values)
+
+
+def test_carddemo_copy_replacing_resolves_the_procedure_template(tmp_path):
+    (tmp_path / "CSSETATY.cpy").write_text(CSSETATY)
+    data = (
+        "       01  WS-FLAGS.\n"
+        "           05  FLG-ACCT-STATUS PIC X.\n"
+        "               88  FLG-ACCT-STATUS-NOT-OK VALUE 'N'.\n"
+        "               88  FLG-ACCT-STATUS-BLANK  VALUE ' '.\n"
+        "       01  CDEMO-FLAG PIC X.\n"
+        "           88  CDEMO-PGM-REENTER VALUE 'Y'.\n"
+        "       01  DFHRED PIC X VALUE '2'.\n"
+        "       01  CACTUPAO.\n"
+        "           05  ACSTTUSC PIC X.\n"
+        "           05  ACSTTUSO PIC X.\n"
+    )
+    source = _procedure_wrap(
+        "           COPY CSSETATY REPLACING\n"
+        "               ==(TESTVAR1)== BY ==ACCT-STATUS==\n"
+        "               ==(SCRNVAR2)== BY ==ACSTTUS==\n"
+        "               ==(MAPNAME3)== BY ==CACTUPA==.\n",
+        data,
+    )
+    result = parse_cobol_with_expansion(
+        source, "COACTUPC.cbl", copybook_paths=[str(tmp_path)]
+    )
+    assert result.success, result.errors
+    moves = [m.to_dict() for m in result.ast.find_all_by_type("MoveStatement")]
+    targets = " ".join(str(m["targets"]) for m in moves)
+    assert "ACSTTUSC" in targets and "ACSTTUSO" in targets
+    assert "CACTUPAO" in targets
+    assert "(" not in targets

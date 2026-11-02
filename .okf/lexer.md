@@ -554,7 +554,10 @@ runs in `_post_tokenize()` after `_merge_exec_name_chars()` and before
 gap, not crossing `.` `,` `;` or a literal) whose text fully matches
 `_TEMPLATE_NAME_RE` becomes one IDENTIFIER spelled as written. A `(...)`
 placeholder must hold a letter or `-` and have name text after it, or a
-name ending in `-` before it (`WS-(SFX)`); `:TAG:` may stand alone. So
+name ending in `-` before it (`WS-(SFX)`); `:TAG:` may stand alone. A condition's own parentheses abutting the name
+(`IF (FLG-(TESTVAR1)-NOT-OK` / `OR FLG-(TESTVAR1)-BLANK)`, AWS CardDemo's
+`CSSETATY.cpy`) are peeled off the run, fewest first, by
+`_template_name_span`, so `WS-(SFX)` keeps its `)`. So
 `PIC -(5)9`, `TAB(I)`, `B(1:2)` and `A-(4)` are untouched; runs right after
 PIC / PICTURE [IS] are skipped. Before, each item of such a copybook parsed
 as `ANONYMOUS-n-m`. After `expand_copybooks` applies REPLACING there is no

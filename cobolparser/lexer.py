@@ -2731,14 +2731,51 @@ class _CobolLexerPure:
                 ):
                     end += 1
             if end - index > 1 and not self._after_picture(merged):
-                text = "".join(t.value or "" for t in tokens[index:end])
-                if self._TEMPLATE_NAME_RE.fullmatch(text):
-                    merged.append(Token(TokenType.IDENTIFIER, text, token.location))
+                span = self._template_name_span(tokens, index, end)
+                if span is not None:
+                    start, stop = span
+                    text = "".join(t.value or "" for t in tokens[start:stop])
+                    merged.extend(tokens[index:start])
+                    merged.append(
+                        Token(TokenType.IDENTIFIER, text, tokens[start].location)
+                    )
+                    merged.extend(tokens[stop:end])
                     index = end
                     continue
             merged.extend(tokens[index:end])
             index = end
         tokens[:] = merged
+
+    def _template_name_span(
+        self, tokens: list[Token], index: int, end: int
+    ) -> tuple[int, int] | None:
+        """The ``[start, stop)`` slice of the run ``tokens[index:end]`` that
+        spells a placeholder name, or None.
+
+        The run may carry a condition's own parentheses abutting the name:
+        ``IF (FLG-(TESTVAR1)-NOT-OK`` / ``OR FLG-(TESTVAR1)-BLANK)``. Those
+        leading '(' and trailing ')' tokens are peeled off, fewest first,
+        so a placeholder that ends the name (``WS-(SFX)``) keeps its ')'.
+        """
+        leading = 0
+        while index + leading < end and tokens[index + leading].type == (
+            TokenType.LEFT_PAREN
+        ):
+            leading += 1
+        trailing = 0
+        while end - trailing > index and tokens[end - trailing - 1].type == (
+            TokenType.RIGHT_PAREN
+        ):
+            trailing += 1
+        for peel_left in range(leading + 1):
+            for peel_right in range(trailing + 1):
+                start, stop = index + peel_left, end - peel_right
+                if stop - start < 2:
+                    continue
+                text = "".join(t.value or "" for t in tokens[start:stop])
+                if self._TEMPLATE_NAME_RE.fullmatch(text):
+                    return start, stop
+        return None
 
     @staticmethod
     def _after_picture(merged: list[Token]) -> bool:
