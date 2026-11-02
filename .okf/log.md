@@ -46,6 +46,14 @@ entries, including both 2026-09-15 sections, were found there on
   selector text with a class or sign test (`WHEN X NOT NUMERIC`) is modelled;
   it used to leave every arm of the EVALUATE without a scenario.
 
+## 2026-11-01 -- CI workflow: manual dispatch only
+
+- [tests.md](tests.md) (CI/CD): `.github/workflows/ci.yml` is no longer fully
+  commented out. A workflow file with no content is invalid, and GitHub logged
+  a failed `.github/workflows/ci.yml` run on every push to `main`. The jobs are
+  back with `workflow_dispatch` as the only trigger; push, PR and the nightly
+  schedule stay off. CLAUDE.md and README.md say so.
+
 ## 2026-11-01 -- open-issue sweep: #790, #793, #794, #795, #796
 
 - [analysis/lineage.md](analysis/lineage.md) (`sql` row): `_sql_flow` unquotes

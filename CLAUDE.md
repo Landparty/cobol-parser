@@ -169,7 +169,7 @@ Layout, markers, fixtures and the per-directory breakdown: `.okf/tests.md`. `tes
 
 ## CI/CD
 
-**Currently disabled:** every line of `.github/workflows/ci.yml` is commented out, to save cost. Run lint, typecheck and the full suite locally before pushing. When enabled it runs lint, mypy, a build matrix over Python 3.11-3.13 against the compiled extensions (`--no-cov`), and a pure-Python coverage job that enforces the floor.
+**Manual dispatch only:** `.github/workflows/ci.yml` has only a `workflow_dispatch` trigger (push, PR and the nightly schedule are off), to save cost. Run lint, typecheck and the full suite locally before pushing. When dispatched it runs lint, mypy, a build matrix over Python 3.11-3.13 against the compiled extensions (`--no-cov`), and a pure-Python coverage job that enforces the floor.
 
 ## Release & Distribution
 
