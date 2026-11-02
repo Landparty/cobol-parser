@@ -34,6 +34,7 @@ import re
 from dataclasses import dataclass, field
 from typing import Any
 
+from .._literals import QUOTED_LITERAL_RE
 from ..dialects.ibm_enterprise import IBMEnterpriseCobol
 from ..lexer import CobolLexer
 from ..models.ast_base import ASTNode, SourceLocation
@@ -500,6 +501,10 @@ def _split_operand(text: str) -> tuple[set[str], set[str], set[str], bool]:
     """
     if not text:
         return set(), set(), set(), True
+    # A literal's text is no operand: `MOVE "TEST(S) FAILED" TO X` read S as a
+    # subscript (NIST CCVS85, every program), since the parentheses were
+    # split off before the literal was dropped.
+    text = QUOTED_LITERAL_RE.sub(" ", text)
     # DFHRESP(cond) / DFHVALUE(cvda): the argument is no subscript (#594).
     text = strip_translator_arguments(text)
 

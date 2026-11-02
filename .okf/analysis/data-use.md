@@ -449,6 +449,12 @@ when the role itself could not be determined.
 
 Things worth knowing before trusting a field:
 
+* **A literal's text is never an operand** (2026-11-02). `_split_operand`
+  blanks quoted literals (`_literals.QUOTED_LITERAL_RE`) before it splits
+  parentheses off as subscripts or reference modifiers: `MOVE "TEST(S)
+  FAILED" TO X`, in every NIST CCVS85 program, reported `S` undefined, and
+  mocky-mock warned that cobc would reject the compile. Pinned by
+  `tests/unit/analysis/test_xref.py::test_parentheses_inside_a_literal_are_no_subscript`.
 * **Single-program scope**, like `DeadCodeAnalyzer` and
   `UnusedVariableAnalyzer`: only *ast* itself. Contained programs are AST
   children and are skipped in every sweep (`_contained_node_ids`) — otherwise

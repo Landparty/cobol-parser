@@ -14,6 +14,12 @@ deliberate. Anything else appended to the bottom is a mistake: five
 entries, including both 2026-09-15 sections, were found there on
 2026-09-15 and moved back up.
 
+## 2026-11-02 -- xref: parentheses inside a literal
+
+- [analysis/data-use.md](analysis/data-use.md): `XrefAnalyzer` blanks quoted
+  literals before splitting subscripts off an operand, so `MOVE "TEST(S)
+  FAILED" TO X` (NIST CCVS85) no longer reports `S` undefined.
+
 ## 2026-11-02 -- placeholder names inside a condition's parentheses
 
 - [lexer.md](lexer.md): `_template_name_span` peels a condition's own

@@ -137,6 +137,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+* **Parentheses inside a literal are not a subscript.** `MOVE "TEST(S)
+  FAILED" TO X`, in every NIST CCVS85 program, made the cross-reference
+  report `S` as an undeclared data name.
 * **A placeholder name inside a condition's parentheses stays one name.**
   AWS CardDemo's `CSSETATY.cpy` writes `IF (FLG-(TESTVAR1)-NOT-OK OR
   FLG-(TESTVAR1)-BLANK)`; the parenthesis abutting the name kept it from
