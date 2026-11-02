@@ -315,8 +315,9 @@ _COLUMN_STOP = frozenset(
 
 def _column(
     part: list[_Tok], position: int
-) -> tuple[DdlColumn, dict[str, Any] | None, bool]:
-    """A column definition: the column, an inline foreign key, and whether it is the primary key."""
+) -> tuple[DdlColumn, dict[str, Any] | None, bool, bool]:
+    """A column definition: the column, an inline foreign key, and whether it is
+    the primary key and whether it is declared UNIQUE."""
     name = _name_text(part[0])
     type_tokens: list[_Tok] = []
     index = 1
@@ -336,6 +337,7 @@ def _column(
     column = DdlColumn(name=name, data_type=_join(type_tokens), position=position)
     foreign_key: dict[str, Any] | None = None
     primary = False
+    unique = False
     rest = part[index:]
     words = [t.upper for t in rest]
     for offset, word in enumerate(words):
@@ -344,17 +346,10 @@ def _column(
         elif word == "PRIMARY":
             primary = True
             column.nullable = False
+        elif word == "UNIQUE":
+            unique = True
         elif word == "DEFAULT":
-            value = []
-            for nxt in rest[offset + 1 :]:
-                if nxt.upper in _COLUMN_STOP:
-                    break
-                value.append(nxt)
-            column.default = (
-                _string_text(value[0])
-                if len(value) == 1
-                else _join(value) if value else SYSTEM_DEFAULT
-            )
+            column.default = _default_value(rest[offset + 1 :])
         elif word == "REFERENCES" and offset + 1 < len(rest):
             cursor = _Cursor(rest[offset + 1 :])
             target = cursor.qualified_name()
@@ -363,8 +358,43 @@ def _column(
                 "references": target,
                 "referenced_columns": _column_names(cursor.paren_group()),
                 "name": None,
+                "on_delete": _on_delete(cursor),
             }
-    return column, foreign_key, primary
+    return column, foreign_key, primary, unique
+
+
+def _default_value(tokens: list[_Tok]) -> str:
+    """The value after DEFAULT: ``NULL``, a constant, or the type's default."""
+    if tokens and tokens[0].upper == "NULL":
+        return "NULL"
+    value: list[_Tok] = []
+    for nxt in tokens:
+        if nxt.upper in _COLUMN_STOP:
+            break
+        value.append(nxt)
+    if not value:
+        return SYSTEM_DEFAULT
+    if len(value) == 1:
+        return _string_text(value[0])
+    if len(value) == 2 and value[0].text in ("-", "+"):
+        return value[0].text + _string_text(value[1])
+    return _join(value)
+
+
+_DELETE_RULE_WORDS = frozenset({"CASCADE", "RESTRICT", "NO", "ACTION", "SET", "NULL"})
+
+
+def _on_delete(cursor: _Cursor) -> str | None:
+    """The ``ON DELETE`` rule (``CASCADE``, ``SET NULL``, ...) from *cursor* on."""
+    while cursor.peek() is not None:
+        if cursor.accept("ON") and cursor.accept("DELETE"):
+            rule: list[str] = []
+            while cursor.peek_upper() in _DELETE_RULE_WORDS:
+                cursor.next()
+                rule.append(cursor.tokens[cursor.index - 1].upper)
+            return " ".join(rule) or None
+        cursor.next()
+    return None
 
 
 def _constraint(part: list[_Tok], table: DdlTable) -> bool:
@@ -396,12 +426,7 @@ def _constraint(part: list[_Tok], table: DdlTable) -> bool:
         if cursor.accept("REFERENCES"):
             target = cursor.qualified_name()
             referenced = _column_names(cursor.paren_group())
-        on_delete = None
-        while cursor.peek() is not None:
-            if cursor.accept("ON") and cursor.accept("DELETE"):
-                on_delete = " ".join(t.upper for t in cursor.tokens[cursor.index :])
-                break
-            cursor.next()
+        on_delete = _on_delete(cursor)
         table.foreign_keys.append(
             {
                 "name": name,
@@ -509,12 +534,14 @@ class _DdlBuilder:
         if part[0].upper in ("CONSTRAINT", "PRIMARY", "UNIQUE", "FOREIGN", "CHECK"):
             _constraint(part, table)
             return
-        column, foreign_key, primary = _column(part, len(table.columns) + 1)
+        column, foreign_key, primary, unique = _column(part, len(table.columns) + 1)
         table.columns.append(column)
         if foreign_key:
             table.foreign_keys.append(foreign_key)
         if primary:
             table.primary_key = [column.name]
+        elif unique:
+            table.unique_keys.append([column.name])
 
     def create_index(self, cursor: _Cursor, line: int, unique: bool) -> None:
         name = cursor.qualified_name()
@@ -623,19 +650,29 @@ _JOIN_WORDS = frozenset({"JOIN", "INNER", "LEFT", "RIGHT", "FULL", "OUTER", "CRO
 
 
 def _from_tables(tokens: list[_Tok]) -> list[str]:
-    """Tables named after FROM and JOIN in a view's SELECT (nested selects included)."""
+    """Tables named after FROM and JOIN in a view's SELECT (nested selects included).
+
+    A ``FROM`` inside a function call (``EXTRACT(YEAR FROM D)``,
+    ``SUBSTR(X FROM 1)``, ``TRIM(... FROM X)``) is not a FROM clause, a table
+    function (``TABLE(F(1))``) names no table, and the view's own common table
+    expressions (``WITH CTE AS (...)``) are not base tables.
+    """
     tables: list[str] = []
     expecting = False
     index = 0
     while index < len(tokens):
         tok = tokens[index]
         word = tok.upper
-        if word in ("FROM", "JOIN"):
+        if word == "FROM" and _is_from_clause(tokens, index):
+            expecting = True
+        elif word == "JOIN":
             expecting = True
         elif word == "," and expecting is False and _in_from_list(tokens, index):
             expecting = True
         elif expecting and tok.kind in ("word", "quoted") and word not in _JOIN_WORDS:
             if word == "SELECT":
+                expecting = False
+            elif word in ("TABLE", "LATERAL") and _next_upper(tokens, index) == "(":
                 expecting = False
             else:
                 cursor = _Cursor(tokens[index:])
@@ -648,7 +685,52 @@ def _from_tables(tokens: list[_Tok]) -> list[str]:
         elif word in _FROM_STOP or word == "(":
             expecting = False
         index += 1
-    return tables
+    common = set(_common_table_names(tokens))
+    return [name for name in tables if name not in common]
+
+
+def _next_upper(tokens: list[_Tok], index: int) -> str:
+    return tokens[index + 1].upper if index + 1 < len(tokens) else ""
+
+
+def _is_from_clause(tokens: list[_Tok], index: int) -> bool:
+    """True when the FROM at *index* follows a SELECT at the same depth.
+
+    A FROM that only has an unmatched ``(`` before it (the argument list of
+    ``EXTRACT``, ``SUBSTR``, ``TRIM``, ...) is a function's keyword.
+    """
+    depth = 0
+    for back in range(index - 1, -1, -1):
+        text = tokens[back].upper
+        if text == ")":
+            depth += 1
+        elif text == "(":
+            if depth == 0:
+                return False
+            depth -= 1
+        elif depth == 0 and text == "SELECT":
+            return True
+    return False
+
+
+def _common_table_names(tokens: list[_Tok]) -> list[str]:
+    """The names a ``WITH name [(cols)] AS (...) [, ...]`` prefix defines."""
+    cursor = _Cursor(tokens)
+    if not cursor.accept("WITH"):
+        return []
+    names: list[str] = []
+    while True:
+        name = cursor.qualified_name()
+        if name is None:
+            return names
+        names.append(name)
+        if cursor.peek_upper() == "(":
+            cursor.paren_group()
+        if not cursor.accept("AS"):
+            return names
+        cursor.paren_group()
+        if not cursor.accept(","):
+            return names
 
 
 def _in_from_list(tokens: list[_Tok], index: int) -> bool:

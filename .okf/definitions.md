@@ -52,10 +52,14 @@ Or call one parser directly: `parse_csd`, `parse_bms`, `parse_ddl`, `parse_dbd`,
 
 `detect_definition_kind(source)` looks at content only (the first 200 KB), in
 the order of `DEFINITION_KINDS`: a `DFHMSD` macro is BMS; `PSBGEN` is a PSB; a
-`DBD NAME=` with a `SEGM` is a DBD; a `DEFINE <type>(` command or a
-`DFHPCT/DFHPPT/DFHFCT TYPE=` macro is a CSD; a `CREATE TABLE|INDEX|VIEW|ALIAS|
+`DBD NAME=` with a `SEGM` is a DBD; an upper-case `DEFINE <type>(` whose
+`<type>` is a CSD resource type (or its DFHCSDUP abbreviation), or a
+`DFHPCT/DFHPPT/DFHFCT TYPE=` macro, is a CSD; a `CREATE TABLE|INDEX|VIEW|ALIAS|
 SYNONYM|TABLESPACE` is DDL **unless** the source is COBOL (an `IDENTIFICATION
 DIVISION` or `EXEC SQL`), so a program that embeds DDL stays a program.
+A JCL job (a `//name JOB|EXEC|DD|PROC` record) is None whatever its in-stream
+data holds, so an IDCAMS `DEFINE GDG(`, DFHCSDUP or DSNTEP2 `CREATE TABLE` job
+stays JCL (#800); IDCAMS `DEFINE CLUSTER(` and Python `def f(` are not CSD.
 Plain assembler (no such macro) is None.
 
 ## Assembler statements (BMS, DBD, PSB, CICS tables)
@@ -126,12 +130,15 @@ other_objects, ignored_statements, warnings)`.
 Statements end at `;` outside quotes (`--#SET TERMINATOR x` changes it);
 `--` and `/* */` comments and a numeric sequence field are dropped. Modelled:
 `CREATE [GLOBAL TEMPORARY|AUXILIARY] TABLE` (columns with type text, NOT NULL,
-DEFAULT -- `WITH DEFAULT` with no value is `SYSTEM_DEFAULT` --, inline PRIMARY
-KEY / REFERENCES, table constraints PRIMARY KEY / UNIQUE / FOREIGN KEY ... ON
+DEFAULT -- `WITH DEFAULT` with no value is `SYSTEM_DEFAULT`, `DEFAULT NULL` is
+`NULL`, a signed constant is `-1` --, inline PRIMARY KEY / UNIQUE / REFERENCES
+... ON DELETE, table constraints PRIMARY KEY / UNIQUE / FOREIGN KEY ... ON
 DELETE, `IN db.ts`, `LIKE t`), `CREATE [UNIQUE] INDEX ... ON t (cols)
 [CLUSTER]` (also attached to the table when it is in the member), `CREATE
 VIEW` (columns and the base tables named after FROM / JOIN, subqueries
-included), `CREATE ALIAS|SYNONYM ... FOR`, `CREATE TABLESPACE|DATABASE|
+included; the view's own `WITH` common table expressions, a `FROM` inside a
+function call such as `EXTRACT(YEAR FROM D)` and a `TABLE(...)` table function
+are left out), `CREATE ALIAS|SYNONYM ... FOR`, `CREATE TABLESPACE|DATABASE|
 STOGROUP|SEQUENCE|PROCEDURE` (name only), `ALTER TABLE t ADD [COLUMN] ... |
 ADD constraint`, `COMMENT ON` / `LABEL ON` a table, a column, or `t (col IS
 '...', ...)`. Anything else is counted in `ignored_statements` by its first
@@ -147,7 +154,9 @@ ACCESS=` starts a database; `DATASET` / `AREA` DD names; `SEGM NAME=, PARENT=`
 `M` = non-unique); `LCHILD` and `XDFLD` on the current segment.
 
 `parse_psb(source) -> PsbDefinitions(psbs, warnings)`: `PCB TYPE=TP|DB|GSAM`
-(DBDNAME may be positional; name from `PCBNAME=` or the label), `SENSEG NAME=,
+(the DBD name from `DBDNAME=`, else `NAME=` as older PSBs write it, else
+positional -- a DB/GSAM PCB with none is a warning; `PROCSEQ=` is kept as
+`procseq`; name from `PCBNAME=` or the label), `SENSEG NAME=,
 PARENT=, PROCOPT=` (inherits the PCB's PROCOPT), and `PSBGEN PSBNAME=, LANG=`
 closes a PSB. PCBs left without a PSBGEN become an unnamed PSB with a warning.
 

@@ -14,6 +14,17 @@ deliberate. Anything else appended to the bottom is a mistake: five
 entries, including both 2026-09-15 sections, were found there on
 2026-09-15 and moved back up.
 
+## 2026-11-02 -- definition detection skips JCL, DDL view tables, PSB NAME=
+
+- [definitions.md](definitions.md): `detect_definition_kind` returns None for a
+  JCL job and only takes an upper-case `DEFINE <csd type>(` as CSD, so IDCAMS
+  `DEFINE GDG(` / DSNTEP2 `CREATE TABLE` jobs and Python `def f(` are no
+  longer definition members (#800). `parse_ddl` view `base_tables` drop CTE
+  names, function-call `FROM`s and `TABLE(...)`; `DEFAULT NULL` is `NULL`;
+  inline UNIQUE and inline `REFERENCES ... ON DELETE` are kept (#801).
+  `parse_psb` reads a DB PCB's `NAME=` as its DBD name, warns when there is
+  none, and keeps `PROCSEQ=` (#802). Tests:
+  `tests/unit/definitions/test_issues_800_802.py`.
 ## 2026-11-02 -- FILE STATUS scenarios for VSAM programs
 
 - [generators/fixtures.md](generators/fixtures.md): new file-status family
