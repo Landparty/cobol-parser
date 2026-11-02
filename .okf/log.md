@@ -25,6 +25,22 @@ entries, including both 2026-09-15 sections, were found there on
   `parse_psb` reads a DB PCB's `NAME=` as its DBD name, warns when there is
   none, and keeps `PROCSEQ=` (#802). Tests:
   `tests/unit/definitions/test_issues_800_802.py`.
+## 2026-11-02 -- FILE STATUS scenarios for VSAM programs
+
+- [generators/fixtures.md](generators/fixtures.md): new file-status family
+  (one scenario per statement and tested FILE STATUS code: 02 on an
+  alternate-key READ, 23, 22, 35 and the rest); status overrides can name
+  one statement (`"READ:F@99"`); both status families pin the path to that
+  statement, including the outer READ of an INVALID KEY clause; a failed
+  WRITE/REWRITE fixture is `STATUS_ONLY`.
+- [analysis/fixtures-support.md](analysis/fixtures-support.md):
+  `ConstraintReport.status_tests` and `statement_sites`; WRITE/REWRITE
+  boundaries carry their file's `status_field`.
+  Found by the oracle E2E over VSAM samples (mocky-mock
+  `examples/oraclemix`): a changed not-found message in a paragraph PERFORMed
+  for one transaction code, and a WRITE inside a READ's INVALID KEY, were
+  never run by a failing-status case. Tests:
+  `tests/unit/generators/test_vsam_status_scenarios.py`.
 
 ## 2026-11-02 -- branch scenarios for CICS programs, constants, edges
 
@@ -40,6 +56,14 @@ entries, including both 2026-09-15 sections, were found there on
 - [analysis/fixtures-support.md](analysis/fixtures-support.md): `EVALUATE TRUE`
   selector text with a class or sign test (`WHEN X NOT NUMERIC`) is modelled;
   it used to leave every arm of the EVALUATE without a scenario.
+
+## 2026-11-01 -- CI workflow: manual dispatch only
+
+- [tests.md](tests.md) (CI/CD): `.github/workflows/ci.yml` is no longer fully
+  commented out. A workflow file with no content is invalid, and GitHub logged
+  a failed `.github/workflows/ci.yml` run on every push to `main`. The jobs are
+  back with `workflow_dispatch` as the only trigger; push, PR and the nightly
+  schedule stay off. CLAUDE.md and README.md say so.
 
 ## 2026-11-01 -- open-issue sweep: #790, #793, #794, #795, #796
 

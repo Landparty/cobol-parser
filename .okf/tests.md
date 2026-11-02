@@ -1,7 +1,7 @@
 ---
 type: Reference
 title: Tests
-description: Test suite layout (tests/ directories, corpora, conftest fixtures), pytest markers and their per-directory enforcement, the 90% coverage floor and why it is measured on pure Python, the CI jobs in .github/workflows/ci.yml (currently disabled), and the conventions a new test must follow.
+description: Test suite layout (tests/ directories, corpora, conftest fixtures), pytest markers and their per-directory enforcement, the 90% coverage floor and why it is measured on pure Python, the CI jobs in .github/workflows/ci.yml (manual dispatch only), and the conventions a new test must follow.
 tags: [tests, pytest, coverage, fixtures, markers]
 timestamp: 2026-10-28T00:00:00Z
 ---
@@ -81,7 +81,7 @@ tests/
       test_decode_cli.py       # decode: CSV/JSON/hex, --view / --list-views, gen-data -> decode round trip, paging, trailing bytes, --strict, non-UTF-8 copybook one-line error (#496); dclgen-check subcommand and lint rule
       test_gen_fixtures_cli.py # gen-fixtures: flags, --list-boundaries, --format json|csv-dir, --strict exit codes
     test_flowchart_generator.py      # Mermaid/DOT flowcharts: label fidelity, quoting, escaping (see generators.md)
-    generators/                # 16 files (5 here: bug-hunt r11, cross-record correlation (carrier detection incl. lossless carriers #758 and no READ or GO TO before the MOVE #762, two-row planning, verification, GnuCOBOL oracle; sample in `tests/samples/correlation/`), entry parameters, row witnesses, scenario verification; + data/)
+    generators/                # 17 files (6 here: bug-hunt r11, cross-record correlation (carrier detection incl. lossless carriers #758 and no READ or GO TO before the MOVE #762, two-row planning, verification, GnuCOBOL oracle; sample in `tests/samples/correlation/`), entry parameters, row witnesses, scenario verification, VSAM FILE STATUS scenarios; + data/)
       data/                    # 11 files: compare, decoding, editing, encoding, layout, layout_offsets, program_layout_conditions, storage, values, variable_length, views
         test_views.py          # build_record_views(): running offsets vs real encoded bytes, REDEFINES overlays (every occurrence inside OCCURS, FILLER padding, nested overlays #296), short-name lookup, ODO ambiguity, contiguity property
         test_decoding.py       # RecordDecoder: decode(encode(row)) == row for every storage class and both charsets, ODO under every RecordFormat, RDW framing, overlay switching, sign conventions read but never written, bad bytes reported per field, paging, hex pane
@@ -389,14 +389,15 @@ found the dead-code worklist quadratic (see
 
 ## CI/CD
 
-> **Currently disabled.** Every line of `.github/workflows/ci.yml` is
-> commented out (commit `315d474`, "refactor(ci): comment out CI
-> configuration"). No lint, typecheck, test or coverage job runs on push or
-> PR; run them locally. The job definitions below are what the file
-> describes and what runs once it is uncommented. `release-please.yml` is
-> still active.
+> **Manual dispatch only.** `.github/workflows/ci.yml` has a single
+> `workflow_dispatch` trigger. Its triggers were first commented out with the
+> whole file (commit `315d474`), but a workflow file with no content is
+> invalid and GitHub logged a failed run on every push, so on 2026-11-01 the
+> jobs came back with dispatch as the only trigger. No lint, typecheck, test
+> or coverage job runs on push or PR; run them locally or dispatch the
+> workflow on a branch. `release-please.yml` is still active.
 
-Triggers (as written): push/PR to `main`, a nightly `schedule`
+Triggers when event-triggered CI was on: push/PR to `main`, a nightly `schedule`
 (`17 4 * * *`) and manual `workflow_dispatch`. Push and PR triggers carry
 `paths-ignore` for `docs/**`, `.okf/**`, `reports/**` and `**/*.md`, so a
 docs-only change runs no CI. A new push to a PR cancels the run in flight
