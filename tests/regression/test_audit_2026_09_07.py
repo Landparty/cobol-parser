@@ -364,6 +364,7 @@ def test_m2_branch_gaps_roll_up_into_report_unsupported():
        PROCEDURE DIVISION.
        MAIN.
            ACCEPT WS-IN
+           ACCEPT WS-LIMIT
            IF WS-IN = WS-LIMIT
                DISPLAY "A"
            END-IF

@@ -75,7 +75,7 @@ targetable arm therefore still yields one scenario, never zero.
 | `expectations` | `list[Expectation]` | Assert-on stubs (see below). |
 | `unconstrained` | `list[str]` | Reserved for a future phase; always `[]` today (a happy-path scenario doesn't attempt branch coverage, and Phase 5/6 record misses in `scenario_coverage` instead, not here). |
 | `verification` | `ScenarioVerification` | Present only for a `"branches"`/`"all"` scenario (absent in `mode="happy"`, which targets no branch). See below. |
-| `entry_parameters` | `BoundaryFixture` | Present only with `ProgramFixtureGenerator(entry_parameters=True)` and a program whose PROCEDURE DIVISION has a USING list. See "Entry parameters" below. |
+| `entry_parameters` | `BoundaryFixture` | Present only with `ProgramFixtureGenerator(entry_parameters=True)` and a program whose PROCEDURE DIVISION has a USING list, or a CICS program (COMMAREA / EIB). See "Entry parameters" below. |
 
 ### Entry parameters (`entry_parameters=True`)
 
@@ -87,8 +87,10 @@ one more boundary:
 - `entry_parameters` is a `BoundaryFixture` with `category` `"ENTRY"`, `key`
   the PROGRAM-ID, `direction` `"BIDIRECTIONAL"`, a `layout` over every
   elementary field of every USING item, and a `sequence` of exactly one
-  row: the values a caller passes. A CICS-translated program's `DFHEIBLK`
-  is left out (CICS fills the EIB, not the caller).
+  row: the values a caller passes. A CICS program is passed its
+  `DFHCOMMAREA` (when it declares one) and its `DFHEIBLK`; of the EIB only
+  the fields a scenario's branch path pins (`EIBCALEN`, `EIBAID`, ...) are
+  in the row, so the others keep the values CICS starts a task with.
 - `expectations` gains a `stub` per USING field the program writes (xref
   role `write`) and for the RETURNING item, with `ref` the field's
   qualified name and `note` `"returned to the caller of <PROGRAM-ID>"`.

@@ -305,6 +305,7 @@ class ProgramFixtureGenerator:
         seed: int | None = None,
     ) -> FixtureBundle:
         bundle_seed = seed if seed is not None else random.randrange(2**31)
+        self._add_cics_interface(index, report)
         scenario = Scenario(
             name=_SCENARIO_NAME,
             intent="layout-valid values for every boundary, no branch targeting",
@@ -405,7 +406,7 @@ class ProgramFixtureGenerator:
             index,
             report,
             extra_fed_names=(
-                self._entry_parameter_names(ast) if self.entry_parameters else ()
+                self._entry_parameter_names(ast, index) if self.entry_parameters else ()
             ),
         )
         flow_report = ProgramFlowAnalyzer().analyze(ast)
@@ -1078,20 +1079,45 @@ class ProgramFixtureGenerator:
 
     # -- the program's own USING parameters (entry_parameters=True) ---------
 
+    def _add_cics_interface(
+        self, index: ProgramLayoutIndex, report: BoundaryReport
+    ) -> None:
+        """A CICS program's EIB as a LINKAGE record, when entry parameters
+        are asked for: CICS passes it with the COMMAREA, and branches on
+        ``EIBCALEN`` / ``EIBAID`` decide which path a transaction takes."""
+        if self.entry_parameters and any(
+            b.ref.category == "CICS" for b in report.boundaries
+        ):
+            index.add_cics_interface()
+
     @staticmethod
-    def _entry_parameter_names(ast: CobolProgram) -> list[str]:
+    def _entry_parameter_names(
+        ast: CobolProgram, index: ProgramLayoutIndex | None = None
+    ) -> list[str]:
         """The PROCEDURE DIVISION USING items, in order (no ENTRY points:
-        the scaffold PERFORMs the default entry). A CICS-translated
-        program's DFHEIBLK is left out: CICS fills the EIB, not the
-        caller."""
+        the scaffold PERFORMs the default entry).
+
+        A CICS program (one whose ``index`` holds a ``DFHEIBLK``, see
+        :meth:`_add_cics_interface`) is passed its EIB and, when it
+        declares one, its ``DFHCOMMAREA`` by CICS whether or not it names
+        them in a USING: both are its inputs. Only the EIB fields a branch
+        scenario pins are set (:meth:`_attach_entry_parameters`); the rest
+        keep the values CICS starts a task with."""
         procedure = ast.get_division("PROCEDURE")
         if procedure is None:
             return []
-        return [
+        names = [
             str(name)
             for name in procedure.get_metadata("using_parameters") or []
             if str(name).upper() != "DFHEIBLK"
         ]
+        if index is None or index.record_named("DFHEIBLK") is None:
+            return names
+        upper = {name.upper() for name in names}
+        if "DFHCOMMAREA" not in upper and index.record_named("DFHCOMMAREA"):
+            names.append("DFHCOMMAREA")
+        names.append("DFHEIBLK")
+        return names
 
     def _attach_entry_parameters(
         self,
@@ -1106,7 +1132,7 @@ class ProgramFixtureGenerator:
         """Give `scenario` the values its caller passes through the USING
         items, and a ``stub`` expectation per field the program writes back
         through them. Returns notes on what could not be resolved."""
-        names = self._entry_parameter_names(ast)
+        names = self._entry_parameter_names(ast, index)
         procedure = ast.get_division("PROCEDURE")
         returning = (
             procedure.get_metadata("returning_parameter")
@@ -1121,7 +1147,13 @@ class ProgramFixtureGenerator:
             for name in names
             if not self._fields_for_name(name, index)
         ]
-        fields = self._fields_for_names(names, index)
+        pinned = override.witnesses if override is not None else {}
+        fields = [
+            spec
+            for spec in self._fields_for_names(names, index)
+            # An EIB field is set only when a scenario's branch needs it.
+            if spec.path[0].upper() != "DFHEIBLK" or spec.qualified_name in pinned
+        ]
         ref = BoundaryRef(
             category="ENTRY",
             key=program,

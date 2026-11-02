@@ -14,6 +14,21 @@ deliberate. Anything else appended to the bottom is a mistake: five
 entries, including both 2026-09-15 sections, were found there on
 2026-09-15 and moved back up.
 
+## 2026-11-02 -- branch scenarios for CICS programs, constants, edges
+
+- [generators/fixtures.md](generators/fixtures.md): with `entry_parameters=True`
+  a CICS program's COMMAREA and the EIB fields its branch paths test are
+  scenario inputs (synthetic `DFHEIBLK` via `ProgramLayoutIndex.add_cics_interface`);
+  each numeric comparison is also targeted at its edge (`_edge_scenarios`).
+- [analysis/fixtures-support.md](analysis/fixtures-support.md): `DFHRESP(...)`
+  and never-written VALUE items fold to literals in comparisons.
+  Found by the change-impact oracle E2E (mocky-mock `examples/oraclemix`):
+  no generated case reached a CICS second screen, a COMMAREA-driven check or
+  its limit. Tests: `tests/unit/test_cics_entry_scenarios.py`.
+- [analysis/fixtures-support.md](analysis/fixtures-support.md): `EVALUATE TRUE`
+  selector text with a class or sign test (`WHEN X NOT NUMERIC`) is modelled;
+  it used to leave every arm of the EVALUATE without a scenario.
+
 ## 2026-11-01 -- open-issue sweep: #790, #793, #794, #795, #796
 
 - [analysis/lineage.md](analysis/lineage.md) (`sql` row): `_sql_flow` unquotes
