@@ -298,6 +298,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   section's `min_severity` and `fail_on` also reach `call-check` and
   `widen-check`). A tracked 1.4 MB `coverage.json` is removed and ignored.
 
+## [3.3.1](https://github.com/Landparty/cobol-parser/compare/v3.3.0...v3.3.1) (2026-11-02)
+
+
+### Bug Fixes
+
+* **constraints:** keep the WHEN range bound list out of the resolved-field variable ([#811](https://github.com/Landparty/cobol-parser/issues/811)) ([adf07bd](https://github.com/Landparty/cobol-parser/commit/adf07bda35c5f70ac83e32ac9bbae8472daf6b68))
+* **fixtures:** WHEN selectors fold DFHRESP(...) and never-changed constants ([8349d94](https://github.com/Landparty/cobol-parser/commit/8349d94aa884e5e74cb856efb4e20f46da2259c9))
+* **fixtures:** WHEN selectors fold DFHRESP(...) and never-changed constants ([cd5d618](https://github.com/Landparty/cobol-parser/commit/cd5d618c1ba853600486ea1281bacf92992afc46))
+* **lexer:** a stray character never fails the whole file ([39a36fe](https://github.com/Landparty/cobol-parser/commit/39a36fef0c550a91ba7463b75368d616a6c439bf))
+* **lexer:** names holding a COPY REPLACING placeholder are one identifier ([06f6377](https://github.com/Landparty/cobol-parser/commit/06f63778d204f03eb941fe4f4fc57fb0f0fdd028))
+* **lexer:** stray characters and REPLACING placeholders never fail a file ([04a8bba](https://github.com/Landparty/cobol-parser/commit/04a8bba61b2e3d14e885a12e065ee1c2a52e4c9f))
+* **scenarios:** FILE STATUS cases follow file organization, OPEN mode and key of reference ([8d05829](https://github.com/Landparty/cobol-parser/commit/8d05829077deed4d749c7cb5f6d4220c5e85bd0b))
+* **scenarios:** FILE STATUS cases follow file organization, OPEN mode and key of reference ([a6e318c](https://github.com/Landparty/cobol-parser/commit/a6e318cbc1262ec5802736dd974e3f01d3c685d1))
+
 ## [3.3.0](https://github.com/Landparty/cobol-parser/compare/v3.2.1...v3.3.0) (2026-11-02)
 
 

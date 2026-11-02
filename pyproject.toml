@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "cobol-parser"
-version = "3.3.0"
+version = "3.3.1"
 description = "A comprehensive COBOL parser for Python with IBM Enterprise COBOL focus"
 readme = "README.md"
 requires-python = ">=3.11"
