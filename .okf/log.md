@@ -14,6 +14,14 @@ deliberate. Anything else appended to the bottom is a mistake: five
 entries, including both 2026-09-15 sections, were found there on
 2026-09-15 and moved back up.
 
+## 2026-11-02 -- placeholder names inside a condition's parentheses
+
+- [lexer.md](lexer.md): `_template_name_span` peels a condition's own
+  `(` / `)` off a run before matching a placeholder name, so CardDemo's
+  `IF (FLG-(TESTVAR1)-NOT-OK OR FLG-(TESTVAR1)-BLANK)` keeps both names
+  whole. Tests: `tests/regression/test_copybook_template_placeholders.py`
+  (CardDemo `CSSETATY.cpy`, standalone and through COPY REPLACING).
+
 ## 2026-11-02 -- COPY REPLACING placeholders in names
 
 - [lexer.md](lexer.md): "COPY REPLACING placeholders in names". New

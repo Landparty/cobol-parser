@@ -137,6 +137,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+* **A placeholder name inside a condition's parentheses stays one name.**
+  AWS CardDemo's `CSSETATY.cpy` writes `IF (FLG-(TESTVAR1)-NOT-OK OR
+  FLG-(TESTVAR1)-BLANK)`; the parenthesis abutting the name kept it from
+  being read as one word. The condition's own parentheses are now split
+  off first.
+
 * **Template copybooks keep their names.** A copybook written for
   `COPY ... REPLACING ==(9999-)== BY ==WS-==` spells each name with the
   placeholder (`01 (9999-)MOD-DTTX0F.`, `05 :PFX:-CODE`). Parsed on its own,
