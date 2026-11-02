@@ -266,6 +266,7 @@ with a literal VALUE that nothing writes (xref roles other than read /
 condition / subscript, on the item, a group above it or its record) as that
 literal (`_named_constants`, kept on `ProgramLayoutIndex.named_constants`),
 so `IF ID NOT > WS-MAX-ID` is a comparison against `899999`.
+An EVALUATE WHEN selector gets both folds too (stress test 2026-11-02): `WHEN DFHRESP(NOTFND)` is `13` and `WHEN DFHENTER` (a DFHAID constant) is its VALUE, so a CICS screen program's PF-key and RESP arms are targeted; a WHEN naming an item the program writes is still unsupported.
 
 ```python
 from cobolparser.analysis.constraints import ConstraintExtractor

@@ -95,3 +95,60 @@ def test_eib_fields_on_the_path_are_set_only_where_needed(tmp_path):
     assert _entry(notfnd)["EIBCALEN"] != "0"
     read = next(f for f in notfnd["fixtures"] if f["category"] == "CICS")
     assert read["sequence"][0]["WS-RESP"] == "13"
+
+
+SCREEN = """\
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. SCREEN.
+       DATA DIVISION.
+       WORKING-STORAGE SECTION.
+       01  KEYS.
+           05  KEY-ENTER          PIC X VALUE X'7D'.
+           05  KEY-PF3            PIC X VALUE '3'.
+       01  WS-RESP                PIC S9(8) COMP.
+       01  WS-REC                 PIC X(10).
+       01  WS-STATE               PIC X.
+       LINKAGE SECTION.
+       01  DFHCOMMAREA            PIC X.
+       PROCEDURE DIVISION.
+       0000-MAIN.
+           EVALUATE EIBAID
+               WHEN KEY-PF3
+                   MOVE 'X' TO WS-STATE
+               WHEN KEY-ENTER
+                   PERFORM 2000-READ
+               WHEN OTHER
+                   MOVE 'I' TO WS-STATE
+           END-EVALUATE
+           EXEC CICS RETURN END-EXEC.
+       2000-READ.
+           EXEC CICS READ FILE('CUSTFIL') INTO(WS-REC)
+               RIDFLD(WS-STATE) RESP(WS-RESP)
+           END-EXEC
+           EVALUATE WS-RESP
+               WHEN DFHRESP(NORMAL)
+                   MOVE 'F' TO WS-STATE
+               WHEN DFHRESP(NOTFND)
+                   MOVE 'N' TO WS-STATE
+               WHEN OTHER
+                   MOVE 'E' TO WS-STATE
+           END-EVALUATE.
+"""
+
+
+def test_when_selectors_naming_constants_and_dfhresp_are_targeted(tmp_path):
+    """`EVALUATE EIBAID WHEN DFHENTER` (a DFHAID constant) and `EVALUATE
+    WS-RESP WHEN DFHRESP(NOTFND)` were "not supported in v1": a CICS
+    screen program's second screen was never generated (stress test
+    2026-11-02, ORDINQ). A WHEN now folds both, as the IF path does."""
+    bundle = _bundle(tmp_path, SCREEN)
+    statuses = {
+        d["arm_key"]: d["status"] for d in bundle["scenario_coverage"]["details"]
+    }
+    assert set(statuses.values()) == {"targeted"}, statuses
+    by_name = {s["name"]: s for s in bundle["scenarios"]}
+    pf3 = next(s for k, s in by_name.items() if k.endswith("WHEN KEY-PF3"))
+    assert _entry(pf3)["EIBAID"] == "3"
+    notfnd = next(s for k, s in by_name.items() if "DFHRESP" in k and "NOTFND" in k)
+    read = next(f for f in notfnd["fixtures"] if f["category"] == "CICS")
+    assert read["sequence"][0]["WS-RESP"] == "13"

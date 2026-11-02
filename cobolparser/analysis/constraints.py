@@ -1555,6 +1555,12 @@ def _extract_evaluate_selector(
     # that is the rare case, and it errs toward the visible answer.
     if sel_type == "Literal":
         value = str(sel.get("value", ""))
+        if not sel.get("quoted"):
+            # ``WHEN DFHRESP(NOTFND)``: the number the CICS translator puts
+            # there, as the IF path folds it.
+            folded = _fold_cics_value(value)
+            if folded != value:
+                return [FieldConstraint(resolved, "eq", (folded,), origin, False)]
         if sel.get("expression") or (
             not sel.get("quoted") and not _is_literal_operand(value, quoted=False)
         ):
@@ -1578,7 +1584,17 @@ def _extract_evaluate_selector(
             return [
                 FieldConstraint(resolved, "figurative", (figurative,), origin, False)
             ]
-        if not sel.get("quoted") and index.resolve(value) is not None:
+        named = index.resolve(value) if not sel.get("quoted") else None
+        constant = _constant_of(named, index) if named is not None else None
+        if constant is not None:
+            # ``WHEN DFHENTER``: a WORKING-STORAGE item the program never
+            # changes is its VALUE, as on the IF path (#803).
+            return [
+                FieldConstraint(
+                    resolved, "eq", (_literal_value(constant),), origin, False
+                )
+            ]
+        if named is not None:
             unsupported.append(
                 f"{origin}: WHEN selector names a data item rather than a "
                 f"literal, which is not supported in v1: {value}"
