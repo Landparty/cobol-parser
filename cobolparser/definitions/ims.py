@@ -264,6 +264,8 @@ class ProgramCommunicationBlock:
     procopt: str | None = None
     keylen: int | None = None
     lterm: str | None = None
+    #: ``PROCSEQ=``: the secondary-index database the program reads through.
+    procseq: str | None = None
     sensitive_segments: list[SensitiveSegment] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
@@ -274,6 +276,7 @@ class ProgramCommunicationBlock:
             "procopt": self.procopt,
             "keylen": self.keylen,
             "lterm": self.lterm,
+            "procseq": self.procseq,
             "line": self.line,
             "sensitive_segments": [s.to_dict() for s in self.sensitive_segments],
         }
@@ -319,8 +322,19 @@ class _PsbBuilder:
         pcb_type = (stmt.text("TYPE") or "DB").upper()
         name = stmt.text("PCBNAME") or stmt.name
         dbdname = _first(stmt.keyword("DBDNAME"))
-        if dbdname is None and pcb_type in ("DB", "GSAM") and stmt.positional:
-            dbdname = _first(stmt.positional[0])
+        if dbdname is None and pcb_type in ("DB", "GSAM"):
+            # PSBGEN takes the DBD name as NAME= too (older PSBs), or positionally.
+            dbdname = _first(stmt.keyword("NAME")) or (
+                _first(stmt.positional[0]) if stmt.positional else None
+            )
+            if dbdname is None:
+                self.result.warnings.append(
+                    {
+                        "line": stmt.line,
+                        "message": f"TYPE={pcb_type} PCB without a DBD name",
+                    }
+                )
+        procseq = _first(stmt.keyword("PROCSEQ"))
         self.pcb = ProgramCommunicationBlock(
             type=pcb_type,
             line=stmt.line,
@@ -329,6 +343,7 @@ class _PsbBuilder:
             procopt=stmt.text("PROCOPT"),
             keylen=as_int(stmt.keyword("KEYLEN")),
             lterm=stmt.text("LTERM"),
+            procseq=procseq.upper() if procseq else None,
         )
         self.pending.append(self.pcb)
 

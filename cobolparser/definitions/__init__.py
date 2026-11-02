@@ -21,7 +21,7 @@ import re
 from typing import Literal
 
 from .bms import BmsDefinitions, BmsField, BmsMap, BmsMapset, parse_bms
-from .csd import CsdDefinitions, CsdResource, parse_csd
+from .csd import CsdDefinitions, CsdResource, _resource_type, parse_csd
 from .ddl import SYSTEM_DEFAULT, DdlColumn, DdlDefinitions, DdlTable, parse_ddl
 from .ims import (
     DbdDefinitions,
@@ -44,10 +44,14 @@ _BMS = re.compile(r"^\S*[ \t]+DFHMSD[ \t]", re.MULTILINE)
 _PSB = re.compile(r"^\S*[ \t]+PSBGEN\b", re.MULTILINE)
 _DBD = re.compile(r"^\S*[ \t]+DBD[ \t]+NAME=", re.MULTILINE)
 _SEGM = re.compile(r"^\S*[ \t]+SEGM[ \t]", re.MULTILINE)
-_CSD = re.compile(
-    r"^[ \t]*DEF(?:INE)?[ \t]+[A-Z0-9]+\(|^\S*[ \t]+DFH(?:PCT|PPT|FCT)[ \t]+TYPE=",
-    re.MULTILINE | re.IGNORECASE,
-)
+#: DFHCSDUP ``DEFINE type(`` (upper case, as DFHCSDUP members are written); the
+#: type must be a CSD resource type, so IDCAMS ``DEFINE GDG(`` and Python
+#: ``def f(`` are not CSD.
+_CSD_DEFINE = re.compile(r"^[ \t]*DEF(?:INE)?[ \t]+([A-Z0-9]+)\(", re.MULTILINE)
+_CSD_MACRO = re.compile(r"^\S*[ \t]+DFH(?:PCT|PPT|FCT)[ \t]+TYPE=", re.MULTILINE)
+#: A JCL statement (``//name JOB|EXEC|DD|PROC``): a job, even one whose in-stream
+#: data holds DEFINE or CREATE statements, is not a definition member.
+_JCL = re.compile(r"^//\S*[ \t]+(?:JOB|EXEC|DD|PROC)\b", re.MULTILINE)
 _DDL = re.compile(
     r"^[ \t]*CREATE[ \t]+(?:UNIQUE[ \t]+|GLOBAL[ \t]+TEMPORARY[ \t]+|AUXILIARY[ \t]+)?"
     r"(?:TABLE|INDEX|VIEW|ALIAS|SYNONYM|TABLESPACE)\b",
@@ -62,16 +66,22 @@ def detect_definition_kind(source: str) -> DefinitionKind | None:
     """Which definition *source* holds, from its content; None when it is none of them.
 
     A COBOL program (an IDENTIFICATION DIVISION or EXEC SQL) is never DDL,
-    even when it embeds ``CREATE TABLE``.
+    even when it embeds ``CREATE TABLE``, and a JCL job (records starting
+    ``//``) is none of them, even when its in-stream data runs IDCAMS
+    ``DEFINE``, DFHCSDUP or DSNTEP2 ``CREATE``.
     """
     sample = source[:200_000]
+    if _JCL.search(sample):
+        return None
     if _BMS.search(sample):
         return "BMS"
     if _PSB.search(sample):
         return "PSB"
     if _DBD.search(sample) and _SEGM.search(sample):
         return "DBD"
-    if _CSD.search(sample):
+    if _CSD_MACRO.search(sample) or any(
+        _resource_type(m.group(1)) for m in _CSD_DEFINE.finditer(sample)
+    ):
         return "CSD"
     if _DDL.search(sample) and not _COBOL.search(sample):
         return "DDL"
