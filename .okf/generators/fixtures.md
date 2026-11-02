@@ -727,7 +727,8 @@ conjuncts must hold simultaneously) and lands in `coverage.missed` with
 * **error status** — one scenario per *declared* handler, never a status
   the program has no path for: `INVALID_KEY` in `Boundary.handlers` ->
   `"23"` (`"22"`, duplicate key, on a WRITE); a CALL's `ON_EXCEPTION` ->
-  `"12"`; an OPEN with a `status_field` -> `"35"`. File statements are
+  `"12"`; an OPEN INPUT / I-O / EXTEND with a `status_field` -> `"35"`
+  (never an OPEN OUTPUT, which creates the file). File statements are
   failed one at a time (`site_status_key`: `"READ:F@99"`), so a READ NEXT
   loop elsewhere on the same file still reaches its AT END.
 * **file status** — `_file_status_scenarios`: one scenario per file
@@ -735,9 +736,14 @@ conjuncts must hold simultaneously) and lands in `coverage.missed` with
   field for (`ConstraintReport.status_tests`: literals compared with it,
   `EVALUATE ... WHEN '02'`, its 88s), limited to the codes the operation
   can return (`_STATUS_CODES_BY_OPERATION`). A program that only tests for
-  `"00"` gets the operation's typical failure (`_TYPICAL_FAILURE`). A
-  sequential READ never gets `"23"`; a READ gets `"02"` only when
-  `StatementSite.duplicate_key` says it can. At most
+  `"00"` gets the operation's typical failure (`_TYPICAL_FAILURE`; on a
+  sequential file `_TYPICAL_SEQUENTIAL_FAILURE`: `"34"` for a WRITE, as an
+  ESDS or QSAM file gives when full, `"44"` for a REWRITE). Codes the
+  file's organization never returns are dropped
+  (`_IMPOSSIBLE_BY_ORGANIZATION`: no `"02"`/`"2x"` on a sequential file, no
+  `"34"` on an indexed or relative one). A sequential READ never gets
+  `"23"`; any statement gets `"02"` only when `StatementSite.duplicate_key`
+  says it can; an OPEN OUTPUT never gets `"35"`. At most
   `_MAX_FILE_STATUS_SCENARIOS` (40); a (statement, code) the error-status
   family already covers is skipped.
 * **Both status families pin the path** to the statement they fail

@@ -38,6 +38,7 @@ from ..analysis.constraints import (
     CorrelationConstraint,
     FieldConstraint,
     SequenceConstraint,
+    StatementSite,
 )
 from ..analysis.domains import FLOAT_LIMIT, Unsatisfiable, Witness, solve
 from ..analysis.program_flow import (
@@ -1278,7 +1279,9 @@ def _fixed_families(
     if empty_input is not None:
         scenarios.append(empty_input)
 
-    error_status = _error_status_scenarios(boundary_report)
+    error_status = _error_status_scenarios(
+        boundary_report, constraint_report.statement_sites
+    )
     file_status = _file_status_scenarios(
         constraint_report, boundary_report, error_status
     )
@@ -1392,7 +1395,21 @@ def site_status_key(boundary: Boundary) -> str:
     return f"{boundary.ref.category}:{boundary.ref.key}@{boundary.ref.line}"
 
 
-def _error_status_scenarios(boundary_report: BoundaryReport) -> list[PlannedScenario]:
+def _open_mode(
+    boundary: Boundary, statement_sites: dict[int, StatementSite]
+) -> str | None:
+    """The mode an OPEN boundary opens its file in, when known."""
+    site = statement_sites.get(boundary.ref.line) if boundary.ref.line else None
+    if site is None:
+        return None
+    return dict(site.open_modes).get(boundary.ref.key.upper())
+
+
+def _error_status_scenarios(
+    boundary_report: BoundaryReport,
+    statement_sites: dict[int, StatementSite] | None = None,
+) -> list[PlannedScenario]:
+    sites = statement_sites or {}
     scenarios: list[PlannedScenario] = []
     for boundary in boundary_report.boundaries:
         key = f"{boundary.ref.category}:{boundary.ref.key}"
@@ -1422,7 +1439,13 @@ def _error_status_scenarios(boundary_report: BoundaryReport) -> list[PlannedScen
                     status_overrides={key: "12"},
                 )
             )
-        if boundary.ref.category == "OPEN" and boundary.status_field:
+        if (
+            boundary.ref.category == "OPEN"
+            and boundary.status_field
+            # OPEN OUTPUT creates the file: only INPUT, I-O and EXTEND can
+            # find it missing (35).
+            and _open_mode(boundary, sites) != "OUTPUT"
+        ):
             scenarios.append(
                 PlannedScenario(
                     name=f"error status: OPEN {boundary.ref.key} not found",
@@ -1445,9 +1468,23 @@ _STATUS_CODES_BY_OPERATION: dict[str, frozenset[str]] = {
     "READ": frozenset({"02", "04", "23", "46", "47", "90", "92"}),
     "START": frozenset({"23", "47", "90", "92"}),
     "WRITE": frozenset({"02", "21", "22", "24", "34", "48", "90", "92"}),
-    "REWRITE": frozenset({"02", "21", "22", "43", "44", "49", "90", "92"}),
+    "REWRITE": frozenset({"02", "21", "22", "23", "43", "44", "49", "90", "92"}),
     "DELETE": frozenset({"23", "43", "49", "90", "92"}),
 }
+#: Codes a file of each organization never returns: a sequential file
+#: has no keys (no 02, 21-24) and reports running out of space as 34; an
+#: indexed or relative one reports it as 24. 21 (sequence error) and 02
+#: are indexed only.
+_IMPOSSIBLE_BY_ORGANIZATION: dict[str, frozenset[str]] = {
+    "SEQUENTIAL": frozenset({"02", "21", "22", "23", "24"}),
+    "RELATIVE": frozenset({"02", "21", "34"}),
+    "INDEXED": frozenset({"34"}),
+}
+#: The commonest failure of each operation on a sequential file, where it
+#: differs from `_TYPICAL_FAILURE`'s: an ESDS or QSAM WRITE that cannot
+#: add the record fails with 34 (boundary violation), a REWRITE of a
+#: different length with 44.
+_TYPICAL_SEQUENTIAL_FAILURE = {"WRITE": "34", "REWRITE": "44"}
 #: The failure a program that only tests for success (``IF WS-FS NOT =
 #: '00'``) is given at each operation: the commonest one.
 _TYPICAL_FAILURE = {
@@ -1497,9 +1534,22 @@ def _file_status_scenarios(
             possible = possible - {"23"}
             typical = None
         site = constraint_report.statement_sites.get(boundary.ref.line)
-        if category == "READ" and site is not None and not site.duplicate_key:
-            # "02" needs an ALTERNATE RECORD KEY WITH DUPLICATES.
+        if site is not None and not site.duplicate_key:
+            # "02" needs an ALTERNATE RECORD KEY WITH DUPLICATES (for a
+            # sequential READ, as its key of reference).
             possible = possible - {"02"}
+        organization = site.organization if site is not None else None
+        if organization is not None:
+            possible = possible - _IMPOSSIBLE_BY_ORGANIZATION[organization]
+            if organization == "SEQUENTIAL":
+                typical = _TYPICAL_SEQUENTIAL_FAILURE.get(category)
+        if category == "OPEN":
+            mode = _open_mode(boundary, constraint_report.statement_sites)
+            if mode == "OUTPUT":
+                possible = possible - {"35"}
+                typical = None
+        if typical is not None and typical not in possible:
+            typical = None
         codes = sorted(tested & possible)
         if not codes and "00" in tested and typical is not None:
             codes = [typical]
