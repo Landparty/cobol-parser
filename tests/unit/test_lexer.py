@@ -856,7 +856,7 @@ class TestCobolLexerProgramText:
 
     def test_invalid_character_error(self):
         """Test error handling for invalid characters."""
-        from cobolparser.lexer import CobolLexer, LexerError
+        from cobolparser.lexer import CobolLexer
 
         lexer = CobolLexer("")
 
@@ -864,18 +864,21 @@ class TestCobolLexerProgramText:
         text = "MOVE ~ WS-VAR."  # ~ is invalid
         lexer.tokenize_program_text(text, 0, 8)
 
-        # Should have recorded an error
-        assert len(lexer.errors) >= 1
-        error = lexer.errors[0]
-        assert isinstance(error, LexerError)
-        assert "Invalid character" in error.message
-        assert "~" in error.message
+        # An opaque STRAY_CHAR token, not an error: tokenize()'s post-pass
+        # decides (kept inside EXEC, dropped with a warning elsewhere).
+        assert not lexer.errors
 
-        # '@' lexes (it is a letter of a DB2 name inside EXEC SQL); outside
-        # an EXEC block the tokenize() post-pass reports it instead.
+        lexer = CobolLexer("       MOVE ~ WS-VAR.\n")
+        tokens = lexer.tokenize()
+        assert not lexer.errors
+        assert all(t.value != "~" for t in tokens)
+        assert any("Ignored invalid character '~'" in w for w in lexer.warnings)
+
+        # A free-standing '@' outside an EXEC block is dropped the same way.
         lexer = CobolLexer("       MOVE @ WS-VAR.\n")
         lexer.tokenize()
-        assert any("Invalid character: @" in e.message for e in lexer.errors)
+        assert not lexer.errors
+        assert any("Ignored invalid character '@'" in w for w in lexer.warnings)
 
 
 class TestCobolLexerTokenizeMethod:

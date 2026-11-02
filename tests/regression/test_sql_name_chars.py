@@ -51,12 +51,14 @@ def test_a_name_char_set_apart_by_blanks_is_left_alone():
     assert "A # B" in text
 
 
-def test_hash_outside_exec_is_still_a_lexer_error():
+def test_hash_outside_exec_is_glued_into_the_name_with_a_warning():
     result = parse_cobol(
         PROLOGUE + "           MOVE SPACES TO WS-A#\n           STOP RUN.\n"
     )
-    assert not result.success
-    assert any("Invalid character: #" in str(e) for e in result.errors)
+    assert not any("Invalid character" in str(e) for e in result.errors)
+    assert any("Non-standard character '#'" in w for w in result.warnings)
+    move = result.ast.find_all_by_type("MoveStatement")[0]
+    assert "WS-A#" in str(move.to_dict())
 
 
 def test_a_declared_hash_currency_symbol_is_still_a_picture_symbol():

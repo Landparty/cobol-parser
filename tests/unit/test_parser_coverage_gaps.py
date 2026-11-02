@@ -19,7 +19,7 @@ _MINIMAL = """
            STOP RUN.
 """
 
-_BROKEN = "       @@INVALID@@ DIVISION.\n       @@@.\n" * 30
+_BROKEN = "       PROCEDURE DIVISION.\n" + "           MOVE TO.\n" * 30
 
 
 # ---------------------------------------------------------------------------

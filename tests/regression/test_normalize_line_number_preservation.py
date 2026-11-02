@@ -70,10 +70,11 @@ class TestNormalizeFixedFormatPreservesLineNumbers:
         result = parse_cobol(
             source, filename="probe.cbl", error_recovery=ErrorRecoveryMode.COLLECT_ALL
         )
-        assert result.errors
+        bad_char_warnings = [w for w in result.warnings if "'~'" in w]
+        assert bad_char_warnings
         # The bad token is on physical line 9; without the fix it reported
         # line 7 (shifted by the dropped blank + comment line).
-        assert all(e.line_number == 9 for e in result.errors)
+        assert all("line 9)" in w for w in bad_char_warnings)
 
     def test_output_line_count_matches_input(self):
         out = normalize_fixed_format(self.LINES)
@@ -128,9 +129,9 @@ class TestConditionalCompilationPreservesLineNumbers:
             error_recovery=ErrorRecoveryMode.COLLECT_ALL,
             free_form=True,
         )
-        bad_char_errors = [e for e in result.errors if "Invalid character" in str(e)]
-        assert bad_char_errors
-        assert all(e.line_number == 5 for e in bad_char_errors)
+        bad_char_warnings = [w for w in result.warnings if "'~'" in w]
+        assert bad_char_warnings
+        assert all("line 5)" in w for w in bad_char_warnings)
 
 
 class TestLexerLineStartQuoteWhitespaceParity:

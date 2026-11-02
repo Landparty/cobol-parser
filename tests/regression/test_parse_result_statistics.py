@@ -7,19 +7,34 @@ with the same ``CobolParser`` instance.
 """
 
 from cobolparser import CobolParser, ErrorRecoveryMode
+from cobolparser import parser as parser_module
+from cobolparser.lexer import LexerError
+from cobolparser.models.ast_base import SourceLocation
 
 
 class TestParseResultStatistics:
+    # A program whose lexer reports a hard error after producing tokens. No
+    # character fails the lexer any more (a stray one is a warning), so the
+    # error is injected; the statistics are what this test is about.
     _LEXER_ERROR = (
-        "IDENTIFICATION DIVISION.\n"
-        "PROGRAM-ID. BAD.\n"
-        "PROCEDURE DIVISION.\n"
-        "    DISPLAY ¥.\n"
-        "    STOP RUN.\n"
+        "       IDENTIFICATION DIVISION.\n"
+        "       PROGRAM-ID. BAD.\n"
+        "       PROCEDURE DIVISION.\n"
+        "           DISPLAY 'X'.\n"
+        "           STOP RUN.\n"
     )
 
-    def test_fail_fast_lexer_error_still_reports_lines_and_time(self):
-        result = CobolParser(free_form=True).parse(self._LEXER_ERROR)
+    def test_fail_fast_lexer_error_still_reports_lines_and_time(self, monkeypatch):
+        real_lexer = parser_module.CobolLexer
+
+        class LexerWithError(real_lexer):  # type: ignore[misc, valid-type]
+            def tokenize(self):
+                tokens = super().tokenize()
+                self.errors.append(LexerError("injected", SourceLocation(4, 12, 1)))
+                return tokens
+
+        monkeypatch.setattr(parser_module, "CobolLexer", LexerWithError)
+        result = CobolParser().parse(self._LEXER_ERROR)
         assert result.errors
         assert result.ast is None
         stats = result.statistics

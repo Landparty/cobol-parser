@@ -140,10 +140,12 @@ CALL_KIND_FUNCTION = "function"
 #: CICS commands that name another program to run, by :attr:`CallEdge.kind`.
 _CICS_TRANSFER_KINDS = {"LINK": CALL_KIND_CICS_LINK, "XCTL": CALL_KIND_CICS_XCTL}
 
-#: A data-item declaration (level number, then name) whose name carries an
-#: IBM ``:TAG:`` REPLACING placeholder, e.g. ``05 :Q:-AMT PIC 9(5).``
+#: A data-item declaration (level number, then name) whose name carries a
+#: REPLACING placeholder: IBM ``:TAG:`` (``05 :Q:-AMT PIC 9(5).``) or a
+#: parenthesised one (``05 (9999-)LONGUEUR-MOD PIC S9(4) COMP.``).
 _PLACEHOLDER_DECLARATION = re.compile(
-    r"(?:^|\s)\d{1,2}\s+([^\s.]*:[A-Z0-9_-]+:[^\s.]*)", re.IGNORECASE
+    r"(?:^|\s)\d{1,2}\s+([^\s.]*(?::[A-Z0-9_-]+:|\([A-Z0-9_-]*[A-Z-][A-Z0-9_-]*\))[^\s.]*)",
+    re.IGNORECASE,
 )
 
 #: Below this many files the sequential fast path in :func:`parse_files` beats
@@ -1890,9 +1892,11 @@ def _member_fields(member_path: str) -> tuple[list[str], str | None]:
     # invention, not something the member contributes, so keep only names the
     # member's own text actually declares.
     declared = source.upper()
-    fields = sorted(name for name in names if name in declared)
-    # A ``:TAG:``-named item that does parse comes back under a generated
-    # ANONYMOUS-* name, which the filter above drops; the note says why.
+    # A placeholder-named item (``:Q:-AMT``, ``(9999-)AMT``) parses under its
+    # template name, which no program uses; the note says why it is left out.
+    fields = sorted(
+        name for name in names if name in declared and name not in placeholders
+    )
     return fields, placeholder_note
 
 

@@ -26,6 +26,14 @@ from cobolparser.cli.parse import (
     main,
 )
 
+# Fails lexing under fail-fast (ast is None): an unterminated literal.
+_UNLEXABLE = (
+    "       IDENTIFICATION DIVISION.\n"
+    "       PROGRAM-ID. BAD.\n"
+    "       PROCEDURE DIVISION.\n"
+    '           DISPLAY "OPEN\n'
+)
+
 # ---------------------------------------------------------------------------
 # Shared helpers
 # ---------------------------------------------------------------------------
@@ -145,7 +153,7 @@ class TestCmdIoSequence:
 
     def test_parse_failure_exits(self, tmp_path):
         bad = tmp_path / "bad.cbl"
-        bad.write_text("@@@@ NOT COBOL")
+        bad.write_text(_UNLEXABLE)
         args = _make_args(str(bad), error_recovery="fail-fast")
         with pytest.raises(SystemExit):
             _cmd_io_sequence(args)
@@ -192,7 +200,7 @@ class TestCmdMoveTypeCheck:
 
     def test_parse_failure_exits(self, tmp_path):
         bad = tmp_path / "bad.cbl"
-        bad.write_text("@@@@ NOT COBOL")
+        bad.write_text(_UNLEXABLE)
         args = _make_args(str(bad), error_recovery="fail-fast")
         with pytest.raises(SystemExit):
             _cmd_move_type_check(args)
@@ -239,7 +247,7 @@ class TestCmdLinkageCheck:
 
     def test_parse_failure_exits(self, tmp_path):
         bad = tmp_path / "bad.cbl"
-        bad.write_text("@@@@ NOT COBOL")
+        bad.write_text(_UNLEXABLE)
         args = _make_args(str(bad), error_recovery="fail-fast")
         with pytest.raises(SystemExit):
             _cmd_linkage_check(args)
@@ -287,7 +295,7 @@ class TestCmdLanguageEnv:
 
     def test_parse_failure_exits(self, tmp_path):
         bad = tmp_path / "bad.cbl"
-        bad.write_text("@@@@ NOT COBOL")
+        bad.write_text(_UNLEXABLE)
         args = _make_args(str(bad), error_recovery="fail-fast")
         with pytest.raises(SystemExit):
             _cmd_language_env(args)
@@ -344,7 +352,7 @@ class TestCmdImsDli:
 
     def test_parse_failure_exits(self, tmp_path):
         bad = tmp_path / "bad.cbl"
-        bad.write_text("@@@@ NOT COBOL")
+        bad.write_text(_UNLEXABLE)
         args = _make_args(str(bad), error_recovery="fail-fast")
         with pytest.raises(SystemExit):
             _cmd_ims_dli(args)
@@ -383,7 +391,7 @@ class TestCmdDataItems:
 
     def test_parse_failure_exits(self, tmp_path):
         bad = tmp_path / "bad.cbl"
-        bad.write_text("@@@@ NOT COBOL")
+        bad.write_text(_UNLEXABLE)
         args = _make_args(str(bad), error_recovery="fail-fast")
         with pytest.raises(SystemExit):
             _cmd_data_items(args)

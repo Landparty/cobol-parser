@@ -5,9 +5,11 @@ text (``!=``, ``||``, ``¬=``) round-trips instead of failing the whole parse
 with a hard "Invalid character" LexerError. The first version accepted the
 tokens *everywhere*, which silently turned garbage COBOL (``MOVE BOGUS !!!
 TO WS-A``) into a successful parse with zero diagnostics -- the junk folded
-into the statement's operand text. ``CobolLexer._flag_stray_sql_chars`` (a
-linear post-pass shared by the Cython fast path) restores the old error for
-any of these characters outside an EXEC block.
+into the statement's operand text. A later version restored the hard error,
+which failed whole files over a box-drawing '|' in a misplaced comment.
+``CobolLexer._drop_stray_chars`` (a linear post-pass shared by the Cython
+fast path) now drops these characters outside an EXEC block and names each
+one in a warning: the file parses, and the junk is not silent.
 """
 
 from cobolparser import parse_cobol
@@ -24,26 +26,35 @@ PROLOGUE = """       IDENTIFICATION DIVISION.
 
 
 class TestStrayCharsOutsideExec:
-    def test_bang_outside_exec_is_a_lexer_error(self):
+    def test_bang_outside_exec_is_dropped_with_a_warning(self):
         result = parse_cobol(
             PROLOGUE + "           MOVE BOGUS !!! TO WS-A\n           STOP RUN.\n"
         )
-        assert not result.success
-        assert any("Invalid character: !" in str(e) for e in result.errors)
+        assert not any("Invalid character" in str(e) for e in result.errors)
+        assert any(
+            "Ignored invalid character '!'" in w and "line 9" in w
+            for w in result.warnings
+        ), result.warnings
 
-    def test_pipe_outside_exec_is_a_lexer_error(self):
+    def test_pipe_outside_exec_is_dropped_with_a_warning(self):
         result = parse_cobol(
             PROLOGUE + "           MOVE BOGUS || TO WS-A\n           STOP RUN.\n"
         )
-        assert not result.success
-        assert any("Invalid character: |" in str(e) for e in result.errors)
+        assert not any("Invalid character" in str(e) for e in result.errors)
+        assert any(
+            "Ignored invalid character '|'" in w and "line 9" in w
+            for w in result.warnings
+        ), result.warnings
 
-    def test_not_sign_outside_exec_is_a_lexer_error(self):
+    def test_not_sign_outside_exec_is_dropped_with_a_warning(self):
         result = parse_cobol(
             PROLOGUE + "           MOVE BOGUS ¬= TO WS-A\n           STOP RUN.\n"
         )
-        assert not result.success
-        assert any("Invalid character: ¬" in str(e) for e in result.errors)
+        assert not any("Invalid character" in str(e) for e in result.errors)
+        assert any(
+            "Ignored invalid character '¬'" in w and "line 9" in w
+            for w in result.warnings
+        ), result.warnings
 
 
 class TestSqlCharsInsideExec:

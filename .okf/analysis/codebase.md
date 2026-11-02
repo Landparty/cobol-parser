@@ -171,12 +171,13 @@ Two rules hold throughout:
    a successful parse); a COPY whose member is off the search path, a dynamic
    CALL with no resolvable target, a duplicate `PROGRAM-ID`, a file holding
    several units — each lands in `unresolved` with a reason. So does a
-   `copybook-impact` member whose data items are named by IBM `:TAG:`
-   REPLACING placeholders (`05 :Q:-AMT ...`, #356): their real names exist
-   only once a `COPY ... REPLACING` fills the tag in, so they are left out of
-   `fields` (the record parser renames them `ANONYMOUS-*`, which the
-   declared-in-the-member filter drops) and named in `unresolved` instead of
-   vanishing.
+   `copybook-impact` member whose data items are named by REPLACING
+   placeholders, IBM `:TAG:` (`05 :Q:-AMT ...`, #356) or parenthesised
+   (`05 (9999-)AMT ...`): their real names exist only once a
+   `COPY ... REPLACING` fills the tag in, so they are left out of `fields`
+   (the lexer reads them as one name spelled as written, and `_member_fields`
+   drops every name `_PLACEHOLDER_DECLARATION` found) and named in
+   `unresolved` instead of vanishing.
 2. **Determinism.** The same tree produces byte-identical `to_dict()`,
    `to_dot()` and `to_mermaid()`. Files are parsed in sorted order, every
    emitted list is sorted, and no `ProcessPoolExecutor` completion order reaches

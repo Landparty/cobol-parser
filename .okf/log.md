@@ -14,6 +14,25 @@ deliberate. Anything else appended to the bottom is a mistake: five
 entries, including both 2026-09-15 sections, were found there on
 2026-09-15 and moved back up.
 
+## 2026-11-02 -- COPY REPLACING placeholders in names
+
+- [lexer.md](lexer.md): "COPY REPLACING placeholders in names". New
+  post-pass `_merge_template_placeholders` lexes `(9999-)MOD-DTTX0F`,
+  `:PFX:-CODE`, `:PFX:` and `WS-(SFX)` as one IDENTIFIER, so a template
+  copybook parsed on its own keeps its names (was `ANONYMOUS-n-m`).
+  Tests: `tests/regression/test_copybook_template_placeholders.py`.
+
+## 2026-11-02 -- no character fails a file
+
+- [lexer.md](lexer.md): "Stray characters post-pass". An unknown character
+  (`|`, `¦`, `?`, box-drawing, control bytes; new token `STRAY_CHAR`) and
+  `! | ¬ # @` outside `EXEC ... END-EXEC` are dropped with one warning per
+  character (count and lines) instead of a hard `Invalid character` error;
+  a `#` / `@` abutting a word is glued into the data name.
+  `_flag_stray_sql_chars` became `_drop_stray_chars`. An upload had 197
+  programs fail over a tab-shifted `*| ... |` comment box and `#` in names.
+  Tests: `tests/regression/test_stray_characters_never_fail_the_file.py`.
+
 ## 2026-11-02 -- FILE STATUS codes follow file organization and OPEN mode
 
 - [generators/fixtures.md](generators/fixtures.md),

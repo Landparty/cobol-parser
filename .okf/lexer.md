@@ -46,7 +46,8 @@ regression test.
 * [Free-form `*>` inline comments](#free-form--inline-comments)
 * [Tokenize pipeline (`_tokenize_source`)](#tokenize-pipeline-_tokenize_source)
 * [Digit-led hyphenated names](#digit-led-hyphenated-names)
-* [Stray SQL characters post-pass](#stray-sql-characters-post-pass)
+* [Stray characters post-pass](#stray-characters-post-pass)
+* [COPY REPLACING placeholders in names](#copy-replacing-placeholders-in-names)
 * [Line splitting (`_lines.py`)](#line-splitting-_linespy)
 * [`&` literal concatenation](#-literal-concatenation)
 * [IDENTIFICATION DIVISION comment-entries](#identification-division-comment-entries)
@@ -106,7 +107,7 @@ Major groups:
 | Operators | `EQUAL`, `LESS`, `GREATER`, `PLUS`, `MINUS`, `MULTIPLY_OP`, `DIVIDE_OP`, `POWER`, `AND`, `OR`, `NOT`, … |
 | Punctuation | `PERIOD`, `COMMA`, `SEMICOLON`, `COLON`, `LEFT_PAREN`, `RIGHT_PAREN` |
 | Embedded EXEC | `EXEC`, `SQL`, `CICS`, `END_EXEC` (there are no fused `EXEC_SQL`/`EXEC_CICS`/`EXEC_IMS` tokens; the EXEC parsers read the word after `EXEC`) |
-| EXEC-SQL-only characters | `BANG`, `PIPE`, `NOT_SIGN`, `SQL_NAME_CHAR` (`#` / `@`; error outside `EXEC ... END-EXEC`) |
+| EXEC-only characters | `BANG`, `PIPE`, `NOT_SIGN`, `SQL_NAME_CHAR` (`#` / `@`), `STRAY_CHAR` (any other unknown character); dropped with a warning outside `EXEC ... END-EXEC` |
 | Layout / other | `NEWLINE`, `EOF`, `COMMENT`, `COMMENT_ENTRY`, `CURRENCY` |
 
 ## Fixed-format column layout
@@ -505,28 +506,60 @@ header and every PERFORM / GO TO of it were dropped as unparsed tokens.
 Pinned by `tests/regression/test_all_digit_procedure_names.py`. Same
 trade-off as above: a space-free `COMPUTE X = 10-1` is one word.
 
-## Stray SQL characters post-pass
+## Stray characters post-pass
 
-`!`, `|`, `¬`, `#` and `@` (tokens `BANG`, `PIPE`, `NOT_SIGN`, `SQL_NAME_CHAR`) are errors outside `EXEC ... END-EXEC`.
+No character fails a file. `!`, `|`, `¬`, `#`, `@` (tokens `BANG`, `PIPE`,
+`NOT_SIGN`, `SQL_NAME_CHAR`) and every other character the lexer does not
+know (`STRAY_CHAR`: `¦`, `§`, `?`, `{`, box-drawing `│`, a codepage-mangled
+glyph, a control byte) are kept as tokens inside `EXEC ... END-EXEC` and
+dropped elsewhere, with a warning.
 
-`CobolLexer._flag_stray_sql_chars()` runs at the end of `tokenize()` (both
-the pure-Python and `_lexer_fast.pyx` implementations call it — the fast
-path inherits the pure-Python method; one linear scan, no C mirror): every
-BANG/PIPE/NOT_SIGN token *outside* an `EXEC ... END-EXEC` token span
-records an `Invalid character` LexerError. The tokens exist only
-so embedded EXEC SQL (`!=`, `||`, `¬=`) round-trips; accepting them
-everywhere would let garbage like `MOVE BOGUS !!! TO WS-A` parse
-"successfully" with zero diagnostics. Pinned by
+`CobolLexer._drop_stray_chars()` runs at the end of `tokenize()` (both the
+pure-Python and `_lexer_fast.pyx` implementations call it — the fast path
+inherits the pure-Python method; one linear scan, no C mirror). Outside an
+EXEC token span:
+
+- a `#` / `@` declared as a SPECIAL-NAMES currency symbol is retyped
+  `CURRENCY`;
+- a `#` / `@` that abuts a word (same line, no gap: `WS-#CPT`, `@ADDR`) is
+  glued into one IDENTIFIER with it, so every reference stays one name;
+  warning `Non-standard character '#' read as part of a data name (N
+  occurrences, lines ...)`;
+- any other stray token is dropped; warning `Ignored invalid character '|'
+  (N occurrences, lines 68, 70, ... and K more)`.
+
+One warning per distinct character (first 10 line numbers), surfaced as
+`Lexer warning: ...` in `ParseResult.warnings`. They used to be hard
+`Invalid character` LexerErrors, which cost a whole program over a
+box-drawing comment whose `*` was not in column 7 (tab-shifted, no sequence
+area) or a `#` in a data name; the warning keeps junk such as
+`MOVE BOGUS !!! TO WS-A` from parsing with zero diagnostics. The only hard
+lexer error left is an unterminated literal. Pinned by
+`tests/regression/test_stray_characters_never_fail_the_file.py` and
 `tests/regression/test_stray_sql_chars.py`.
 
 `#` and `@` are letters of a DB2 ordinary identifier (`ACCT#`, `@ADDR`,
 `T#TAB`), like `$`. `CobolLexer._merge_exec_name_chars()` runs first: inside
 an EXEC block it glues each `SQL_NAME_CHAR` or `CURRENCY` token to the words
 it abuts (same line, no gap) into one IDENTIFIER, so `SELECT ACCT#` and
-`X$Y` round-trip unchanged. Before, `#` failed the whole parse with
-`Invalid character: #`. Outside an EXEC block a `#` / `@` declared as a
-SPECIAL-NAMES currency symbol is retyped `CURRENCY`; any other is an error.
-Pinned by `tests/regression/test_sql_name_chars.py`.
+`X$Y` round-trip unchanged. Pinned by `tests/regression/test_sql_name_chars.py`.
+
+## COPY REPLACING placeholders in names
+
+Template copybooks spell names with a placeholder the including program
+replaces: `01 (9999-)MOD-DTTX0F.` for `COPY X REPLACING ==(9999-)== BY
+==WS-==`, or `05 :PFX:-CODE`. `CobolLexer._merge_template_placeholders()`
+runs in `_post_tokenize()` after `_merge_exec_name_chars()` and before
+`_drop_stray_chars()`: outside EXEC, a run of abutting tokens (same line, no
+gap, not crossing `.` `,` `;` or a literal) whose text fully matches
+`_TEMPLATE_NAME_RE` becomes one IDENTIFIER spelled as written. A `(...)`
+placeholder must hold a letter or `-` and have name text after it, or a
+name ending in `-` before it (`WS-(SFX)`); `:TAG:` may stand alone. So
+`PIC -(5)9`, `TAB(I)`, `B(1:2)` and `A-(4)` are untouched; runs right after
+PIC / PICTURE [IS] are skipped. Before, each item of such a copybook parsed
+as `ANONYMOUS-n-m`. After `expand_copybooks` applies REPLACING there is no
+placeholder left. Pinned by
+`tests/regression/test_copybook_template_placeholders.py`.
 
 ## Line splitting (`_lines.py`)
 
@@ -543,7 +576,7 @@ token's line number by one. See [preprocessing.md](preprocessing.md).
 `&` is never a token (both lexers skip it as a separator), but
 `tokenize()` -- pure-Python and `_lexer_fast.pyx` alike -- ends with
 `CobolLexer._post_tokenize()`, which runs `_merge_concatenated_literals()`,
-`_flag_stray_sql_chars()`, `_retype_operator_currency_symbols()` (see
+`_merge_template_placeholders()`, `_drop_stray_chars()`, `_retype_operator_currency_symbols()` (see
 [Declared currency symbols](#declared-currency-symbols)), then
 `_retype_legacy_verb_data_names()`, and rewrites `self.tokens` in place (the
 Cython path returns the same list). The last pass (#525) retypes the legacy
@@ -615,10 +648,10 @@ makes the symbol a PICTURE editing character like `$`. `__init__`
 collects the declared symbols (`declared_currency_signs(source)`, one regex
 scan; digits, spaces and the letters A B C D E G N P R S U V X Z are never
 symbols) and keeps the non-letters in `self._currency_symbols`; in `tokenize_program_text` (both lexers) a
-character that would otherwise be an "Invalid character" error is emitted
+character that would otherwise be a dropped stray character is emitted
 as a `CURRENCY` token when it is declared. Characters that already lex as
 something (`& ! | < > :`, letters) are not rerouted. Without the declaration,
-every `£` in `PIC £££9.99` is a lexer error. See [ast-models.md](ast-models.md) for
+every `£` in `PIC £££9.99` is dropped with a warning. See [ast-models.md](ast-models.md) for
 how the PictureClause sizes it. The same scan
 (`declared_currency_signs(source)`) also keeps each symbol's currency string,
 public as `lexer.currency_signs` (`{"#": "EUR"}`); `CobolParser` copies it to

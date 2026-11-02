@@ -21,6 +21,14 @@ from cobolparser.cli.parse import (
 )
 from cobolparser.parser import parse_cobol
 
+# Fails lexing under fail-fast (ast is None): an unterminated literal.
+_UNLEXABLE = (
+    "       IDENTIFICATION DIVISION.\n"
+    "       PROGRAM-ID. BAD.\n"
+    "       PROCEDURE DIVISION.\n"
+    '           DISPLAY "OPEN\n'
+)
+
 # ---------------------------------------------------------------------------
 # Shared helpers
 # ---------------------------------------------------------------------------
@@ -155,7 +163,7 @@ class TestCmdAnalyze:
 
     def test_analyze_parse_failure_exits(self, tmp_path):
         bad = tmp_path / "bad.cbl"
-        bad.write_text("@@@@ NOT COBOL")  # invalid chars force ast=None in fail-fast
+        bad.write_text(_UNLEXABLE)  # an unterminated literal forces ast=None
         args = _make_analyze_args(str(bad), error_recovery="fail-fast")
         with pytest.raises(SystemExit):
             _cmd_analyze(args)
@@ -184,7 +192,7 @@ class TestCmdDeadCode:
 
     def test_dead_code_parse_failure_exits(self, tmp_path):
         bad = tmp_path / "bad.cbl"
-        bad.write_text("@@@@ NOT COBOL")
+        bad.write_text(_UNLEXABLE)
         args = _make_dead_code_args(str(bad), error_recovery="fail-fast")
         with pytest.raises(SystemExit):
             _cmd_dead_code(args)
@@ -212,7 +220,7 @@ class TestCmdProgramFlow:
 
     def test_program_flow_parse_failure_exits(self, tmp_path):
         bad = tmp_path / "bad.cbl"
-        bad.write_text("@@@@ NOT COBOL")
+        bad.write_text(_UNLEXABLE)
         args = _make_program_flow_args(str(bad), error_recovery="fail-fast")
         with pytest.raises(SystemExit):
             _cmd_program_flow(args)

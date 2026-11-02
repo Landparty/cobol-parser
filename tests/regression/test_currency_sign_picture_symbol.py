@@ -63,10 +63,11 @@ def test_picture_keeps_symbol_and_sizes_like_dollar() -> None:
     assert usd.currency_symbols == frozenset()
 
 
-def test_undeclared_symbol_is_still_an_error() -> None:
+def test_undeclared_symbol_is_dropped_with_a_warning() -> None:
     source = _SOURCE.replace("CURRENCY SIGN IS '£'", "CURRENCY SIGN IS 'X'")
     result = parse_cobol(source)
-    assert any("Invalid character: £" in str(e) for e in result.errors)
+    assert not any("Invalid character" in str(e) for e in result.errors)
+    assert any("Ignored invalid character '£'" in w for w in result.warnings)
 
 
 @pytest.mark.parametrize("lexer_cls", [_CobolLexerPure, CobolLexer])

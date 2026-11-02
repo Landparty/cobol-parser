@@ -137,6 +137,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+* **Template copybooks keep their names.** A copybook written for
+  `COPY ... REPLACING ==(9999-)== BY ==WS-==` spells each name with the
+  placeholder (`01 (9999-)MOD-DTTX0F.`, `05 :PFX:-CODE`). Parsed on its own,
+  each item came out `ANONYMOUS-n-m` with "Unparsed token" warnings; the
+  lexer now reads such a name as one identifier, spelled as written.
+
+* **No character fails a whole file any more.** A character COBOL has no
+  use for (`|`, `¦`, `?`, box-drawing, control bytes, and `! ¬ # @`) outside
+  `EXEC ... END-EXEC` used to be a hard `Invalid character` lexer error,
+  so a comment box whose `*` was not in column 7 (tab-shifted, no sequence
+  area) cost the whole program. It is now dropped, with one
+  `Lexer warning: Ignored invalid character '|' (N occurrences, lines ...)`
+  per character; a `#` / `@` that abuts a word (`WS-#CPT`) is read as part
+  of that data name, with its own warning. Inside EXEC blocks the
+  characters are kept as before.
+
 * **MCP `check_claims` sees writes of FILE SECTION records** (#788). The
   01 records of one FD / SD share one record area, so a `MOVE` to one record
   now counts as a write of every field of the others it covers. A `READ` /
