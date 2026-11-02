@@ -14,6 +14,23 @@ deliberate. Anything else appended to the bottom is a mistake: five
 entries, including both 2026-09-15 sections, were found there on
 2026-09-15 and moved back up.
 
+## 2026-11-02 -- FILE STATUS scenarios for VSAM programs
+
+- [generators/fixtures.md](generators/fixtures.md): new file-status family
+  (one scenario per statement and tested FILE STATUS code: 02 on an
+  alternate-key READ, 23, 22, 35 and the rest); status overrides can name
+  one statement (`"READ:F@99"`); both status families pin the path to that
+  statement, including the outer READ of an INVALID KEY clause; a failed
+  WRITE/REWRITE fixture is `STATUS_ONLY`.
+- [analysis/fixtures-support.md](analysis/fixtures-support.md):
+  `ConstraintReport.status_tests` and `statement_sites`; WRITE/REWRITE
+  boundaries carry their file's `status_field`.
+  Found by the oracle E2E over VSAM samples (mocky-mock
+  `examples/oraclemix`): a changed not-found message in a paragraph PERFORMed
+  for one transaction code, and a WRITE inside a READ's INVALID KEY, were
+  never run by a failing-status case. Tests:
+  `tests/unit/generators/test_vsam_status_scenarios.py`.
+
 ## 2026-11-02 -- branch scenarios for CICS programs, constants, edges
 
 - [generators/fixtures.md](generators/fixtures.md): with `entry_parameters=True`

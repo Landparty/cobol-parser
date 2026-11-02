@@ -391,7 +391,8 @@ class TestA7OpenBoundariesCarryStatusField:
             s for s in plan.scenarios if s.name == "error status: OPEN F1 not found"
         ]
         assert open_error, [s.name for s in plan.scenarios]
-        assert open_error[0].status_overrides == {"OPEN:F1": "35"}
+        # Keyed to the OPEN statement's line: it fails that statement only.
+        assert open_error[0].status_overrides == {"OPEN:F1@16": "35"}
 
 
 class TestB1StopLiteralIsNotTermination:
