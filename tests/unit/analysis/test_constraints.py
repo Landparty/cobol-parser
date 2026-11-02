@@ -329,6 +329,26 @@ class TestEvaluate:
         other = branch.arms["WHEN_OTHER"]
         assert [(c.op, c.values) for c in other] == [("not_in_set", ("A", "B"))]
 
+    def test_evaluate_true_class_and_sign_tests_in_stacked_whens(self):
+        """``WHEN X NOT NUMERIC`` arrives as raw condition text; it used to be
+        reported unparseable, which left every arm of the EVALUATE (stacked
+        WHENs and WHEN OTHER) without a scenario."""
+        _, _, _, report = _extract(
+            "           EVALUATE TRUE\n"
+            "               WHEN F1-QTY NOT NUMERIC\n"
+            "               WHEN F1-QTY IS ZERO\n"
+            "                   DISPLAY 'NO'\n"
+            "               WHEN OTHER\n"
+            "                   DISPLAY 'OK'\n"
+            "           END-EVALUATE.\n"
+        )
+        branch = _branch(report)
+        assert not any("not structurally parseable" in u for u in branch.unsupported)
+        first = branch.arms["WHEN_1#1"][0]
+        assert (first.op, first.negated) == ("class_numeric", True)
+        second = branch.arms["WHEN_1#2"][0]
+        assert (second.op, second.values) == ("eq", ("0",))
+
     def test_level_88_arms_are_scoped_to_their_own_condition_name(self):
         """`resolve()` maps an 88 to its *parent* field, and
         `FieldSpec.condition_values` is deliberately the union of every 88

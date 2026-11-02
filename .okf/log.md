@@ -25,6 +25,9 @@ entries, including both 2026-09-15 sections, were found there on
   Found by the change-impact oracle E2E (mocky-mock `examples/oraclemix`):
   no generated case reached a CICS second screen, a COMMAREA-driven check or
   its limit. Tests: `tests/unit/test_cics_entry_scenarios.py`.
+- [analysis/fixtures-support.md](analysis/fixtures-support.md): `EVALUATE TRUE`
+  selector text with a class or sign test (`WHEN X NOT NUMERIC`) is modelled;
+  it used to leave every arm of the EVALUATE without a scenario.
 
 ## 2026-11-01 -- open-issue sweep: #790, #793, #794, #795, #796
 

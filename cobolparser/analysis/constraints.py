@@ -222,6 +222,13 @@ _RELATIONAL_TEXT_OP_CANON: dict[str, str] = {
     "<": "lt",
 }
 _BARE_IDENTIFIER_RE = re.compile(r"^[A-Za-z][A-Za-z0-9-]*$")
+# A class or sign test in relational text: ``LK-ID IS NOT NUMERIC``.
+_CLASS_TEXT_RE = re.compile(
+    r"^([A-Za-z][A-Za-z0-9-]*)\s+(?:IS\s+)?(NOT\s+)?"
+    r"(NUMERIC|ALPHABETIC(?:\s*-\s*(?:UPPER|LOWER))?|POSITIVE|NEGATIVE"
+    r"|ZEROES|ZEROS|ZERO)$",
+    re.IGNORECASE,
+)
 
 
 @dataclass(frozen=True)
@@ -1023,8 +1030,22 @@ def _extract_class_or_sign(
     origin: str,
     unsupported: list[str],
 ) -> FieldConstraint | None:
-    effective_negate = negate != is_not
     name = expr.left_operand if isinstance(expr.left_operand, str) else ""
+    return _class_or_sign_constraint(
+        name, class_word, negate != is_not, index, fed_names, origin, unsupported
+    )
+
+
+def _class_or_sign_constraint(
+    name: str,
+    class_word: str,
+    effective_negate: bool,
+    index: ProgramLayoutIndex,
+    fed_names: set[str],
+    origin: str,
+    unsupported: list[str],
+) -> FieldConstraint | None:
+    """``name [NOT] <class or sign word>`` as one constraint, or None."""
     if not name.strip():
         unsupported.append(f"{origin}: class/sign condition missing operand")
         return None
@@ -1569,6 +1590,21 @@ def _parse_relational_text(
                 # unquoted from the lexer -- see _is_literal_operand.
                 quoted_operands=False,
             )
+
+    class_match = _CLASS_TEXT_RE.match(text)
+    if class_match:
+        # ``WHEN LK-ID NOT NUMERIC`` / ``WHEN WS-AMT IS POSITIVE``: the class
+        # and sign tests the IF path models from the condition tree.
+        name, is_not, class_word = class_match.groups()
+        return _class_or_sign_constraint(
+            name,
+            re.sub(r"\s+", "", class_word.upper()),
+            bool(is_not),
+            index,
+            fed_names,
+            origin,
+            unsupported,
+        )
 
     if _BARE_IDENTIFIER_RE.match(text):
         return _extract_condition_name_value(

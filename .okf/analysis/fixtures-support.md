@@ -546,6 +546,9 @@ F1-VALID` and a simple comparison like `WHEN F1-QTY = 5` both arrive as
 `_parse_relational_text` itself reports any text holding an `AND`/`OR`
 outside a quoted literal as unsupported rather than splitting it on its first
 operator.
+A class or sign test in the text (`WHEN LK-ID NOT NUMERIC`, `WHEN X IS
+POSITIVE`, `_CLASS_TEXT_RE`) becomes the same constraint the IF path builds
+from the condition tree (`_class_or_sign_constraint`).
 Before matching, `_symbolize_relational_words` spells the word operators
 as symbols (`[IS] [NOT] GREATER|LESS [THAN] [OR EQUAL [TO]]`, `EQUAL[S]
 [TO]`; quoted literals untouched), so `WHEN X GREATER THAN OR EQUAL TO 1`
