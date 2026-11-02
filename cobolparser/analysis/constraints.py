@@ -1618,11 +1618,13 @@ def _extract_evaluate_selector(
             return None
         start = _literal_value(str(sel.get("start", "")))
         end = _literal_value(str(sel.get("end", "")))
-        named = [bound for bound in (start, end) if index.resolve(bound) is not None]
-        if named:
+        named_bounds = [
+            bound for bound in (start, end) if index.resolve(bound) is not None
+        ]
+        if named_bounds:
             unsupported.append(
                 f"{origin}: WHEN range bound names a data item rather than a "
-                f"literal, which is not supported in v1: {', '.join(named)}"
+                f"literal, which is not supported in v1: {', '.join(named_bounds)}"
             )
             return None
         return [
