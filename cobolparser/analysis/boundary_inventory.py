@@ -814,11 +814,20 @@ class BoundaryInventoryAnalyzer:
                     f"{category} {record_name}: record not resolvable in layout index"
                 )
                 report.unresolved.extend(gaps)
+            # The FILE STATUS of the FD the record belongs to: a WRITE or
+            # REWRITE sets it like any other operation on the file.
+            fd_file = record.get_metadata("fd_file_name") if record else None
+            write_facts = index.file_facts(str(fd_file)) if fd_file else None
             report.boundaries.append(
                 Boundary(
                     ref=ref(category, record_name.upper()),
                     direction="OUT",
                     record_names=record_names,
+                    status_field=(
+                        write_facts.file_status_field
+                        if write_facts is not None
+                        else None
+                    ),
                     handlers=handlers,
                     unresolved=gaps,
                 )

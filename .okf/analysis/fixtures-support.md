@@ -298,6 +298,20 @@ by `_record_transfer_site` during the same `_walk_statements` pass, so its
 branch's `parent_proc` to it to carry the path condition across paragraphs
 (see generators/fixtures.md).
 
+**`status_tests` and `statement_sites`: the status families' inputs.**
+`ConstraintReport.status_tests` maps an uppercased data name to the
+two-character codes the program compares it with (`IF WS-FS = '23'`, `IF
+WS-FS NOT = '00'`, an 88 of it tested by name, `EVALUATE WS-FS WHEN '02'`),
+so the planner's file-status family knows which FILE STATUS codes each
+statement's status field is checked for. It is never a branch constraint:
+the file operation sets the field, not the data. `statement_sites` maps the
+line of each boundary statement to a `StatementSite(paragraph, enclosing,
+handlers, duplicate_key)`: its arm chain like a branch's `enclosing`, the
+`(outer line, clause)` handler clauses (`INVALID_KEY`, `NOT_INVALID_KEY`,
+`AT_END`, `NOT_AT_END`) of other file statements it is nested in, and, for
+a READ, whether it can return `"02"` (by `KEY IS` an alternate key WITH
+DUPLICATES, or sequential on a file that has one).
+
 **`enclosing`: the path condition.** Every `BranchConstraints`
 records the `(branch_id, arm_id)` chain enclosing it. `_walk_list` threads it
 down through `_nested_statement_lists`, which pairs each nested statement

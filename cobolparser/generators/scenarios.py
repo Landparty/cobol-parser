@@ -30,7 +30,7 @@ from dataclasses import dataclass, field, replace
 from decimal import Decimal, InvalidOperation
 from typing import Any
 
-from ..analysis.boundary_inventory import BoundaryReport
+from ..analysis.boundary_inventory import Boundary, BoundaryReport
 from ..analysis.constraints import (
     _FLIPPED_RELATIONAL,
     BranchConstraints,
@@ -463,7 +463,13 @@ class ScenarioPlanner:
         scenarios.extend(edge for _, edge in edges)
 
         if mode == "all":
-            scenarios.extend(_fixed_families(constraint_report, boundary_report))
+            scenarios.extend(
+                _fixed_families(
+                    constraint_report,
+                    boundary_report,
+                    _StatusPath(reach, arms_by_key, constraint_report, boundary_report),
+                )
+            )
         # Branch scenarios are already unique among themselves (see
         # `_merge_candidates`) and come first, so this pass can only ever
         # rename a fixed-family scenario -- never a merge target some
@@ -1262,7 +1268,9 @@ def _merge_candidates(
 
 
 def _fixed_families(
-    constraint_report: ConstraintReport, boundary_report: BoundaryReport
+    constraint_report: ConstraintReport,
+    boundary_report: BoundaryReport,
+    status_path: _StatusPath | None = None,
 ) -> list[PlannedScenario]:
     scenarios: list[PlannedScenario] = []
 
@@ -1270,9 +1278,85 @@ def _fixed_families(
     if empty_input is not None:
         scenarios.append(empty_input)
 
-    scenarios.extend(_error_status_scenarios(boundary_report))
+    error_status = _error_status_scenarios(boundary_report)
+    file_status = _file_status_scenarios(
+        constraint_report, boundary_report, error_status
+    )
+    for scenario in error_status + file_status:
+        if status_path is not None:
+            status_path.pin(scenario)
+        scenarios.append(scenario)
     scenarios.extend(_boundary_value_scenarios(constraint_report))
     return scenarios
+
+
+class _StatusPath:
+    """Pins the path to the one statement a status scenario fails.
+
+    A per-site status override (`site_status_key`) only shows when the data
+    runs that statement: a READ in a paragraph PERFORMed for transaction
+    code 'C' never runs on rows drawn with any other code, and a WRITE in a
+    READ's INVALID KEY clause runs only when that READ fails too. `pin`
+    folds the branch arms that reach the statement (`_ParagraphReach` plus
+    `StatementSite.enclosing`, as for a branch scenario) into the
+    scenario's constraints, fails the outer statement of each INVALID KEY
+    clause it sits in, and records a `path_gaps` reason for what it cannot
+    pin (an unmodeled arm). An AT END clause needs nothing: the generated
+    rows always run out."""
+
+    def __init__(
+        self,
+        reach: _ParagraphReach,
+        arms_by_key: dict[tuple[str, str], list[FieldConstraint]],
+        constraint_report: ConstraintReport,
+        boundary_report: BoundaryReport,
+    ) -> None:
+        self._reach = reach
+        self._arms = arms_by_key
+        self._sites = constraint_report.statement_sites
+        self._by_line = {
+            b.ref.line: b for b in boundary_report.boundaries if b.ref.line
+        }
+
+    def pin(self, scenario: PlannedScenario) -> None:
+        if len(scenario.status_overrides) != 1:
+            return
+        (key,) = scenario.status_overrides
+        _, _, line_text = key.partition("@")
+        if not line_text.isdigit():
+            return
+        site = self._sites.get(int(line_text))
+        if site is None:
+            return
+        outer, gaps = self._reach.path_to(site.paragraph)
+        enclosing = outer + site.enclosing
+        options, path_gaps = _path_options(enclosing, self._arms)
+        gaps = gaps + path_gaps
+        witnesses, unsat, path = _solve_with_path(options, [])
+        if unsat is not None:
+            gaps.append(f"the path to the failing statement does not solve: {unsat}")
+        elif path:
+            for constraint in path:
+                scenario.field_constraints.setdefault(
+                    constraint.field.spec.qualified_name, []
+                ).append(constraint)
+            scenario.witnesses.update(witnesses)
+            scenario.intent += " (path to the statement included)"
+        for outer_line, clause in site.handlers:
+            boundary = self._by_line.get(outer_line)
+            if boundary is None:
+                continue
+            outer_key = site_status_key(boundary)
+            if clause == "INVALID_KEY":
+                scenario.status_overrides.setdefault(
+                    outer_key, "22" if boundary.ref.category == "WRITE" else "23"
+                )
+                scenario.intent += (
+                    f"; {boundary.ref.category} {boundary.ref.key} (line "
+                    f"{outer_line}) fails first, since the statement runs in "
+                    "its INVALID KEY clause"
+                )
+        scenario.path_gaps.extend(gaps)
 
 
 def _empty_input_scenario(boundary_report: BoundaryReport) -> PlannedScenario | None:
@@ -1300,6 +1384,14 @@ def _empty_input_scenario(boundary_report: BoundaryReport) -> PlannedScenario | 
     )
 
 
+def site_status_key(boundary: Boundary) -> str:
+    """The `status_overrides` key that fails one statement only:
+    ``"READ:CUST-KSDS@99"``. A plain ``"READ:CUST-KSDS"`` fails every READ
+    of the file, which made a READ NEXT loop (no INVALID KEY there) see
+    "23" on every call and never reach its AT END."""
+    return f"{boundary.ref.category}:{boundary.ref.key}@{boundary.ref.line}"
+
+
 def _error_status_scenarios(boundary_report: BoundaryReport) -> list[PlannedScenario]:
     scenarios: list[PlannedScenario] = []
     for boundary in boundary_report.boundaries:
@@ -1312,7 +1404,14 @@ def _error_status_scenarios(boundary_report: BoundaryReport) -> list[PlannedScen
                         f"{boundary.ref.category} {boundary.ref.key} fails with an "
                         "INVALID KEY status the program declares a handler for"
                     ),
-                    status_overrides={key: "23"},
+                    status_overrides={
+                        site_status_key(boundary) if boundary.ref.line else key: (
+                            # A WRITE's INVALID KEY is a duplicate key.
+                            "22"
+                            if boundary.ref.category == "WRITE"
+                            else "23"
+                        )
+                    },
                 )
             )
         if boundary.ref.category == "CALL" and "ON_EXCEPTION" in boundary.handlers:
@@ -1328,9 +1427,100 @@ def _error_status_scenarios(boundary_report: BoundaryReport) -> list[PlannedScen
                 PlannedScenario(
                     name=f"error status: OPEN {boundary.ref.key} not found",
                     intent=f"OPEN {boundary.ref.key} fails with FILE STATUS 35",
-                    status_overrides={key: "35"},
+                    status_overrides={
+                        site_status_key(boundary) if boundary.ref.line else key: "35"
+                    },
                 )
             )
+    return scenarios
+
+
+#: The FILE STATUS codes each file operation can return (IBM Enterprise
+#: COBOL, VSAM and QSAM), other than "00" and the end-of-file "10" the
+#: empty-input family and every READ loop's end already reach.
+_STATUS_CODES_BY_OPERATION: dict[str, frozenset[str]] = {
+    "OPEN": frozenset(
+        {"05", "35", "37", "38", "39", "41", "90", "91", "92", "93", "95", "96", "97"}
+    ),
+    "READ": frozenset({"02", "04", "23", "46", "47", "90", "92"}),
+    "START": frozenset({"23", "47", "90", "92"}),
+    "WRITE": frozenset({"02", "21", "22", "24", "34", "48", "90", "92"}),
+    "REWRITE": frozenset({"02", "21", "22", "43", "44", "49", "90", "92"}),
+    "DELETE": frozenset({"23", "43", "49", "90", "92"}),
+}
+#: The failure a program that only tests for success (``IF WS-FS NOT =
+#: '00'``) is given at each operation: the commonest one.
+_TYPICAL_FAILURE = {
+    "OPEN": "35",
+    "READ": "23",
+    "START": "23",
+    "WRITE": "22",
+    "REWRITE": "23",
+    "DELETE": "23",
+}
+#: At most this many file-status scenarios per program: one per (statement,
+#: tested code) can multiply on a program with many file operations.
+_MAX_FILE_STATUS_SCENARIOS = 40
+
+
+def _file_status_scenarios(
+    constraint_report: ConstraintReport,
+    boundary_report: BoundaryReport,
+    error_status: list[PlannedScenario],
+) -> list[PlannedScenario]:
+    """One scenario per file operation and FILE STATUS code the program
+    tests that operation's status field for (`status_tests`): ``IF
+    ACCT-NOTFND`` after a READ gets a case where that READ returns "23",
+    ``IF WS-FS = '02'`` after a READ by alternate key one where it returns
+    "02". A program that only tests for success gets the operation's
+    typical failure. Each scenario fails that one statement
+    (`site_status_key`); codes an operation cannot return are skipped, and
+    so is a (statement, code) the error-status family already covers."""
+    covered = {
+        (key, code)
+        for scenario in error_status
+        for key, code in scenario.status_overrides.items()
+    }
+    scenarios: list[PlannedScenario] = []
+    for boundary in boundary_report.boundaries:
+        category = boundary.ref.category
+        possible = _STATUS_CODES_BY_OPERATION.get(category)
+        if possible is None or not boundary.status_field or not boundary.ref.line:
+            continue
+        status_leaf = boundary.status_field.upper().split()[0]
+        tested = set(constraint_report.status_tests.get(status_leaf, ()))
+        if not tested:
+            continue
+        typical: str | None = _TYPICAL_FAILURE[category]
+        if category == "READ" and "AT_END" in boundary.handlers:
+            # A sequential READ: no record key to miss.
+            possible = possible - {"23"}
+            typical = None
+        site = constraint_report.statement_sites.get(boundary.ref.line)
+        if category == "READ" and site is not None and not site.duplicate_key:
+            # "02" needs an ALTERNATE RECORD KEY WITH DUPLICATES.
+            possible = possible - {"02"}
+        codes = sorted(tested & possible)
+        if not codes and "00" in tested and typical is not None:
+            codes = [typical]
+        site_key = site_status_key(boundary)
+        file_key = f"{category}:{boundary.ref.key}"
+        for code in codes:
+            if (site_key, code) in covered or (file_key, code) in covered:
+                continue
+            covered.add((site_key, code))
+            scenarios.append(
+                PlannedScenario(
+                    name=f"file status {code}: {category} {boundary.ref.key}",
+                    intent=(
+                        f"{category} {boundary.ref.key} (line {boundary.ref.line}) "
+                        f"returns FILE STATUS {code}, which the program tests"
+                    ),
+                    status_overrides={site_key: code},
+                )
+            )
+            if len(scenarios) >= _MAX_FILE_STATUS_SCENARIOS:
+                return scenarios
     return scenarios
 
 

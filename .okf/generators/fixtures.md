@@ -246,9 +246,12 @@ the internal `_build_fixture`/`_build_call_fixture`/`_status_dict` helpers:
   `(category, key)`) overrides a READ boundary's row count, e.g. the "empty
   input" family's `length=0`. Falls back to `--rows` (READ) / `1` (everything
   else) like the happy path when no override applies.
-* **Status** — `override.status_overrides` (keyed by `"<CATEGORY>:<KEY>"`)
-  replaces the default status value (`"00"`/`"0"`) for the error-status
-  family and any status-targeting scenario.
+* **Status** — `override.status_overrides` (keyed by `"<CATEGORY>:<KEY>"`,
+  or `"<CATEGORY>:<KEY>@<line>"` for one statement only; the per-line key
+  wins) replaces the default status value (`"00"`/`"0"`) for the
+  error-status and file-status families and any status-targeting scenario.
+  An OUT boundary (WRITE/REWRITE) whose override is a failure comes out
+  `STATUS_ONLY` with that status: nothing was written.
 * **Keyed READ key** (see #322; every scenario including the happy path) — a
   successful keyed READ of an INDEXED file (RANDOM access, or DYNAMIC without
   NEXT/PREVIOUS/FIRST/LAST; `const_fold.keyed_read_key`) returns the record
@@ -723,8 +726,29 @@ conjuncts must hold simultaneously) and lands in `coverage.missed` with
   boundary gets a `status_overrides` entry of `"100"` (SQLCODE not found).
 * **error status** — one scenario per *declared* handler, never a status
   the program has no path for: `INVALID_KEY` in `Boundary.handlers` ->
-  `"23"`; a CALL's `ON_EXCEPTION` -> `"12"`; an OPEN with a `status_field`
-  -> `"35"`.
+  `"23"` (`"22"`, duplicate key, on a WRITE); a CALL's `ON_EXCEPTION` ->
+  `"12"`; an OPEN with a `status_field` -> `"35"`. File statements are
+  failed one at a time (`site_status_key`: `"READ:F@99"`), so a READ NEXT
+  loop elsewhere on the same file still reaches its AT END.
+* **file status** — `_file_status_scenarios`: one scenario per file
+  statement and FILE STATUS code the program tests that statement's status
+  field for (`ConstraintReport.status_tests`: literals compared with it,
+  `EVALUATE ... WHEN '02'`, its 88s), limited to the codes the operation
+  can return (`_STATUS_CODES_BY_OPERATION`). A program that only tests for
+  `"00"` gets the operation's typical failure (`_TYPICAL_FAILURE`). A
+  sequential READ never gets `"23"`; a READ gets `"02"` only when
+  `StatementSite.duplicate_key` says it can. At most
+  `_MAX_FILE_STATUS_SCENARIOS` (40); a (statement, code) the error-status
+  family already covers is skipped.
+* **Both status families pin the path** to the statement they fail
+  (`_StatusPath.pin`, from `ConstraintReport.statement_sites`): the arms
+  that reach its paragraph (`_ParagraphReach`) and enclose it there are
+  solved into the scenario's `field_constraints`/`witnesses` like a branch
+  scenario's path, and each INVALID KEY clause it sits in fails that outer
+  statement too (a WRITE in a READ's INVALID KEY gets the READ's `"23"`).
+  What cannot be pinned goes to `path_gaps`. Without this a READ in a
+  paragraph run only for transaction code 'C' was failed on rows that
+  never ran it.
 * **boundary values** — two combined scenarios (`"minimum"`/`"maximum"`),
   every numeric field any constraint touches pinned to its picture's true
   extreme (`-ceiling` for a signed field, `0` otherwise, vs. `ceiling`). A

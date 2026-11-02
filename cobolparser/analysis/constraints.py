@@ -434,12 +434,61 @@ class TransferSite:
         }
 
 
+#: A file statement's handler clauses that nest another statement: the
+#: nested one runs only when the outer statement takes that clause.
+_HANDLER_CLAUSES = (
+    "invalid_key_clause",
+    "not_invalid_key_clause",
+    "at_end_clause",
+    "not_at_end_clause",
+)
+
+
+@dataclass(frozen=True)
+class StatementSite:
+    """Where one boundary statement sits (keyed by its line in
+    `ConstraintReport.statement_sites`): its paragraph, the branch arms
+    enclosing it there (`BranchConstraints.enclosing`'s shape), and the
+    handler clauses of other statements it is nested in, outermost first,
+    as ``(outer statement line, clause)`` with the clause one of
+    ``INVALID_KEY``, ``NOT_INVALID_KEY``, ``AT_END``, ``NOT_AT_END``.
+
+    The planner's status families read it to pin the path to the statement
+    they fail: a READ that runs only for one transaction code, or a WRITE
+    that runs only in another READ's INVALID KEY clause."""
+
+    paragraph: str
+    enclosing: tuple[tuple[str, str], ...] = ()
+    handlers: tuple[tuple[int, str], ...] = ()
+    #: A READ that can return FILE STATUS "02" (another record has the same
+    #: alternate key): one by ``KEY IS`` an ALTERNATE RECORD KEY WITH
+    #: DUPLICATES, or a sequential one on a file that has such a key. A READ
+    #: by the prime key never can.
+    duplicate_key: bool = False
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "paragraph": self.paragraph,
+            "enclosing": [list(pair) for pair in self.enclosing],
+            "handlers": [list(pair) for pair in self.handlers],
+            "duplicate_key": self.duplicate_key,
+        }
+
+
 @dataclass
 class ConstraintReport:
     branches: list[BranchConstraints] = field(default_factory=list)
     sequence_constraints: list[SequenceConstraint] = field(default_factory=list)
     unsupported: list[str] = field(default_factory=list)
     transfer_sites: list[TransferSite] = field(default_factory=list)
+    #: Uppercased data-name -> the two-character codes the program tests it
+    #: against (``IF WS-FS = '23'``, an 88 under it, ``EVALUATE WS-FS WHEN
+    #: '02'``), sorted. Read for FILE STATUS fields by the planner's
+    #: file-status family; never a branch constraint (a status field is
+    #: set by the file operation, not by data).
+    status_tests: dict[str, list[str]] = field(default_factory=dict)
+    #: Boundary statement line -> its `StatementSite`.
+    statement_sites: dict[int, StatementSite] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -447,6 +496,11 @@ class ConstraintReport:
             "sequence_constraints": [s.to_dict() for s in self.sequence_constraints],
             "unsupported": list(self.unsupported),
             "transfer_sites": [t.to_dict() for t in self.transfer_sites],
+            "status_tests": {k: list(v) for k, v in self.status_tests.items()},
+            "statement_sites": {
+                str(line): site.to_dict()
+                for line, site in sorted(self.statement_sites.items())
+            },
         }
 
 
@@ -481,6 +535,8 @@ class ConstraintExtractor:
         fed_names = _boundary_fed_names(boundary_report)
         fed_names.update(name.upper() for name in extra_fed_names)
         index.named_constants = _named_constants(ast, index)
+        report.status_tests = _status_tests(ast, procedure, index)
+        report.statement_sites = _statement_sites(procedure, boundary_report, index)
         eof_flags = _collect_eof_flags(ast)
         carriers = _Carriers(ast, procedure, index, fed_names)
 
@@ -1995,6 +2051,75 @@ def _fold_cics_value(text: str) -> str:
 _READ_ONLY_ROLES = frozenset({"read", "condition", "subscript"})
 
 
+_TWO_CHAR_LITERAL_RE = re.compile(r"""^(['"])(.{2})\1$""")
+
+
+def _status_tests(
+    ast: CobolProgram, procedure: Any, index: ProgramLayoutIndex
+) -> dict[str, list[str]]:
+    """Every two-character literal each data item is compared with, and
+    the VALUEs of each condition-name tested, by the item's uppercased
+    leaf name (`ConstraintReport.status_tests`). Collected from IF and
+    PERFORM UNTIL comparisons and from EVALUATE subjects and selectors."""
+    found: dict[str, set[str]] = {}
+
+    def leaf(name: str) -> str | None:
+        resolved = index.resolve(name.strip())
+        if resolved is None:
+            return None
+        return resolved.spec.qualified_name.upper().rsplit(".", 1)[-1]
+
+    def add_literal(name: str, literal: object) -> None:
+        match = _TWO_CHAR_LITERAL_RE.match(str(literal or "").strip())
+        target = leaf(name) if name else None
+        if match and target:
+            found.setdefault(target, set()).add(match.group(2))
+
+    def add_condition_name(name: str) -> None:
+        values = index.condition_values(name.strip())
+        target = leaf(name)
+        if values and target:
+            found.setdefault(target, set()).update(
+                str(v) for v in values if len(str(v)) == 2
+            )
+
+    def add_text(text: str) -> None:
+        match = _RELATIONAL_TEXT_RE.match(text.strip())
+        if match:
+            add_literal(match.group(1), match.group(3).strip())
+        elif _BARE_IDENTIFIER_RE.match(text.strip()):
+            add_condition_name(text)
+
+    for expr in ast.find_all_by_type("ConditionalExpression"):
+        if not isinstance(expr, ConditionalExpression):
+            continue
+        left = expr.left_operand if isinstance(expr.left_operand, str) else ""
+        if expr.operator == "CONDITION_NAME" and left:
+            add_condition_name(left)
+        elif left:
+            add_literal(left, expr.right_operand)
+    for _, statement, _ in _walk_statements(procedure):
+        if not isinstance(statement, EvaluateStatement):
+            continue
+        subjects = statement.subjects
+        subject = subjects[0] if len(subjects) == 1 else None
+        is_true = isinstance(subject, str) and subject.strip().upper() == "TRUE"
+        for when in statement.when_clauses:
+            for selector in when.selectors:
+                if not isinstance(selector, dict):
+                    continue
+                if is_true and selector.get("type") == "Literal":
+                    add_condition_name(str(selector.get("value", "")))
+                elif is_true and selector.get("type") == "Condition":
+                    add_text(str(selector.get("text", "")))
+                elif isinstance(subject, str) and selector.get("type") == "Literal":
+                    value = str(selector.get("value", ""))
+                    if selector.get("quoted"):
+                        value = f"'{value}'"
+                    add_literal(subject, value)
+    return {name: sorted(codes) for name, codes in found.items()}
+
+
 def _named_constants(ast: CobolProgram, index: ProgramLayoutIndex) -> dict[str, str]:
     """``{qualified name: VALUE literal}`` of every WORKING-STORAGE
     elementary item with a literal VALUE that nothing in the program writes,
@@ -2297,6 +2422,79 @@ def _record_transfer_site(
         )
 
 
+def _duplicate_key_read(statement: Any, index: ProgramLayoutIndex) -> bool:
+    if not isinstance(statement, IOReadStatement) or not statement.file_name:
+        return False
+    facts = index.file_facts(statement.file_name)
+    if facts is None:
+        return False
+    duplicates = {
+        str(key.get("key", "")).upper()
+        for key in facts.alternate_keys
+        if key.get("duplicates_allowed")
+    }
+    if statement.key_name:
+        return statement.key_name.upper() in duplicates
+    sequential = bool(statement.access_mode) or bool(statement.at_end_clause)
+    return sequential and bool(duplicates)
+
+
+def _statement_sites(
+    procedure_division: CobolDivision,
+    boundary_report: BoundaryReport,
+    index: ProgramLayoutIndex,
+) -> dict[int, StatementSite]:
+    """`StatementSite` of every boundary statement, by line (the first
+    statement on a line wins)."""
+    lines = {b.ref.line for b in boundary_report.boundaries if b.ref.line}
+    sites: dict[int, StatementSite] = {}
+    if not lines:
+        return sites
+
+    def walk(
+        paragraph: str,
+        statements: list[Any],
+        enclosing: tuple[tuple[str, str], ...],
+        handlers: tuple[tuple[int, str], ...],
+    ) -> None:
+        for statement in statements:
+            location = getattr(statement, "location", None)
+            line = location.line if location is not None else None
+            if line in lines and line not in sites:
+                sites[line] = StatementSite(
+                    paragraph,
+                    enclosing,
+                    handlers,
+                    _duplicate_key_read(statement, index),
+                )
+            is_branch = isinstance(
+                statement, (IfStatement, EvaluateStatement, SearchStatement)
+            )
+            branch_id = _branch_id(paragraph, location) if is_branch else None
+            clause_lists = {
+                id(getattr(statement, attr, None)): attr.removesuffix("_clause").upper()
+                for attr in _HANDLER_CLAUSES
+                if getattr(statement, attr, None)
+            }
+            for arm_id, nested in _nested_statement_lists(statement):
+                deeper = (
+                    enclosing + ((branch_id, arm_id),)
+                    if arm_id is not None and branch_id is not None
+                    else enclosing
+                )
+                clause = clause_lists.get(id(nested))
+                outer = (
+                    handlers + ((line, clause),)
+                    if clause is not None and line is not None and not is_branch
+                    else handlers
+                )
+                walk(paragraph, nested, deeper, outer)
+
+    for paragraph in _all_paragraphs(procedure_division):
+        walk(paragraph.paragraph_name, paragraph.statements, (), ())
+    return sites
+
+
 def _branch_id(paragraph_name: str | None, location: SourceLocation | None) -> str:
     line = location.line if location else "?"
     column = location.column if location else "?"
@@ -2310,5 +2508,6 @@ __all__ = [
     "BranchConstraints",
     "ConstraintReport",
     "TransferSite",
+    "StatementSite",
     "ConstraintExtractor",
 ]

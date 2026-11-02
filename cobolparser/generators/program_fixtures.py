@@ -203,7 +203,11 @@ def _drop_failure_path_counts(
     OPEN, a CALL, an SQL statement); a READ's count comes from its generated
     row sequence, which a failing READ does not consume.
     """
-    kept_refs = {key for key in planned.status_overrides if not key.startswith("READ:")}
+    kept_refs = {
+        key.split("@", 1)[0]
+        for key in planned.status_overrides
+        if not key.startswith("READ:")
+    }
     return [e for e in expectations if e.kind != "call_count" or e.ref in kept_refs]
 
 
@@ -624,6 +628,18 @@ class ProgramFixtureGenerator:
                 ref=f"{ref.category}:{ref.key}",
                 note="value produced by the program under test",
             )
+            failed = self._status_dict(boundary, index, override=override)
+            if override is not None and any(
+                code not in ("00", "0") for code in failed.values()
+            ):
+                # A scenario that fails this WRITE / REWRITE (22 duplicate
+                # key, 23 not found, 34 out of space): the status is all a
+                # mock can give back, as for an OPEN.
+                return (
+                    BoundaryFixture(ref=ref, direction="STATUS_ONLY", status=failed),
+                    [expectation],
+                    unresolved,
+                )
             return None, [expectation], unresolved
 
         # IN or BIDIRECTIONAL: generate the value(s) a mock would supply.
@@ -964,8 +980,13 @@ class ProgramFixtureGenerator:
             return {}
         default = "0" if boundary.ref.category == "SQL" else "00"
         override_key = f"{boundary.ref.category}:{boundary.ref.key}"
-        if override is not None and override_key in override.status_overrides:
-            return {field_name: override.status_overrides[override_key]}
+        site_key = f"{override_key}@{boundary.ref.line}"
+        if override is not None:
+            # One statement (`scenarios.site_status_key`) wins over the
+            # whole file.
+            for key in (site_key, override_key):
+                if key in override.status_overrides:
+                    return {field_name: override.status_overrides[key]}
         return {field_name: default}
 
     @staticmethod
