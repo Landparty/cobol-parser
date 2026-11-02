@@ -310,7 +310,8 @@ handlers, duplicate_key)`: its arm chain like a branch's `enclosing`, the
 `(outer line, clause)` handler clauses (`INVALID_KEY`, `NOT_INVALID_KEY`,
 `AT_END`, `NOT_AT_END`) of other file statements it is nested in, and, for
 a READ, whether it can return `"02"` (by `KEY IS` an alternate key WITH
-DUPLICATES, or sequential on a file that has one).
+DUPLICATES; a sequential READ's key of reference is not tracked, so it is
+never given `"02"`).
 
 **`enclosing`: the path condition.** Every `BranchConstraints`
 records the `(branch_id, arm_id)` chain enclosing it. `_walk_list` threads it

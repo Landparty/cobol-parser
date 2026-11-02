@@ -462,8 +462,8 @@ class StatementSite:
     handlers: tuple[tuple[int, str], ...] = ()
     #: A READ that can return FILE STATUS "02" (another record has the same
     #: alternate key): one by ``KEY IS`` an ALTERNATE RECORD KEY WITH
-    #: DUPLICATES, or a sequential one on a file that has such a key. A READ
-    #: by the prime key never can.
+    #: DUPLICATES. A READ by the prime key never can; a sequential one can
+    #: when its key of reference is such a key, which is not tracked.
     duplicate_key: bool = False
 
     def to_dict(self) -> dict[str, Any]:
@@ -2433,10 +2433,10 @@ def _duplicate_key_read(statement: Any, index: ProgramLayoutIndex) -> bool:
         for key in facts.alternate_keys
         if key.get("duplicates_allowed")
     }
-    if statement.key_name:
-        return statement.key_name.upper() in duplicates
-    sequential = bool(statement.access_mode) or bool(statement.at_end_clause)
-    return sequential and bool(duplicates)
+    # A sequential READ returns "02" only when the key of reference (set by
+    # an earlier START / READ ... KEY) is such a key, which is not tracked:
+    # left out rather than guessed.
+    return bool(statement.key_name) and statement.key_name.upper() in duplicates
 
 
 def _statement_sites(
