@@ -47,6 +47,7 @@ regression test.
 * [Tokenize pipeline (`_tokenize_source`)](#tokenize-pipeline-_tokenize_source)
 * [Digit-led hyphenated names](#digit-led-hyphenated-names)
 * [Stray characters post-pass](#stray-characters-post-pass)
+* [COPY REPLACING placeholders in names](#copy-replacing-placeholders-in-names)
 * [Line splitting (`_lines.py`)](#line-splitting-_linespy)
 * [`&` literal concatenation](#-literal-concatenation)
 * [IDENTIFICATION DIVISION comment-entries](#identification-division-comment-entries)
@@ -543,6 +544,23 @@ an EXEC block it glues each `SQL_NAME_CHAR` or `CURRENCY` token to the words
 it abuts (same line, no gap) into one IDENTIFIER, so `SELECT ACCT#` and
 `X$Y` round-trip unchanged. Pinned by `tests/regression/test_sql_name_chars.py`.
 
+## COPY REPLACING placeholders in names
+
+Template copybooks spell names with a placeholder the including program
+replaces: `01 (9999-)MOD-DTTX0F.` for `COPY X REPLACING ==(9999-)== BY
+==WS-==`, or `05 :PFX:-CODE`. `CobolLexer._merge_template_placeholders()`
+runs in `_post_tokenize()` after `_merge_exec_name_chars()` and before
+`_drop_stray_chars()`: outside EXEC, a run of abutting tokens (same line, no
+gap, not crossing `.` `,` `;` or a literal) whose text fully matches
+`_TEMPLATE_NAME_RE` becomes one IDENTIFIER spelled as written. A `(...)`
+placeholder must hold a letter or `-` and have name text after it, or a
+name ending in `-` before it (`WS-(SFX)`); `:TAG:` may stand alone. So
+`PIC -(5)9`, `TAB(I)`, `B(1:2)` and `A-(4)` are untouched; runs right after
+PIC / PICTURE [IS] are skipped. Before, each item of such a copybook parsed
+as `ANONYMOUS-n-m`. After `expand_copybooks` applies REPLACING there is no
+placeholder left. Pinned by
+`tests/regression/test_copybook_template_placeholders.py`.
+
 ## Line splitting (`_lines.py`)
 
 `split_source_lines(text, keepends=False) -> list[str]` splits on `\n` /
@@ -558,7 +576,7 @@ token's line number by one. See [preprocessing.md](preprocessing.md).
 `&` is never a token (both lexers skip it as a separator), but
 `tokenize()` -- pure-Python and `_lexer_fast.pyx` alike -- ends with
 `CobolLexer._post_tokenize()`, which runs `_merge_concatenated_literals()`,
-`_drop_stray_chars()`, `_retype_operator_currency_symbols()` (see
+`_merge_template_placeholders()`, `_drop_stray_chars()`, `_retype_operator_currency_symbols()` (see
 [Declared currency symbols](#declared-currency-symbols)), then
 `_retype_legacy_verb_data_names()`, and rewrites `self.tokens` in place (the
 Cython path returns the same list). The last pass (#525) retypes the legacy

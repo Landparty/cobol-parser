@@ -2212,6 +2212,7 @@ class _CobolLexerPure:
         self._merge_concatenated_literals()
         self._merge_numeric_procedure_names()
         self._merge_exec_name_chars()
+        self._merge_template_placeholders()
         self._drop_stray_chars()
         self._retype_operator_currency_symbols()
         self._retype_legacy_verb_data_names()
@@ -2666,6 +2667,88 @@ class _CobolLexerPure:
         if prev_loc is None or loc is None or prev_loc.line != loc.line:
             return False
         return loc.column == prev_loc.column + len(prev.value or "")
+
+    #: A name holding a COPY REPLACING placeholder, as one run of abutting
+    #: tokens: ``(9999-)MOD-DTTX0F``, ``:PFX:-CODE``, ``:REC:``, ``WS-(SFX)``.
+    #: A ``(...)`` placeholder holds a letter or a hyphen (``(4)`` and a
+    #: subscript ``TAB(I)`` never match) and needs name text after it, or a
+    #: name ending in '-' before it.
+    _TEMPLATE_NAME_RE = re.compile(
+        r"(?:[A-Z0-9][A-Z0-9-]*-(?:\((?=[A-Z0-9-]*[A-Z-])[A-Z0-9-]+\)|:[A-Z0-9][A-Z0-9-]*:)"
+        r"|\((?=[A-Z0-9-]*[A-Z-])[A-Z0-9-]+\)[A-Z0-9-]"
+        r"|:[A-Z0-9][A-Z0-9-]*:)"
+        r"(?:[A-Z0-9-]+|\([A-Z0-9-]+\)|:[A-Z0-9-]+:)*",
+        re.IGNORECASE,
+    )
+
+    #: Tokens a run of abutting name text never spans.
+    _RUN_STOP_TYPES = frozenset(
+        {
+            TokenType.PERIOD,
+            TokenType.COMMA,
+            TokenType.SEMICOLON,
+            TokenType.NEWLINE,
+            TokenType.EOF,
+            TokenType.COMMENT,
+            TokenType.STRING_LITERAL,
+        }
+    )
+
+    def _merge_template_placeholders(self) -> None:
+        """Outside ``EXEC ... END-EXEC``, glue a data or procedure name that
+        holds a COPY REPLACING placeholder into one IDENTIFIER.
+
+        Copybook templates spell their names with a placeholder the
+        including program swaps out (``COPY X REPLACING ==(9999-)== BY
+        ==WS-==``): ``01 (9999-)MOD-DTTX0F.``, ``05 :PFX:-CODE PIC X.``.
+        Parsed on its own, the copybook lexed ``(`` ``9999`` ``-`` ``)``
+        ``MOD-DTTX0F`` and every item came out ANONYMOUS. A run of abutting
+        tokens (same line, no gap) whose text is such a name now becomes
+        one IDENTIFIER spelled as written. Runs right after PIC / PICTURE
+        (``PIC -(5)9``) are left alone. After COPY REPLACING has run, no
+        placeholder is left and nothing here applies.
+        """
+        tokens = self.tokens
+        if not any(t.type in (TokenType.LEFT_PAREN, TokenType.COLON) for t in tokens):
+            return
+        merged: list[Token] = []
+        in_exec = False
+        count = len(tokens)
+        index = 0
+        while index < count:
+            token = tokens[index]
+            ttype = token.type
+            if ttype == TokenType.EXEC:
+                in_exec = True
+            elif ttype == TokenType.END_EXEC:
+                in_exec = False
+            end = index + 1
+            if not in_exec and ttype not in self._RUN_STOP_TYPES:
+                while (
+                    end < count
+                    and tokens[end].type not in self._RUN_STOP_TYPES
+                    and self._abuts(tokens[end - 1], tokens[end])
+                ):
+                    end += 1
+            if end - index > 1 and not self._after_picture(merged):
+                text = "".join(t.value or "" for t in tokens[index:end])
+                if self._TEMPLATE_NAME_RE.fullmatch(text):
+                    merged.append(Token(TokenType.IDENTIFIER, text, token.location))
+                    index = end
+                    continue
+            merged.extend(tokens[index:end])
+            index = end
+        tokens[:] = merged
+
+    @staticmethod
+    def _after_picture(merged: list[Token]) -> bool:
+        """Whether the next token is a PICTURE string (``PIC [IS] ...``)."""
+        for token in reversed(merged[-2:]):
+            if token.type in (TokenType.PIC, TokenType.PICTURE):
+                return True
+            if token.type != TokenType.IS:
+                return False
+        return False
 
     #: Characters that are no part of COBOL outside an EXEC block.
     _STRAY_TYPES = frozenset(

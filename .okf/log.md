@@ -14,6 +14,14 @@ deliberate. Anything else appended to the bottom is a mistake: five
 entries, including both 2026-09-15 sections, were found there on
 2026-09-15 and moved back up.
 
+## 2026-11-02 -- COPY REPLACING placeholders in names
+
+- [lexer.md](lexer.md): "COPY REPLACING placeholders in names". New
+  post-pass `_merge_template_placeholders` lexes `(9999-)MOD-DTTX0F`,
+  `:PFX:-CODE`, `:PFX:` and `WS-(SFX)` as one IDENTIFIER, so a template
+  copybook parsed on its own keeps its names (was `ANONYMOUS-n-m`).
+  Tests: `tests/regression/test_copybook_template_placeholders.py`.
+
 ## 2026-11-02 -- no character fails a file
 
 - [lexer.md](lexer.md): "Stray characters post-pass". An unknown character
