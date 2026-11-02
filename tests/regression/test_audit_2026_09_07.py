@@ -140,12 +140,15 @@ class TestH1NonLiteralOperand:
        PROCEDURE DIVISION.
        MAIN.
            ACCEPT WS-CODE
+           ACCEPT WS-OTHER
            EVALUATE WS-CODE
                WHEN "AB"     DISPLAY "1"
                WHEN WS-OTHER DISPLAY "2"
            END-EVALUATE
            STOP RUN.
 """
+        # WS-OTHER is ACCEPTed, so its value is only known at run time (a
+        # never-changed VALUE item is folded to its VALUE since 2026-11-02).
         report = _constraints(source)
         values = [
             constraint.values[0]
