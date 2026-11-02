@@ -260,6 +260,12 @@ turns a field's constraints into a concrete witness value.
 `extract(..., extra_fed_names=[...])` (2026-10-21) adds data names to treat
 as boundary-fed on top of the report's: `ProgramFixtureGenerator(
 entry_parameters=True)` passes the program's own USING items.
+Since 2026-11-02 `_build_relational_constraint` also folds `DFHRESP(<cond>)`
+to its EIBRESP number (`_fold_cics_value`) and treats a WORKING-STORAGE item
+with a literal VALUE that nothing writes (xref roles other than read /
+condition / subscript, on the item, a group above it or its record) as that
+literal (`_named_constants`, kept on `ProgramLayoutIndex.named_constants`),
+so `IF ID NOT > WS-MAX-ID` is a comparison against `899999`.
 
 ```python
 from cobolparser.analysis.constraints import ConstraintExtractor
@@ -540,6 +546,9 @@ F1-VALID` and a simple comparison like `WHEN F1-QTY = 5` both arrive as
 `_parse_relational_text` itself reports any text holding an `AND`/`OR`
 outside a quoted literal as unsupported rather than splitting it on its first
 operator.
+A class or sign test in the text (`WHEN LK-ID NOT NUMERIC`, `WHEN X IS
+POSITIVE`, `_CLASS_TEXT_RE`) becomes the same constraint the IF path builds
+from the condition tree (`_class_or_sign_constraint`).
 Before matching, `_symbolize_relational_words` spells the word operators
 as symbols (`[IS] [NOT] GREATER|LESS [THAN] [OR EQUAL [TO]]`, `EQUAL[S]
 [TO]`; quoted literals untouched), so `WHEN X GREATER THAN OR EQUAL TO 1`

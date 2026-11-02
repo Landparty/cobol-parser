@@ -311,6 +311,23 @@ row too. Off by default: no `entry_parameters` key, identical values.
 Layout registered under `layouts["ENTRY:<PROGRAM-ID>"]`. Tests:
 `tests/unit/generators/test_entry_parameters.py`.
 
+**CICS programs (2026-11-02).** With `entry_parameters=True` and a CICS
+boundary, `_add_cics_interface` calls `ProgramLayoutIndex.add_cics_interface()`
+(a synthetic LINKAGE `01 DFHEIBLK`, the translator's layout, when the program
+declares none; `index.synthetic_eib`), and `_entry_parameter_names(ast,
+index)` adds `DFHCOMMAREA` (when declared and not already in USING) and
+`DFHEIBLK`: CICS passes both. Only the EIB fields a scenario's witnesses pin
+go into the row (`IF EIBCALEN = 0` / `IF EIBAID = X'F3'` on the path to an
+arm), so the happy path keeps CICS's start values. Tests:
+`tests/unit/test_cics_entry_scenarios.py`.
+
+**Edge scenarios (2026-11-02).** `ScenarioPlanner.plan` adds, after the
+merged branch scenarios, each targeted arm again once per numeric `<`, `<=`,
+`>`, `>=` conjunct of its own with that field pinned to the edge the arm
+still takes (`_edge_scenarios`; named `<arm> at <FIELD> = <value>`). They are
+never merged and add no `ArmOutcome`. A change to a limit then moves a case
+from one arm to the other.
+
 ## Self-verification
 
 A scenario's *name* is a claim. `generators/verification.py`'s

@@ -64,8 +64,16 @@ class TestSingleIf:
             "               DISPLAY 'HIGH'\n"
             "           END-IF.\n"
         )
-        assert len(plan.scenarios) == 2
-        witnesses = [s.witnesses["F1-REC.F1-QTY"] for s in plan.scenarios]
+        # The two arms, then each again at the edge of `> 100`.
+        assert [s.name for s in plan.scenarios][2:] == [
+            "MAIN-PARA: IF@21 ELSE at F1-QTY = 100",
+            "MAIN-PARA: IF@21 THEN at F1-QTY = 101",
+        ]
+        assert [s.witnesses["F1-REC.F1-QTY"] for s in plan.scenarios[2:]] == [
+            "100",
+            "101",
+        ]
+        witnesses = [s.witnesses["F1-REC.F1-QTY"] for s in plan.scenarios[:2]]
         assert float(witnesses[0]) != float(witnesses[1])
         assert plan.coverage.total_arms == 2
         assert plan.coverage.targeted == 2
