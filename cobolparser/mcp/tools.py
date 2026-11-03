@@ -3285,7 +3285,11 @@ def _control_flow_notes(nodes: list[Any]) -> list[str]:
     ends = [
         n
         for n in nodes
-        if n.has_stop_run or n.has_goback or n.has_exit_program or n.has_cics_exit
+        if n.has_stop_run
+        or n.has_goback
+        or n.has_exit_program
+        or n.has_cics_exit
+        or n.has_abend_call
     ]
     if not ends:
         notes.append(
