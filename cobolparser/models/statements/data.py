@@ -55,6 +55,18 @@ class DisplayStatement(CobolStatement):
         self.with_no_advancing: bool = False
         self.at_line: int | None = None
         self.at_column: int | None = None
+        # Screen-handling phrases, as written (`AT 0101`, `LINE 3`,
+        # `HIGHLIGHT`, `BLANK SCREEN`, `FOREGROUND-COLOR 2`, ...): a DISPLAY
+        # carrying any of them writes to the screen, not to SYSOUT.
+        self.screen_phrases: list[str] = []
+
+    @property
+    def is_screen_display(self) -> bool:
+        """Whether this DISPLAY writes to the screen (a screen phrase, or
+        UPON CRT)."""
+        return bool(self.screen_phrases) or (
+            (self.output_device or "").upper() in ("CRT", "CRT-UNDER")
+        )
 
     def add_display_item(self, item: str) -> None:
         """Add an item to display."""
@@ -86,6 +98,8 @@ class DisplayStatement(CobolStatement):
                 "at_column": self.at_column,
             }
         )
+        if self.screen_phrases:
+            result["screen_phrases"] = self.screen_phrases
         return result
 
 

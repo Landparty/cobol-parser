@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+* **Screen `DISPLAY` phrases are parsed.** `AT 0101`, `AT LINE n COLUMN m`,
+  `LINE` / `COL` / `POSITION` with a literal or data name, `WITH HIGHLIGHT`,
+  `BLANK SCREEN`, `FOREGROUND-COLOR IS n` and the other attributes go into
+  `DisplayStatement.screen_phrases` (in `to_dict()` when present) instead of
+  becoming display items, and `is_screen_display` says whether a DISPLAY
+  writes to the screen (also `UPON CRT`). `DISPLAY OMITTED` keeps
+  `OMITTED` as its item. A lone attribute word (`DISPLAY BELL`) is still an
+  item: it can name a SYMBOLIC CHARACTER.
 * **`cobolparser.definitions`: the members beside the COBOL.** New parsers
   for CICS resource definitions (DFHCSDUP `DEFINE` / `ALTER` / `ADD`, with
   abbreviations, and the older `DFHPCT` / `DFHPPT` / `DFHFCT` tables), BMS

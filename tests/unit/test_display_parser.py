@@ -105,3 +105,64 @@ class TestDisplayIntrinsicFunction:
         display = result.ast.find_statements("DISPLAY")[0]
         move = result.ast.find_statements("MOVE")[0]
         assert display.display_items == [move.source]
+
+
+class TestDisplayScreenPhrases:
+    """Screen DISPLAYs (2026-11-03, mockymock's sample sweep: a positioned
+    DISPLAY switches GnuCOBOL to screen mode, so a test runner has to know
+    one when it sees one)."""
+
+    def _display(self, text: str):
+        result = parse_cobol(_prog(f"           {text}\n           DISPLAY 'NEXT'."))
+        assert not result.warnings, result.warnings
+        stmts = result.ast.find_statements("DISPLAY")
+        assert stmts[-1].display_items == ['"NEXT"']
+        return stmts[0]
+
+    def test_at_and_attributes(self):
+        stmt = self._display("DISPLAY 'A' AT 0101 WITH BLANK SCREEN")
+        assert stmt.display_items == ['"A"']
+        assert stmt.screen_phrases == ["AT 0101", "BLANK SCREEN"]
+        assert stmt.is_screen_display
+
+    def test_line_column_without_at(self):
+        stmt = self._display("DISPLAY 'A' LINE 3 COLUMN 5 HIGHLIGHT")
+        assert stmt.display_items == ['"A"']
+        assert stmt.screen_phrases == ["LINE 3", "COLUMN 5", "HIGHLIGHT"]
+
+    def test_col_and_colour_by_data_name(self):
+        stmt = self._display(
+            "DISPLAY WS-IDX AT LINE 3 COL WS-IDX\n"
+            "               WITH FOREGROUND-COLOR IS 2"
+        )
+        assert stmt.display_items == ["WS-IDX"]
+        assert stmt.screen_phrases == [
+            "AT LINE 3",
+            "COLUMN WS-IDX",
+            "FOREGROUND-COLOR IS 2",
+        ]
+
+    def test_one_position_per_item(self):
+        stmt = self._display("DISPLAY 'YOU: ' AT 0204 WS-IDX AT 0217")
+        assert stmt.display_items == ['"YOU: "', "WS-IDX"]
+        assert stmt.screen_phrases == ["AT 0204", "AT 0217"]
+
+    def test_omitted_clears_the_screen(self):
+        stmt = self._display("DISPLAY OMITTED AT 0101 WITH BLANK SCREEN")
+        assert stmt.display_items == ["OMITTED"]
+        assert stmt.is_screen_display
+
+    def test_upon_crt_is_a_screen_display(self):
+        assert self._display("DISPLAY 'A' UPON CRT").is_screen_display
+
+    def test_a_plain_display_is_not(self):
+        stmt = self._display("DISPLAY 'A' WS-IDX WITH NO ADVANCING")
+        assert stmt.screen_phrases == []
+        assert not stmt.is_screen_display
+        assert "screen_phrases" not in stmt.to_dict()
+
+    def test_a_lone_attribute_word_is_an_item(self):
+        """`DISPLAY BELL` shows a SYMBOLIC CHARACTER named BELL (#519)."""
+        stmt = self._display("DISPLAY BELL")
+        assert stmt.display_items == ["BELL"]
+        assert not stmt.is_screen_display
