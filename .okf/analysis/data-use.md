@@ -551,6 +551,13 @@ report: MoveTypeReport = MoveTypeChecker().check(ast)
 Detects MOVE statements with type-incompatible sending/receiving fields based on
 PICTURE clause categories.
 
+**Edited pictures** (`_classify_picture`): an edited picture holding an `X`
+or an `A` is ALPHANUMERIC_EDITED even when it also holds `9`s (`PIC XXB99`,
+`99/XX`, `A9B9`); only one with no `X`/`A` is NUMERIC_EDITED (#816; it used
+to be NUMERIC_EDITED whenever a `9` was present, a false "Illegal MOVE" on
+`MOVE alpha TO XXB99` and a missed error on a decimal moved into one).
+Repeat counts are stripped first, so the `9` in `X(9)BX(9)` is no digit.
+
 **One unit's catalog and MOVEs** (#504). `_build_catalog` and `_check_moves`
 stop at a contained `CobolProgram`: walking into one let an inner namesake
 (`01 WS-X PIC X(3)`) make the outer `WS-X PIC 9(3)` ambiguous, so the outer

@@ -32,6 +32,7 @@ from ...models.statements.misc import (
     SortStatement,
     XmlJsonStatement,
 )
+from .._abend import abend_call_target
 from .._cics import cics_exit_kind, cics_terminator_kind
 from .._procedures import ProcedureIndex, branch_terminates, enclosing_section
 from .condition_text import render_condition_text
@@ -337,6 +338,13 @@ class ProcedureScanner:
             elif isinstance(stmt, CallStatement):
                 node.call_count += 1
                 self._collector.process_call(stmt, proc_name)
+                abend_target = abend_call_target(stmt)
+                if abend_target is not None:
+                    node.has_abend_call = True
+                    self._exit_points.add(proc_name)
+                    self._record_exit_statement(
+                        node, f"CALL '{abend_target}'", stmt.location
+                    )
                 # Queue exception handler branches for nested flow
                 push_sequential(
                     [
@@ -678,8 +686,9 @@ class ProcedureScanner:
         reached: STOP RUN (not STOP 'literal', which merely halts pending
         operator action), GOBACK, EXIT PROGRAM, a non-DEPENDING GO TO --
         including the alterable ``GO TO.`` with no operand, which always
-        transfers to whatever an ALTER last set it to -- or EXEC CICS
-        RETURN / XCTL / ABEND (see ``_cics``). Mirrors
+        transfers to whatever an ALTER last set it to -- EXEC CICS
+        RETURN / XCTL / ABEND (see ``_cics``), or a static CALL of a
+        non-returning abend service (``abend_call_target``, #817). Mirrors
         DeadCodeAnalyzer._is_terminator, kept independent per this package's
         existing collaborator architecture. An exhaustive IF/EVALUATE whose
         every arm terminates counts too (``_procedures.branch_terminates``).
@@ -689,6 +698,8 @@ class ProcedureScanner:
         if cics_terminator_kind(stmt) is not None:
             return True
         if isinstance(stmt, GobackStatement):
+            return True
+        if abend_call_target(stmt) is not None:
             return True
         if isinstance(stmt, StopStatement):
             return stmt.stop_type == "RUN"

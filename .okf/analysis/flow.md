@@ -155,7 +155,14 @@ Two rules. `cics_exit_kind(stmt)`: the command is `RETURN`, `XCTL` or
 `ABEND`, which leave the program whenever they succeed. `cics_terminator_kind
 (stmt)`: the same, minus a `RETURN` / `XCTL` carrying `RESP`, `RESP2` or
 `NOHANDLE` (decision (a) on the issue: a failed command then continues at
-the next statement); `ABEND` always is one. Both `_is_terminator` copies
+the next statement); `ABEND` always is one. A static `CALL 'CEE3ABD'` or
+`CALL 'ILBOABN0'` (`_abend.abend_call_target`, the non-returning IBM abend
+services; site modules such as `ABEND` / `CKRABEND` are not assumed, #817)
+is a terminator in the scanner's `_is_terminator` too, sets
+`FlowNode.has_abend_call`, adds an exit point with `exit_statement_kind`
+`"CALL 'CEE3ABD'"`, and counts as a way out in
+`RecursionRiskAnalyzer._has_escape`: a validation loop that abends on bad
+data is `MEDIUM`, like its STOP RUN equivalent, not `HIGH`. Both `_is_terminator` copies
 (`dead_code.py`, `program_flow/scanner.py`) use `cics_terminator_kind`, so
 neither draws fall-through past such a paragraph. The scanner uses
 `cics_exit_kind` for `FlowNode.has_cics_exit`, `exit_points` and

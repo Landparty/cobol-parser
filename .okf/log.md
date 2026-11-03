@@ -14,6 +14,20 @@ deliberate. Anything else appended to the bottom is a mistake: five
 entries, including both 2026-09-15 sections, were found there on
 2026-09-15 and moved back up.
 
+## 2026-11-03 -- issue sweep: #809, #814, #816, #817
+
+- [analysis/data-use.md](analysis/data-use.md): `_classify_picture` calls an
+  edited picture with an `X` or `A` ALPHANUMERIC_EDITED even with `9`s
+  (#816). Tests: `tests/regression/test_issue_816_mixed_edited_pictures.py`.
+- [analysis/flow.md](analysis/flow.md): a static CALL of CEE3ABD / ILBOABN0
+  is a terminator, `FlowNode.has_abend_call` and an exit point, and a loop
+  escape for recursion-check (#817). New `cobolparser/analysis/_abend.py`.
+  Tests: `tests/regression/test_issue_817_abend_call_loop_exit.py`.
+- [lexer.md](lexer.md): a placeholder name after `NOT(` / `AND(` / `OR(` /
+  `UNTIL(` stays whole (#814); a declared currency symbol is CURRENCY only
+  inside a PICTURE string, so `WS-#N` stays one name (#809). Tests:
+  `tests/regression/test_issue_814_809_lexer_names.py`.
+
 ## 2026-11-02 -- xref: parentheses inside a literal
 
 - [analysis/data-use.md](analysis/data-use.md): `XrefAnalyzer` blanks quoted

@@ -192,6 +192,7 @@ OKF_MAP = [
     ("cobolparser/analysis/technical_debt.py", [".okf/analysis/flow.md"]),
     ("cobolparser/analysis/_procedures.py", [".okf/analysis/flow.md"]),
     ("cobolparser/analysis/_cics.py", [".okf/analysis/flow.md"]),
+    ("cobolparser/analysis/_abend.py", [".okf/analysis/flow.md"]),
     ("cobolparser/analysis/_sql_whenever.py", [".okf/analysis/flow.md"]),
     ("cobolparser/analysis/unused_variables.py", [".okf/analysis/data-use.md"]),
     ("cobolparser/analysis/xref.py", [".okf/analysis/data-use.md"]),

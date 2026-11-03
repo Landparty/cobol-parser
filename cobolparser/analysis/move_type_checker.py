@@ -510,14 +510,14 @@ def _classify_picture(pic: PictureClause) -> DataCategory:
 
     if has_edit_chars:
         # Test symbols on pattern_no_reps: the 9 in a repeat count such as
-        # X(9)BX(9) is not a digit position.
-        # Numeric-edited: contains 9s alongside editing characters
-        if "9" in pattern_no_reps:
-            return DataCategory.NUMERIC_EDITED
-        # Alphanumeric-edited: X with editing chars
+        # X(9)BX(9) is not a digit position. An edited picture holding an
+        # X or an A is alphanumeric-edited even when it also holds 9s
+        # (PIC XXB99, 99/XX, A9B9): only numeric editing symbols with 9s
+        # make an item numeric-edited (IBM Language Reference, "PICTURE
+        # clause editing").
         if "X" in pattern_no_reps or "A" in pattern_no_reps:
             return DataCategory.ALPHANUMERIC_EDITED
-        return DataCategory.NUMERIC_EDITED  # default for edited
+        return DataCategory.NUMERIC_EDITED
 
     # Pure numeric: only S, 9, V, P and grouping digits
     if _PIC_NUMERIC_ONLY_RE.match(pattern):
