@@ -2756,7 +2756,15 @@ class _CobolLexerPure:
         ``IF (FLG-(TESTVAR1)-NOT-OK`` / ``OR FLG-(TESTVAR1)-BLANK)``. Those
         leading '(' and trailing ')' tokens are peeled off, fewest first,
         so a placeholder that ends the name (``WS-(SFX)``) keeps its ')'.
+        A reserved word the '(' abuts (``NOT(``, ``AND(``, ``UNTIL(``, #814)
+        is peeled off first: it is never part of the name.
         """
+        if (
+            end - index > 2
+            and tokens[index + 1].type == TokenType.LEFT_PAREN
+            and self._is_reserved_word(tokens[index])
+        ):
+            index += 1
         leading = 0
         while index + leading < end and tokens[index + leading].type == (
             TokenType.LEFT_PAREN
@@ -2776,6 +2784,16 @@ class _CobolLexerPure:
                 if self._TEMPLATE_NAME_RE.fullmatch(text):
                     return start, stop
         return None
+
+    @staticmethod
+    def _is_reserved_word(token: Token) -> bool:
+        """Whether *token* is a COBOL reserved word (a keyword token)."""
+        value = token.value or ""
+        return (
+            token.type != TokenType.IDENTIFIER
+            and value.isalpha()
+            and token.type.name == value.upper().replace("-", "_")
+        )
 
     @staticmethod
     def _after_picture(merged: list[Token]) -> bool:
@@ -2818,8 +2836,9 @@ class _CobolLexerPure:
         A '#' or '@' that abuts a word (``WS-#CPT``, ``@ADDR``) is a letter
         of that name in some shops' dialects; it is glued into one
         IDENTIFIER rather than dropped, so every reference to the name stays
-        the same name. A declared PICTURE currency symbol (``CURRENCY SIGN
-        IS 'EUR' WITH PICTURE SYMBOL '#'``) becomes CURRENCY.
+        the same name, whether or not that character is also a declared
+        PICTURE currency symbol. Otherwise a declared currency symbol
+        (``CURRENCY SIGN IS 'EUR' WITH PICTURE SYMBOL '#'``) becomes CURRENCY.
 
         A single linear pass, shared verbatim by the Cython fast path, which
         inherits this method.
@@ -2833,9 +2852,17 @@ class _CobolLexerPure:
         in_exec = False
         # Whether kept[-1] is a name already glued around a '#' / '@'.
         glued = False
+        # Whether *token* belongs to a PICTURE string: the run of abutting
+        # tokens right after PIC / PICTURE [IS]. Only there is a declared
+        # currency symbol one (#809).
+        in_picture = False
         count = len(tokens)
         for index, token in enumerate(tokens):
             ttype = token.type
+            if in_picture and not self._abuts(tokens[index - 1], token):
+                in_picture = False
+            if not in_picture and self._after_picture(kept):
+                in_picture = True
             if ttype == TokenType.EXEC:
                 in_exec = True
             elif ttype == TokenType.END_EXEC:
@@ -2858,11 +2885,14 @@ class _CobolLexerPure:
                 continue
             line = token.location.line if token.location else 0
             if ttype == TokenType.SQL_NAME_CHAR:
-                if token.value in self._currency_symbols:
+                if in_picture and token.value in self._currency_symbols:
                     token.type = TokenType.CURRENCY
                     kept.append(token)
                     glued = False
                     continue
+                # Outside a PICTURE string a currency symbol means nothing,
+                # so ``WS-#N`` stays one name even when '#' is the PICTURE
+                # currency symbol (#809).
                 prev = kept[-1] if kept else None
                 nxt = tokens[index + 1] if index + 1 < count else None
                 if (
@@ -2887,6 +2917,11 @@ class _CobolLexerPure:
                     )
                     glued = True
                     glued_names.setdefault(token.value, []).append(line)
+                    continue
+                if token.value in self._currency_symbols:
+                    token.type = TokenType.CURRENCY
+                    kept.append(token)
+                    glued = False
                     continue
             dropped.setdefault(token.value, []).append(line)
             glued = False

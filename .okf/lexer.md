@@ -520,9 +520,13 @@ inherits the pure-Python method; one linear scan, no C mirror). Outside an
 EXEC token span:
 
 - a `#` / `@` declared as a SPECIAL-NAMES currency symbol is retyped
-  `CURRENCY`;
+  `CURRENCY` inside a PICTURE string (the run of abutting tokens right
+  after PIC / PICTURE [IS]);
 - a `#` / `@` that abuts a word (same line, no gap: `WS-#CPT`, `@ADDR`) is
-  glued into one IDENTIFIER with it, so every reference stays one name;
+  glued into one IDENTIFIER with it, so every reference stays one name --
+  also when it is the declared currency symbol (`WS-#N` with `PICTURE
+  SYMBOL '#'`, #809; it used to be cut to `WS-`); outside a PICTURE string
+  an unglued currency symbol is still retyped `CURRENCY`;
   warning `Non-standard character '#' read as part of a data name (N
   occurrences, lines ...)`;
 - any other stray token is dropped; warning `Ignored invalid character '|'
@@ -557,7 +561,10 @@ placeholder must hold a letter or `-` and have name text after it, or a
 name ending in `-` before it (`WS-(SFX)`); `:TAG:` may stand alone. A condition's own parentheses abutting the name
 (`IF (FLG-(TESTVAR1)-NOT-OK` / `OR FLG-(TESTVAR1)-BLANK)`, AWS CardDemo's
 `CSSETATY.cpy`) are peeled off the run, fewest first, by
-`_template_name_span`, so `WS-(SFX)` keeps its `)`. So
+`_template_name_span`, so `WS-(SFX)` keeps its `)`. A reserved word the
+`(` abuts (`NOT(`, `AND(`, `OR(`, `UNTIL(`) is peeled off the front of the
+run first (`_is_reserved_word`, #814), so `IF NOT(FLG-(T)-OK)` lexes like
+`IF NOT (FLG-(T)-OK)`. So
 `PIC -(5)9`, `TAB(I)`, `B(1:2)` and `A-(4)` are untouched; runs right after
 PIC / PICTURE [IS] are skipped. Before, each item of such a copybook parsed
 as `ANONYMOUS-n-m`. After `expand_copybooks` applies REPLACING there is no

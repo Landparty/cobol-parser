@@ -315,6 +315,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   section's `min_severity` and `fail_on` also reach `call-check` and
   `widen-check`). A tracked 1.4 MB `coverage.json` is removed and ignored.
 
+## [3.3.2](https://github.com/Landparty/cobol-parser/compare/v3.3.1...v3.3.2) (2026-11-03)
+
+
+### Bug Fixes
+
+* **lexer:** a placeholder name inside a condition's parentheses stays one name ([c0b4a5a](https://github.com/Landparty/cobol-parser/commit/c0b4a5a66cc5954c50f1ba14612a67644c66cadf))
+* **lexer:** a placeholder name inside a condition's parentheses stays one name ([deb52bf](https://github.com/Landparty/cobol-parser/commit/deb52bfe4497f1d639d1e00a9ec9ca5514508440))
+* mixed X/9 edited pictures, abend CALL loop exits, two lexer name splits ([#818](https://github.com/Landparty/cobol-parser/issues/818)) ([b460b3b](https://github.com/Landparty/cobol-parser/commit/b460b3bb379bb13796400829d9c76b0414e2c3e4))
+* **xref:** parentheses inside a literal are not a subscript ([96222c5](https://github.com/Landparty/cobol-parser/commit/96222c50882d7d20d33d17c7d5685c24f6017db0))
+
 ## [3.3.1](https://github.com/Landparty/cobol-parser/compare/v3.3.0...v3.3.1) (2026-11-02)
 
 

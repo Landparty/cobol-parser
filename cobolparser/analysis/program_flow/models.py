@@ -77,6 +77,9 @@ class FlowNode:
     #: EXEC CICS RETURN / XCTL / ABEND: leaves the program, at least when
     #: it succeeds (one with RESP / NOHANDLE may also fall through).
     has_cics_exit: bool = False
+    #: A static CALL of a Language Environment abend service that never
+    #: returns (``CALL 'CEE3ABD'``, ``CALL 'ILBOABN0'``): ends the program.
+    has_abend_call: bool = False
     #: A SORT/MERGE ``RETURN sd-file`` (reads the next sorted record) --
     #: not a program terminator, unlike the four flags above.
     has_return: bool = False
@@ -124,6 +127,8 @@ class FlowNode:
             result["has_exit_program"] = True
         if self.has_cics_exit:
             result["has_cics_exit"] = True
+        if self.has_abend_call:
+            result["has_abend_call"] = True
         if self.has_return:
             result["has_return"] = True
         if self.has_exit_section:

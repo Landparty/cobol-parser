@@ -227,6 +227,7 @@ class _FlowIndex:
                 or node.has_goback
                 or node.has_exit_program
                 or node.has_cics_exit
+                or node.has_abend_call
             ):
                 return True
             if not self.escape_targets.get(name, set()) <= component:
