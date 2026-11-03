@@ -747,6 +747,28 @@ def test_entry_for_is_case_insensitive_and_returns_none_for_unknown():
 # ---------------------------------------------------------------------------
 
 
+def test_parentheses_inside_a_literal_are_no_subscript():
+    """NIST CCVS85 writes `MOVE "TEST(S) FAILED" TO ENDER-DESC` in every
+    program: the parentheses were split off as a subscript before the
+    literal was dropped, so S was reported undeclared."""
+    report = _analyze_source("""\
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. LIT.
+       DATA DIVISION.
+       WORKING-STORAGE SECTION.
+       01  ENDER-DESC PIC X(20).
+       01  WS-I       PIC 9.
+       PROCEDURE DIVISION.
+       P1.
+           MOVE "TEST(S) FAILED" TO ENDER-DESC.
+           MOVE 'A(WS-I)' TO ENDER-DESC (WS-I:1).
+           STOP RUN.
+""")
+    assert report.undefined == []
+    assert report.entry_for("S") is None
+    assert "subscript" not in _roles(report, "WS-I")
+
+
 def test_undefined_data_name_is_reported_not_guessed():
     prog = _make_program(
         [("MAIN-PARA", [_move("WS-A", "WS-MISSING")])],
