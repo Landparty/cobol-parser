@@ -14,6 +14,13 @@ deliberate. Anything else appended to the bottom is a mistake: five
 entries, including both 2026-09-15 sections, were found there on
 2026-09-15 and moved back up.
 
+## 2026-11-03 -- screen DISPLAY phrases
+
+- [parser/statements-data.md](parser/statements-data.md): `DisplayStatement`
+  gains `screen_phrases` and `is_screen_display`; AT / LINE / COL /
+  attributes no longer become display items. Tests:
+  `tests/unit/test_display_parser.py::TestDisplayScreenPhrases`.
+
 ## 2026-11-02 -- xref: parentheses inside a literal
 
 - [analysis/data-use.md](analysis/data-use.md): `XrefAnalyzer` blanks quoted

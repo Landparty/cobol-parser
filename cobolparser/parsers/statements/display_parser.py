@@ -26,6 +26,61 @@ from ._utils import (
     warn_paragraph_boundary_swallowed,
 )
 
+# Screen-handling phrases of a DISPLAY (IBM, X/Open and GnuCOBOL screen
+# I/O). The first set takes an operand (`LINE 3`, `FOREGROUND-COLOR IS 2`),
+# the second takes none, the third takes one keyword (`BLANK SCREEN`).
+_SCREEN_WORDS_WITH_OPERAND = frozenset(
+    {
+        "LINE",
+        "COL",
+        "COLUMN",
+        "POSITION",
+        "POS",
+        "FOREGROUND-COLOR",
+        "FOREGROUND-COLOUR",
+        "BACKGROUND-COLOR",
+        "BACKGROUND-COLOUR",
+        "COLOR",
+        "COLOUR",
+        "SIZE",
+        "CONTROL",
+        "CURSOR",
+    }
+)
+_SCREEN_WORDS = frozenset(
+    {
+        "HIGHLIGHT",
+        "LOWLIGHT",
+        "REVERSE-VIDEO",
+        "REVERSED",
+        "BLINK",
+        "UNDERLINE",
+        "OVERLINE",
+        "LEFTLINE",
+        "BELL",
+        "BEEP",
+        "NO-ECHO",
+        "SECURE",
+        "CONVERSION",
+        "UPDATE",
+        "AUTO",
+        "AUTO-SKIP",
+        "FULL",
+        "REQUIRED",
+        "PROMPT",
+        "TAB",
+    }
+)
+_SCREEN_WORDS_WITH_KEYWORD = {
+    "BLANK": frozenset({"SCREEN", "LINE"}),
+    "ERASE": frozenset({"EOL", "EOS", "SCREEN", "LINE"}),
+}
+_OPERAND_TYPES = (
+    TokenType.NUMERIC_LITERAL,
+    TokenType.LEVEL_NUMBER,
+    TokenType.IDENTIFIER,
+)
+
 
 class DisplayStatementParser(IStatementParser):
     """Parser for DISPLAY statements.
@@ -113,7 +168,23 @@ class DisplayStatementParser(IStatementParser):
 
             # Check for AT LINE/COLUMN positioning (M3a)
             if token.type == TokenType.AT:
+                start = len(stmt.screen_phrases)
                 self._parse_at_clause(token_stream, stmt)
+                if len(stmt.screen_phrases) == start:
+                    stmt.screen_phrases.append("AT")
+                skip_whitespace(token_stream)
+                continue
+
+            # Screen phrases outside AT: `LINE 3 COL 5`, `HIGHLIGHT`, ...
+            # Without WITH, a bare attribute word is one only once the
+            # statement is already a screen DISPLAY: `DISPLAY BELL` shows
+            # the SYMBOLIC CHARACTER BELL (issue #519's sample).
+            if self._parse_screen_phrase(
+                token_stream,
+                stmt,
+                bare_attributes=bool(stmt.screen_phrases),
+                operands=bool(stmt.display_items),
+            ):
                 skip_whitespace(token_stream)
                 continue
 
@@ -127,6 +198,10 @@ class DisplayStatementParser(IStatementParser):
                     token_stream.consume()
                     skip_whitespace(token_stream)
                     token = token_stream.peek()
+                    # `WITH HIGHLIGHT BLANK SCREEN ...`: screen phrases.
+                    if self._parse_screen_phrase(token_stream, stmt):
+                        skip_whitespace(token_stream)
+                        continue
                 if token and token.type == TokenType.NO:
                     token_stream.consume()
                     skip_whitespace(token_stream)
@@ -168,6 +243,14 @@ class DisplayStatementParser(IStatementParser):
                 # collecting items, mirroring the MOVE/SET parsers'
                 # target-list handling.
                 token_stream.consume()
+                skip_whitespace(token_stream)
+                continue
+
+            # `DISPLAY OMITTED AT 0101 WITH BLANK SCREEN`: clears the screen,
+            # displays nothing.
+            if (token.value or "").upper() == "OMITTED":
+                token_stream.consume()
+                stmt.add_display_item("OMITTED")
                 skip_whitespace(token_stream)
                 continue
 
@@ -271,6 +354,14 @@ class DisplayStatementParser(IStatementParser):
             value = int(token.value)
             line, column = divmod(value, 100)
             stmt.set_position(line, column)
+            stmt.screen_phrases.append(f"AT {token.value}")
+            return
+        if token.type == TokenType.IDENTIFIER and token.value and (
+            token.value.upper() not in ("COLUMN", "COL")
+        ):
+            # `AT WS-POS`: a 4- or 6-digit position held in a data item.
+            token_stream.consume()
+            stmt.screen_phrases.append(f"AT {token.value}")
             return
 
         # Keyword form: LINE and/or COLUMN, in either order.
@@ -283,12 +374,16 @@ class DisplayStatementParser(IStatementParser):
                 if num and num.value and num.value.lstrip("-").isdigit():
                     token_stream.consume()
                     line = int(num.value)
+                    stmt.screen_phrases.append(f"AT LINE {num.value}")
+                elif num and num.type == TokenType.IDENTIFIER and num.value:
+                    token_stream.consume()
+                    stmt.screen_phrases.append(f"AT LINE {num.value}")
                 skip_whitespace(token_stream)
             elif (
                 token
                 and token.type == TokenType.IDENTIFIER
                 and token.value
-                and token.value.upper() == "COLUMN"
+                and token.value.upper() in ("COLUMN", "COL")
             ):
                 token_stream.consume()
                 skip_whitespace(token_stream)
@@ -296,12 +391,71 @@ class DisplayStatementParser(IStatementParser):
                 if num and num.value and num.value.lstrip("-").isdigit():
                     token_stream.consume()
                     column = int(num.value)
+                    stmt.screen_phrases.append(f"COLUMN {num.value}")
+                elif num and num.type == TokenType.IDENTIFIER and num.value:
+                    token_stream.consume()
+                    stmt.screen_phrases.append(f"COLUMN {num.value}")
                 skip_whitespace(token_stream)
             else:
                 break
 
         if line is not None or column is not None:
             stmt.set_position(line, column)
+
+    @staticmethod
+    def _parse_screen_phrase(
+        token_stream: ITokenStream,
+        stmt: DisplayStatement,
+        bare_attributes: bool = True,
+        operands: bool = True,
+    ) -> bool:
+        """Consume one screen phrase (`LINE 3`, `COL WS-C`, `HIGHLIGHT`,
+        `BLANK SCREEN`, `FOREGROUND-COLOR IS 2`) into `stmt.screen_phrases`;
+        False, consuming nothing, when the next token starts none.
+        `bare_attributes` / `operands` False leave a lone attribute word
+        (`BELL`) / an operand phrase (`SIZE 3`) to be read as an item."""
+        token = token_stream.peek()
+        if not token or not token.value:
+            return False
+        word = token.value.upper()
+        if token.type not in (TokenType.IDENTIFIER, TokenType.LINE):
+            return False
+        if word in _SCREEN_WORDS:
+            if not bare_attributes:
+                return False
+            token_stream.consume()
+            stmt.screen_phrases.append(word)
+            return True
+        if word in _SCREEN_WORDS_WITH_KEYWORD:
+            following, _ = peek_past_noise(token_stream, 1)
+            if (
+                following
+                and following.value
+                and following.value.upper() in _SCREEN_WORDS_WITH_KEYWORD[word]
+            ):
+                token_stream.consume()
+                skip_whitespace(token_stream)
+                token_stream.consume()
+                stmt.screen_phrases.append(f"{word} {following.value.upper()}")
+                return True
+            return False
+        if word not in _SCREEN_WORDS_WITH_OPERAND or not operands:
+            return False
+        token_stream.consume()
+        skip_whitespace(token_stream)
+        phrase = [word]
+        for noise in ("NUMBER", "IS", "PLUS", "+"):
+            nxt = token_stream.peek()
+            if nxt and nxt.value and nxt.value.upper() == noise:
+                token_stream.consume()
+                skip_whitespace(token_stream)
+                phrase.append(noise)
+        operand = token_stream.peek()
+        if operand and operand.type in _OPERAND_TYPES and operand.value:
+            token_stream.consume()
+            phrase.append(operand.value)
+        stmt.screen_phrases.append(" ".join(phrase))
+        return True
 
     @staticmethod
     def _consume_function_name(token_stream: ITokenStream) -> str | None:

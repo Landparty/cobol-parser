@@ -244,8 +244,16 @@ first. Node fields are in [ast-models.md](../ast-models.md).
   ADVANCING`; breaking out left the period for a phantom `"."` paragraph). `AT`
   positioning: the combined numeric form `AT 0330` (line 3, column 30, via
   `divmod(value, 100)`) and the keyword form `AT LINE n COLUMN m`
-  (`_parse_at_clause`). Screen-section extensions (`LINE` / `COLUMN` / `BLANK
-  SCREEN` / `WITH BELL` / colours) are not modeled and warn.
+  (`_parse_at_clause`, which also takes `COL` and data-name operands and a
+  bare `AT identifier`). Every screen phrase goes into `screen_phrases`
+  (`"AT 0330"`, `"AT LINE 3"`, `"COLUMN WS-C"`, `"HIGHLIGHT"`, `"BLANK
+  SCREEN"`, `"FOREGROUND-COLOR IS 2"`; `_parse_screen_phrase`), after `AT`,
+  after `WITH`, or bare: an operand phrase (`LINE` / `COL` / `POSITION` /
+  `SIZE` ...) once an item has been read, a lone attribute word only once
+  another screen phrase has -- `DISPLAY BELL` shows the SYMBOLIC CHARACTER
+  BELL. `is_screen_display` is true with any screen phrase or `UPON CRT`
+  (mockymock splices such a DISPLAY out: GnuCOBOL's curses mode hides its
+  run markers). `DISPLAY OMITTED` keeps `OMITTED` as its item.
 
 ## ACCEPT
 
