@@ -16,6 +16,7 @@ from ...models.ast_base import SourceLocation
 from ...models.statements import DisplayStatement
 from ._utils import (
     consume_optional_qualifiers,
+    get_parse_context,
     is_statement_boundary,
     looks_dedented_relative_to,
     looks_like_paragraph_boundary,
@@ -179,11 +180,17 @@ class DisplayStatementParser(IStatementParser):
             # Without WITH, a bare attribute word is one only once the
             # statement is already a screen DISPLAY: `DISPLAY BELL` shows
             # the SYMBOLIC CHARACTER BELL (issue #519's sample).
+            # A word the program declares as a data item (`COLOR`, `POS`,
+            # `COL` are not reserved in IBM Enterprise COBOL) is an item to
+            # display, never a phrase (issue #821).
             if self._parse_screen_phrase(
                 token_stream,
                 stmt,
                 bare_attributes=bool(stmt.screen_phrases),
                 operands=bool(stmt.display_items),
+                data_names=getattr(
+                    get_parse_context(token_stream), "known_data_names", frozenset()
+                ),
             ):
                 skip_whitespace(token_stream)
                 continue
@@ -356,8 +363,10 @@ class DisplayStatementParser(IStatementParser):
             stmt.set_position(line, column)
             stmt.screen_phrases.append(f"AT {token.value}")
             return
-        if token.type == TokenType.IDENTIFIER and token.value and (
-            token.value.upper() not in ("COLUMN", "COL")
+        if (
+            token.type == TokenType.IDENTIFIER
+            and token.value
+            and (token.value.upper() not in ("COLUMN", "COL"))
         ):
             # `AT WS-POS`: a 4- or 6-digit position held in a data item.
             token_stream.consume()
@@ -408,16 +417,20 @@ class DisplayStatementParser(IStatementParser):
         stmt: DisplayStatement,
         bare_attributes: bool = True,
         operands: bool = True,
+        data_names: frozenset[str] = frozenset(),
     ) -> bool:
         """Consume one screen phrase (`LINE 3`, `COL WS-C`, `HIGHLIGHT`,
         `BLANK SCREEN`, `FOREGROUND-COLOR IS 2`) into `stmt.screen_phrases`;
         False, consuming nothing, when the next token starts none.
         `bare_attributes` / `operands` False leave a lone attribute word
-        (`BELL`) / an operand phrase (`SIZE 3`) to be read as an item."""
+        (`BELL`) / an operand phrase (`SIZE 3`) to be read as an item, and a
+        word in `data_names` (a declared data item) is always an item."""
         token = token_stream.peek()
         if not token or not token.value:
             return False
         word = token.value.upper()
+        if word in data_names:
+            return False
         if token.type not in (TokenType.IDENTIFIER, TokenType.LINE):
             return False
         if word in _SCREEN_WORDS:

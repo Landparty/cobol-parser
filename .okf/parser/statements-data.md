@@ -251,7 +251,9 @@ first. Node fields are in [ast-models.md](../ast-models.md).
   after `WITH`, or bare: an operand phrase (`LINE` / `COL` / `POSITION` /
   `SIZE` ...) once an item has been read, a lone attribute word only once
   another screen phrase has -- `DISPLAY BELL` shows the SYMBOLIC CHARACTER
-  BELL. `is_screen_display` is true with any screen phrase or `UPON CRT`
+  BELL. Without `WITH` / `AT`, a word the program declares as a data item
+  (`ParseContext.known_data_names`) is always an item: `COLOR`, `POS`, `COL`
+  are ordinary names in IBM Enterprise COBOL (#821). `is_screen_display` is true with any screen phrase or `UPON CRT`
   (mockymock splices such a DISPLAY out: GnuCOBOL's curses mode hides its
   run markers). `DISPLAY OMITTED` keeps `OMITTED` as its item.
 
