@@ -15,6 +15,7 @@ import pytest
 from cobolparser import parse_cobol
 from cobolparser.analysis.field_lineage import FieldFlowAnalyzer
 from cobolparser.analysis.field_widening import (
+    INVALID_MOVE,
     Capacity,
     FieldWideningAnalyzer,
     WideningReport,
@@ -91,15 +92,27 @@ class TestCapacity:
         assert capacity_of(None, "COMP-2", 8, False) is None
         assert capacity_of("9(4)", "POINTER", 4, False) is None
         assert capacity_of(None, None, None, True) is None
-        assert capacity_of(None, None, 12, True) == Capacity(False, chars=12)
+        assert capacity_of(None, None, 12, True) == Capacity(
+            False, chars=12, group=True
+        )
 
     def test_losses(self) -> None:
         wide = Capacity(True, 9, 2, signed=True)
         assert wide.losses(Capacity(True, 7, 2, signed=True)) == ["high-order digits"]
         assert wide.losses(Capacity(True, 9, 1, signed=True)) == ["decimal places"]
         assert wide.losses(Capacity(True, 9, 2)) == ["sign"]
-        assert wide.losses(Capacity(False, chars=10)) == ["characters"]
-        assert wide.losses(Capacity(False, chars=11)) == []
+        # An elementary alphanumeric receiver gets the digits only: the sign
+        # is lost and a noninteger MOVE is invalid (#765, #822); a group
+        # receiver copies the bytes.
+        assert wide.losses(Capacity(False, chars=10)) == [
+            "characters",
+            "sign",
+            INVALID_MOVE,
+        ]
+        assert wide.losses(Capacity(False, chars=11)) == ["sign", INVALID_MOVE]
+        assert wide.losses(Capacity(False, chars=10, group=True)) == ["characters"]
+        assert wide.losses(Capacity(False, chars=11, group=True)) == []
+        assert Capacity(True, 9).losses(Capacity(False, chars=9)) == []
         text = Capacity(False, chars=8)
         assert text.losses(Capacity(False, chars=7)) == ["characters"]
         assert text.losses(Capacity(True, 7)) == ["high-order digits"]
@@ -415,6 +428,42 @@ class TestRegressions:
         finding = _find(report, "truncation", "SIGNED", "ED-PLAIN")
         assert "sign" in finding.message
         _absent(report, "SIGNED", "ED-SIGN")
+
+    def test_sign_and_decimal_point_into_alphanumeric(self) -> None:
+        """#822 (#765's fix never landed): a signed numeric MOVEd to an
+        elementary alphanumeric item loses its sign, a noninteger one makes
+        the MOVE invalid; a group receiver keeps both."""
+        graph = _inline(
+            _program(
+                "WID",
+                """
+                WORKING-STORAGE SECTION.
+                01 AMT PIC 9(5).
+                01 R-I PIC X(6).
+                01 R-K PIC 9(5).
+                01 R-X PIC X(12).
+                01 R-G.
+                   05 R-G1 PIC X(9).
+                """,
+                "MOVE AMT TO R-I R-K R-G. MOVE AMT TO R-X. GOBACK.",
+            )
+        )
+        report = FieldWideningAnalyzer(graph).analyze("AMT", "S9(5)")
+        for field in ("R-I", "R-X", "R-K"):
+            finding = _find(report, "truncation", "WID", field)
+            assert finding.severity == "error"
+            assert finding.message.endswith("loses sign")
+        _absent(report, "WID", "R-G.R-G1")
+
+        report = FieldWideningAnalyzer(graph).analyze("AMT", "9(6)V99")
+        finding = _find(report, "truncation", "WID", "R-X")
+        assert finding.severity == "error"
+        assert INVALID_MOVE in finding.message
+        assert not [
+            f
+            for f in report.findings
+            if f.kind == "truncation" and f.field == "R-G.R-G1"
+        ]
 
     def test_receiver_of_a_literal_subscript_is_checked(self) -> None:
         """#759: MOVE A(2) TO X reaches X through an occurrence node."""

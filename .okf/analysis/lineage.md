@@ -279,7 +279,10 @@ report is a caveat and no start. Finding kinds:
   (+ sign) for numeric and numeric-edited items, characters for the rest
   (a group: its bytes, `group=True`); `losses()` follows MOVE alignment. A
   signed numeric MOVEd to an elementary alphanumeric item loses its sign
-  (#765); a group receiver copies the bytes, sign included. Severity: `info`
+  (#765, landed with #822), and a noninteger one makes the MOVE invalid
+  (`INVALID_MOVE`, an `error` when exact); a group receiver copies the
+  bytes, sign and decimal point included, as does a field a group MOVE lays
+  bytes over (an `overlap` hop). Severity: `info`
   when the old value lost the same things (`pre_existing`), `warning` when
   only decimal places are new, the path is derived (arithmetic) or not
   `exact`, else `error`. A derived pre-existing loss is dropped (a rate, a

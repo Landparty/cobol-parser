@@ -47,6 +47,7 @@ from ..models.statements.control import (
     SearchStatement,
     StopStatement,
 )
+from ..models.statements.io import IOAcceptStatement
 from ..models.statements.misc import InvokeStatement
 from ._names import IDENTIFIER_TOKEN_RE
 from ._procedures import ProcedureIndex
@@ -343,6 +344,9 @@ class _Fingerprinter:
             )
             at_end = tuple(self._fp(s) for s in (stmt.at_end_clause or []))
             details = self._details(stmt, frozenset({"when_clauses", "at_end_clause"}))
+            # Serial vs binary search is the verb, not a name (#823).
+            if (stmt.metadata or {}).get("is_search_all"):
+                return ("SEARCH ALL", search_whens, at_end, details)
             return ("SEARCH", search_whens, at_end, details)
 
         if isinstance(stmt, PerformStatement) and stmt.inline_statements:
@@ -374,7 +378,9 @@ class _Fingerprinter:
                 operands[operands.index(value)] = _quote(value)
         normalized = tuple(self._norm(op) for op in operands)
         details = self._details(stmt, literals=literals)
-        return (stype, normalized, self._clauses(stmt), details)
+        fingerprint = (stype, normalized, self._clauses(stmt), details)
+        verbatim = _verbatim(stmt)
+        return (*fingerprint, verbatim) if verbatim else fingerprint
 
     def _clauses(self, stmt: Any) -> tuple[Any, ...]:
         return tuple(
@@ -428,6 +434,18 @@ class _Fingerprinter:
         return _normalize_text(
             text, self._type2, self._id_map, keywords=_DETAIL_KEYWORDS
         )
+
+
+def _verbatim(stmt: Any) -> tuple[Any, ...]:
+    """The words of *stmt* that are keywords, not names, though its detail
+    fields hold them as plain values a Type-2 rename would substitute: the
+    ACCEPT ... FROM source (DATE, TIME, a mnemonic) and each CALL argument's
+    passing mode (BY REFERENCE / CONTENT / VALUE) (#823)."""
+    if isinstance(stmt, IOAcceptStatement):
+        return (str(getattr(stmt, "from_source", None) or "").upper(),)
+    if isinstance(stmt, CallStatement):
+        return tuple(str(p.passing_mode).upper() for p in stmt.using_parameters)
+    return ()
 
 
 def _canonical(fingerprint: Any) -> str:

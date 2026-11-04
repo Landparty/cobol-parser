@@ -977,3 +977,77 @@ class TestUnquotedLiteralCaseStillBreaksType1:
         group = _group_with(report, "P1")
         assert group is not None
         assert group.clone_type == "TYPE_2"
+
+
+_KEYWORD_HEADER = """\
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. KW.
+       DATA DIVISION.
+       WORKING-STORAGE SECTION.
+       01 A PIC 9(4).
+       01 B PIC 9(4).
+       01 D PIC X(8).
+       01 E PIC X(8).
+       01 TB.
+          05 T PIC 9 OCCURS 5 ASCENDING KEY IS T INDEXED BY IX.
+       PROCEDURE DIVISION.
+       MAIN-PARA.
+           STOP RUN.
+"""
+
+
+def _keyword_pair(x0: str, x1: str) -> str:
+    body = "\n".join(f"""\
+       {name}.
+           {stmt}
+           MOVE 7 TO A
+           MOVE 8 TO B
+           DISPLAY 'X'.""" for name, stmt in (("Q0", x0), ("Q1", x1)))
+    return _KEYWORD_HEADER + body + "\n"
+
+
+class TestKeywordDifferencesAreNotType2:
+    """#823: the ACCEPT FROM source, a CALL argument's passing mode and
+    SEARCH vs SEARCH ALL are keywords; a Type-2 rename must not cover them."""
+
+    @pytest.mark.parametrize(
+        ("x0", "x1"),
+        [
+            ("ACCEPT D FROM DATE", "ACCEPT D FROM TIME"),
+            ("CALL 'SUB' USING BY REFERENCE A", "CALL 'SUB' USING BY CONTENT A"),
+            (
+                "SEARCH T AT END MOVE 1 TO A\n"
+                "               WHEN T(IX) = 1 MOVE 2 TO A END-SEARCH",
+                "SEARCH ALL T AT END MOVE 1 TO A\n"
+                "               WHEN T(IX) = 1 MOVE 2 TO A END-SEARCH",
+            ),
+        ],
+    )
+    def test_not_clones(self, x0: str, x1: str) -> None:
+        _, report = _analyze(_keyword_pair(x0, x1))
+        assert _group_with(report, "Q0") is None, [
+            g.to_dict() for g in report.clone_groups
+        ]
+
+    @pytest.mark.parametrize(
+        "stmt",
+        [
+            "ACCEPT D FROM DATE",
+            "CALL 'SUB' USING BY CONTENT A",
+            "SEARCH ALL T AT END MOVE 1 TO A\n"
+            "               WHEN T(IX) = 1 MOVE 2 TO A END-SEARCH",
+        ],
+    )
+    def test_identical_still_type1(self, stmt: str) -> None:
+        _, report = _analyze(_keyword_pair(stmt, stmt))
+        group = _group_with(report, "Q0")
+        assert group is not None and group.clone_type == "TYPE_1"
+
+    def test_renamed_operand_still_type2(self) -> None:
+        _, report = _analyze(
+            _keyword_pair(
+                "CALL 'SUB' USING BY CONTENT D", "CALL 'SUB' USING BY CONTENT E"
+            )
+        )
+        group = _group_with(report, "Q0")
+        assert group is not None and group.clone_type == "TYPE_2"

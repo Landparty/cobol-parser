@@ -14,6 +14,24 @@ deliberate. Anything else appended to the bottom is a mistake: five
 entries, including both 2026-09-15 sections, were found there on
 2026-09-15 and moved back up.
 
+## 2026-11-04 -- issue sweep: #821, #822, #823
+
+- [parser/statements-data.md](parser/statements-data.md): a bare screen
+  phrase word the program declares as a data item (`COLOR`, `POS`, `COL`
+  are not reserved in IBM Enterprise COBOL) is a display item, not a phrase
+  (#821; `ParseContext.known_data_names`). Tests:
+  `tests/unit/test_display_parser.py::TestDisplayDataNamedLikeAScreenPhrase`.
+- [analysis/lineage.md](analysis/lineage.md): #765's fix had not landed.
+  `Capacity.losses()` now reports `sign` for a signed numeric reaching an
+  elementary alphanumeric item and `INVALID_MOVE` for a noninteger one (the
+  MOVE no longer compiles); a group receiver (`Capacity.group`) and the
+  fields a group MOVE lays bytes over keep both (#822). Tests:
+  `tests/unit/analysis/test_field_widening.py::TestRegressions::test_sign_and_decimal_point_into_alphanumeric`.
+- [analysis/flow.md](analysis/flow.md): the Type-2 fingerprint keeps the
+  ACCEPT FROM source, each CALL argument's passing mode and SEARCH vs
+  SEARCH ALL verbatim (#823). Tests:
+  `tests/unit/analysis/test_redundancy.py::TestKeywordDifferencesAreNotType2`.
+
 ## 2026-11-03 -- screen DISPLAY phrases
 
 - [parser/statements-data.md](parser/statements-data.md): `DisplayStatement`

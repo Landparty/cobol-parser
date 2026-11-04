@@ -97,6 +97,11 @@ def normalize_picture(text: str) -> str:
 # --------------------------------------------------------------------------
 
 
+#: The loss reported when a noninteger numeric value reaches an elementary
+#: alphanumeric item: the MOVE no longer compiles.
+INVALID_MOVE = "decimal places (a noninteger MOVE to an alphanumeric item is invalid)"
+
+
 @dataclass(frozen=True)
 class Capacity:
     """What a field can hold: digits on each side of the decimal point for a
@@ -107,6 +112,8 @@ class Capacity:
     decimal_digits: int = 0
     chars: int = 0
     signed: bool = False
+    #: A group item: a MOVE to it copies the sender's bytes, sign included.
+    group: bool = False
 
     def describe(self) -> str:
         if self.numeric:
@@ -139,6 +146,15 @@ class Capacity:
             # A numeric value moved to an alphanumeric item is its digits.
             if receiver.chars < self.digits:
                 lost.append("characters")
+            if not receiver.group:
+                # An elementary receiver gets the digits only: the sign is
+                # lost (#765), and a noninteger sender makes the MOVE itself
+                # invalid (IBM, GnuCOBOL: "invalid MOVE statement", #822).
+                # A group receiver copies the bytes as they are.
+                if self.signed:
+                    lost.append("sign")
+                if self.decimal_digits:
+                    lost.append(INVALID_MOVE)
         elif receiver.numeric:
             if receiver.integer_digits < self.chars:
                 lost.append("high-order digits")
@@ -169,7 +185,7 @@ def capacity_of(
     """The capacity of an item from its PICTURE / USAGE (a group holds its
     bytes as characters); None when it cannot be known."""
     if is_group:
-        return Capacity(False, chars=int(length or 0)) if length else None
+        return Capacity(False, chars=int(length or 0), group=True) if length else None
     if str(usage or "").upper() in _FLOAT_OR_POINTER or not picture:
         return None
     clause = PictureClause(normalize_picture(picture), SourceLocation(0, 0))
@@ -576,6 +592,10 @@ class FieldWideningAnalyzer:
                 continue
             if not isinstance(last, Capacity):
                 continue
+            if hit.path and hit.path[-1].confidence == "overlap" and not last.numeric:
+                # Bytes laid over it by a MOVE to an enclosing group: a group
+                # move, sign and decimal point included (#822).
+                last = dataclasses.replace(last, group=True)
             lost = carried_new.losses(last)
             if not lost:
                 continue

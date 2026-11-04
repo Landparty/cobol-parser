@@ -166,3 +166,63 @@ class TestDisplayScreenPhrases:
         stmt = self._display("DISPLAY BELL")
         assert stmt.display_items == ["BELL"]
         assert not stmt.is_screen_display
+
+
+class TestDisplayDataNamedLikeAScreenPhrase:
+    """#821: COLOR, POS and COL are not reserved in IBM Enterprise COBOL, so
+    a program can declare them; a declared data item is displayed, not read
+    as a screen phrase."""
+
+    def _displays(self, stmts: str):
+        source = f"""
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. DISP.
+       DATA DIVISION.
+       WORKING-STORAGE SECTION.
+       01  COLOR    PIC X(5) VALUE 'RED'.
+       01  POS      PIC 9(3) VALUE 7.
+       01  COL      PIC 9(3) VALUE 7.
+       01  WS-B     PIC X(5).
+       PROCEDURE DIVISION.
+{stmts}
+           STOP RUN.
+    """
+        result = parse_cobol(source)
+        assert not result.warnings, result.warnings
+        return result.ast.find_statements("DISPLAY")
+
+    def test_declared_names_are_items(self):
+        a, b, c = self._displays(
+            "           DISPLAY 'COLOR IS ' COLOR.\n"
+            "           DISPLAY 'AT ' POS ' AND ' COL.\n"
+            "           DISPLAY 'X' COLOR WS-B."
+        )
+        assert a.display_items == ['"COLOR IS "', "COLOR"]
+        assert b.display_items == ['"AT "', "POS", '" AND "', "COL"]
+        assert c.display_items == ['"X"', "COLOR", "WS-B"]
+        for stmt in (a, b, c):
+            assert stmt.screen_phrases == []
+            assert not stmt.is_screen_display
+
+    def test_reserved_phrase_words_still_phrases(self):
+        (stmt,) = self._displays("           DISPLAY 'Y' LINE 3 COLUMN COL.")
+        assert stmt.display_items == ['"Y"']
+        assert stmt.screen_phrases == ["LINE 3", "COLUMN COL"]
+
+    def test_lint_sees_the_references(self):
+        from cobolparser import LintAnalyzer
+
+        source = """
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. DISP.
+       DATA DIVISION.
+       WORKING-STORAGE SECTION.
+       01  COLOR    PIC X(5) VALUE 'RED'.
+       PROCEDURE DIVISION.
+           DISPLAY 'C ' COLOR.
+           STOP RUN.
+    """
+        report = LintAnalyzer().analyze(parse_cobol(source).ast)
+        assert not [
+            f for f in report.to_dict()["findings"] if "COLOR" in f.get("message", "")
+        ]

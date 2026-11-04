@@ -646,7 +646,10 @@ kinds:
   ...) -- `MOVE WS-A TO WS-B` and `MOVE WS-X TO WS-Y` match. A changed
   *literal* never matches (even for Type-2): a literal is behavior, not a
   name, so quoted substrings are protected from substitution before the
-  identifier regex runs.
+  identifier regex runs. Keywords stored as plain values are kept verbatim
+  too: the ACCEPT ... FROM source (DATE / TIME / a mnemonic), each CALL
+  argument's passing mode (BY REFERENCE / CONTENT / VALUE), and SEARCH vs
+  SEARCH ALL (#823).
 
 `_Fingerprinter` builds a hashable nested-tuple fingerprint per paragraph
 (not a flat token stream -- a flat sequence could conflate two differently-
