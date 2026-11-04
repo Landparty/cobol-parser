@@ -108,7 +108,7 @@ Verified against `python -m cobolparser <cmd> --help` on 2026-10-15. Order is
 | `dclgen-check` | `file` | — | A; +prof | `DclgenChecker` |
 | `redundancy` | `file` | `--min-clone-statements N` (3) | A; +prof | `RedundancyAnalyzer` |
 | `scan` | `[files ...]` | `--glob`..., `--files-from FILE`, `--analyzer NAME`... (`health,redundancy`), `--clones`, `--min-clone-members N` (2), `--min-clone-statements N` (3), `--workers N` (CPU count), `--encoding` (detected), `--cache-dir DIR` (off), `--format {json,sarif}` (json; sarif runs `lint`) | A without `--program` | `scan_version` report, or a SARIF log of every file's lint findings |
-| `lint` | `file` | `--rule RULE`... (all), `--min-severity {error,warning,info}` (info), `--fail-on {error,warning,info,never}` (never), `--format {json,text,sarif}` (json) | A (`--program` default: every unit); +prof | findings (or a SARIF 2.1.0 log); exit 3 on `--fail-on` |
+| `lint` | `[FILE ...]` | `--glob PATTERN`..., `--files-from FILE`, `--changed-since REF`, `--extension EXT`... (`.cbl .cob .cobol`), `--rule RULE`... (all, incl. `line-length`), `--min-severity {error,warning,info}` (info), `--fail-on {error,warning,info,never}` (never), `--format {json,text,sarif,github}` (json) | A (`--program` default: every unit); +prof (one file only) | findings (or a SARIF 2.1.0 log, or GitHub workflow commands); several files: `{files, failures, summary}`; exit 3 on `--fail-on`, 1 when a file could not be linted |
 | `data-items` | `file` | — | A; +prof | `compute_program_data_items()` |
 | `program-signature` | `file` | — | A (`--program` default: every unit); +prof | `{"signatures": [...]}` |
 | `xref` | `file` | — | A; +prof | `XrefReport` |
@@ -138,7 +138,7 @@ Subcommands that take none of the COBOL parse flags (`--source-format`,
 | `0` | Ran to completion; findings alone never change it. Analyzer subcommands exit 0 on a partial parse too, printing `warning: <file> parsed with N error(s); analysis may be incomplete` to stderr (`_parse_result_or_fail`) |
 | `1` | The CLI failed (`_fail()`): unreadable file, `ast is None`, unwritable output, a `cobol.yml` error, a missing extra, an invalid option value |
 | `2` | Argparse rejected the arguments; `parse` (incl. `--find-type`) got a recovered-but-errored parse — JSON still printed, summary on stderr (`_exit_if_partial_parse`; with `--errors` it says the errors are in the JSON instead of the re-run hint, #745); `batch` had a file with a `read_error` or `success=false`; `scan` had a file in `failures`, and `codebase-graph` / `copybook-impact` a file in the graph's `errors` (missing, unreadable or parsed with errors) -- output still written, a `warning:` on stderr, plus `error: no such file or directory: X` per missing path (`_exit_on_graph_errors`, #325, owner's option (a): any failed file, as `batch`); `gen-fixtures --strict` found unresolved items; `call-check` had a missing file (before any parse) or a file that failed to parse (after the report) |
-| `3` | `lint --fail-on` / `call-check --fail-on` / `widen-check --fail-on` threshold hit; `jcl --strict` hit an unparseable card |
+| `3` | `lint --fail-on` (any file of a multi-file run; a file that could not be linted makes it 1 instead) / `call-check --fail-on` / `widen-check --fail-on` threshold hit; `jcl --strict` hit an unparseable card |
 | `141` | stdout closed (128 + SIGPIPE) |
 
 Exit 2 on a partial parse lets scripts gating on `$?` tell a partial parse
@@ -688,7 +688,44 @@ parse, one severity-graded finding list.
   lines for caveats and failed rules, a summary line; a finding with no
   location prints as `file: severity ...`.
 * Exit: 0 completed (findings alone never change it), 1 unreadable / no AST /
-  unwritable output, 2 argparse, 3 `--fail-on` threshold hit.
+  unwritable output, 2 argparse (or no FILE/`--glob`/`--files-from`/
+  `--changed-since` at all), 3 `--fail-on` threshold hit.
+* **`--format github`**: one `::error`/`::warning`/`::notice` workflow
+  command per finding (info is `notice`; GitHub has no info level),
+  `title=cobol-lint [rule]`, placed like text output (origin file and line,
+  on-disk column when known). Paths are made relative to `$GITHUB_WORKSPACE`
+  (else the cwd) when inside it (`_github_path`); values are escaped
+  (`_github_escape`: `%`, CR, LF; `:` and `,` in properties). Caveats and
+  failed rules print as plain `note:` lines. No problem matcher needed.
+* **Several files** (`_lint_many`): more than one FILE, or any of `--glob`,
+  `--files-from`, `--changed-since`. Each file runs through `_lint_one`
+  isolated (`_lint_one_isolated`: `_fail`'s `SystemExit` and any exception
+  become a `failures` entry, its stderr passed through), so one bad file
+  never stops the rest. Text/github print every file's findings, then
+  `could not be linted` lines, then one total (`N finding(s) in M file(s):
+  ...`); json is `{files: [{source_file, program_id, ...report}], failures:
+  [{source_file, error}], summary: {file_count, linted, failed, total, error,
+  warning, info}}` plus `changed_since: {ref, changed_files, via_copybook}`;
+  sarif is one log with a notification per failure. Exit 1 if any file
+  failed, else 3 if any file hit `--fail-on`. `--profile` is ignored with a
+  warning. One FILE alone keeps the single-file shapes above unchanged.
+* **`--changed-since REF`** (`cli/_changed_files.py`): files changed between
+  `git merge-base REF HEAD` and the working tree (committed, staged,
+  unstaged), plus untracked non-ignored files; deletions dropped. A program
+  is linted when it changed, or when it COPYs (or `EXEC SQL INCLUDE`s) a
+  changed copybook at any depth (members read with `extract_copy_statements`,
+  copybooks found by name in the `--copybook-path` directories; a `note:` on
+  stderr says which copybook pulled each one in). Candidates are the
+  FILE/`--glob`/`--files-from` set when given, else every git-tracked or
+  untracked program with an `--extension` (`project.extensions`) outside the
+  copybook directories. A changed file counts as a copybook when it has no
+  program extension or sits in a copybook directory. Nothing changed: a
+  clean run, exit 0 (empty json/sarif still written). git missing, not a
+  work tree or an unknown REF: exit 1, with a hint about `fetch-depth: 0`.
+* **pre-commit**: `.pre-commit-hooks.yaml` ships `cobol-lint` (the staged
+  programs) and `cobol-lint-changed` (`--changed-since HEAD`,
+  `pass_filenames: false`, so programs using a staged copybook are linted
+  too); both default to `--fail-on error`. CI recipe: `docs/ci-lint.md`.
 * **Parse errors are findings** (#249): a partial AST lints quietly, so
   `_cmd_lint` runs `add_parse_errors()` over `result.errors` before the
   source map and the severity filter — each a `rule: "parse"`, `severity:

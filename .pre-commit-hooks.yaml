@@ -1,0 +1,32 @@
+# pre-commit hooks: lint COBOL with cobol-parser.
+# Use them from another repository's .pre-commit-config.yaml:
+#
+#   - repo: https://github.com/landparty/cobol-parser
+#     rev: v3.4.0              # a cobol-parser release tag with these hooks
+#     hooks:
+#       - id: cobol-lint       # the staged programs
+#         exclude: ^copybooks/ # keep copybook folders out if they use .cbl
+#
+# Both read cobol.yml (copybook paths, rules, min_severity) from the repo.
+# --fail-on error is the default gate; override it with `args:`.
+
+# The staged programs themselves.
+- id: cobol-lint
+  name: cobol-lint
+  description: Lint the staged COBOL programs with cobol-parser.
+  entry: cobol-parser lint --format text
+  args: [--fail-on, error]
+  language: python
+  files: \.(cbl|cob|cobol|CBL|COB|COBOL)$
+  require_serial: true
+
+# Everything changed since HEAD, including the programs that COPY a changed
+# copybook (which the hook above never sees). Runs once per commit.
+- id: cobol-lint-changed
+  name: cobol-lint (changed programs and their copybooks)
+  description: Lint every COBOL program changed since HEAD, plus the programs that COPY a changed copybook.
+  entry: cobol-parser lint --format text --changed-since HEAD
+  args: [--fail-on, error]
+  language: python
+  pass_filenames: false
+  files: \.(cbl|cob|cobol|cpy|copy|CBL|COB|COBOL|CPY|COPY)$

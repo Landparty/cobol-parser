@@ -1,7 +1,7 @@
 ---
 type: Module
 title: Lint Analyzer
-description: LintAnalyzer (analysis/lint.py) -- runs nine analyzers over one parse and flattens them into one severity-graded LintFinding stream; per-unit linting, caveats and failed rules, and the source-map origin stamping (apply_source_map, stamp_report_origins, fixed_format_column_offset) shared by every analyzer CLI.
+description: LintAnalyzer (analysis/lint.py) -- runs nine analyzers over one parse plus the line-length source rule and flattens them into one severity-graded LintFinding stream; per-unit linting, caveats and failed rules, and the source-map origin stamping (apply_source_map, stamp_report_origins, fixed_format_column_offset) shared by every analyzer CLI.
 tags: [analysis, lint, findings, severity, source-map, origin]
 timestamp: 2026-10-15T00:00:00Z
 ---
@@ -93,6 +93,38 @@ Recursion's `LOW` (a self-CALL into an `IS RECURSIVE` program) maps to `info`
 
 CLI: `cobol-parser lint <file.cbl>` (see cli.md), including `--format text`,
 `--min-severity`, and `--fail-on` (exit 3).
+
+## Line length (`line-length`)
+
+The one **source rule** (`SOURCE_RULES`; `ALL_RULES = RULES + SOURCE_RULES`):
+it reads the files on disk, not the AST, so `LintAnalyzer` accepts the id
+(callers pass one selection list everywhere) but never runs it.
+`add_line_length_findings(report, main_file, source_map, preprocess_fixed,
+copybooks)` does, over the program and every copybook the parse read (the
+map's files plus `expansion_copybooks`); the `lint` CLI and `scan`'s lint call
+it **after** `apply_source_map`, since its findings are placed on disk
+already (`origin` = file, line, column; `location` = the expanded line that
+file line became, else the on-disk line). Fixed or free is judged as the
+parse judged it (program: `preprocess_fixed`, else the detector; copybook:
+`_looks_fixed_format`); a free-format file, or a line after `>>SOURCE FORMAT
+FREE`, has no limit. `line_length_findings(path, text, free_lines)` per file:
+
+* `LINE_PAST_COLUMN_80` at column 81: **error**, or **warning** when everything
+  past column 72 is comment (comment line, or an inline `*>` outside a literal;
+  `_comment_start`). The record is 80 columns on the mainframe.
+* `TEXT_PAST_COLUMN_72` at column 73, **warning**: a word runs across the
+  72/73 edge (both columns non-blank), so the compiler keeps a cut word.
+  Judged as `normalize_fixed_format`'s own warning: not on a comment line or
+  inside `*>`, not a lone `.`, not a numeric stamp filling 73-80 (or a shorter
+  one under `_has_identification_stamp_convention`), and not a tail with the
+  shape of the file's own stamps (`_identification_shapes`: digits `9`,
+  letters `A`, seen on at least `MIN_ID_STAMP_EVIDENCE_LINES` lines whose
+  column 72 is blank; NIST's `IX2094.2`).
+
+On `examples/cobol/` + `tests/samples/` (566 programs): 0 errors, 86 warnings
+(all comment lines past column 80). The CLI's multi-file run reports each
+`line-length` finding once per run (`_drop_repeated_layout_findings`): a
+copybook COPYed by many programs is one fix.
 
 ## Program units
 

@@ -2975,7 +2975,7 @@ def _cmd_ims_dli(args: argparse.Namespace) -> None:
 
 
 def _build_lint_parser(subparsers: argparse._SubParsersAction) -> None:
-    from ..analysis.lint import RULES, SEVERITIES
+    from ..analysis.lint import ALL_RULES, SEVERITIES
 
     p = subparsers.add_parser(
         "lint",
@@ -2987,15 +2987,62 @@ def _build_lint_parser(subparsers: argparse._SubParsersAction) -> None:
             "  cobol-parser lint program.cbl --format text --min-severity warning\n"
             "  cobol-parser lint program.cbl --rule dead-code --rule move-type-check\n"
             "  cobol-parser lint program.cbl --copybook-path ./copybooks --fail-on error\n"
+            "  cobol-parser lint src/*.cbl --format text --fail-on error\n"
+            "  cobol-parser lint --glob 'src/**/*.cbl' --format sarif -o lint.sarif\n"
+            "  cobol-parser lint --changed-since origin/main --format github "
+            "--fail-on error\n"
+            "\nMore than one file, --glob, --files-from or --changed-since lints\n"
+            "every file in one run: text and github print each file's findings,\n"
+            "json is {files, failures, summary}, sarif is one log. A file that\n"
+            "cannot be read or parsed is reported and the others still run.\n"
             "\nExit codes:\n"
             "  0  ran to completion (findings may still have been reported)\n"
-            "  1  the file could not be read or parsed, or its output could not\n"
-            "     be written\n"
+            "  1  a file could not be read or parsed, or the output could not\n"
+            "     be written, or --changed-since could not ask git\n"
             "  2  the arguments were rejected (argparse's own usage error)\n"
             "  3  --fail-on was given and a finding at or above it was reported"
         ),
     )
-    p.add_argument("file", help="Path to the COBOL source file")
+    p.add_argument(
+        "files",
+        nargs="*",
+        metavar="FILE",
+        help="COBOL program(s) to lint",
+    )
+    p.add_argument(
+        "--glob",
+        action="append",
+        default=[],
+        metavar="PATTERN",
+        help="Also lint the files this glob matches (repeatable; ** recurses)",
+    )
+    p.add_argument(
+        "--files-from",
+        metavar="FILE",
+        help="Also lint the paths listed in FILE, one per line ('-' = stdin)",
+    )
+    p.add_argument(
+        "--changed-since",
+        metavar="REF",
+        help=(
+            "Lint only programs changed since REF (a branch, tag or commit; "
+            "compared from its merge base with HEAD, working-tree edits and "
+            "untracked files included), plus every program that COPYs a "
+            "changed copybook. Picks from FILE/--glob/--files-from when given, "
+            "else from every git-tracked program (--extension). Nothing "
+            "changed is a clean run (exit 0)."
+        ),
+    )
+    p.add_argument(
+        "--extension",
+        action="append",
+        dest="extensions",
+        metavar="EXT",
+        help=(
+            "Program extension for --changed-since, repeatable "
+            "(default: .cbl, .cob, .cobol; any case)"
+        ),
+    )
     _add_encoding_arg(p)
     _add_compact_arg(p)
     _add_source_format_args(p)
@@ -3013,11 +3060,13 @@ def _build_lint_parser(subparsers: argparse._SubParsersAction) -> None:
         "--rule",
         action="append",
         dest="rules",
-        choices=list(RULES),
+        choices=list(ALL_RULES),
         metavar="RULE",
         help=(
             "Run only this rule (repeatable). Rule ids are the analyzer "
-            "subcommand names: " + ", ".join(RULES) + ". Default: all of them."
+            "subcommand names plus line-length (fixed-format text past "
+            "column 72 or 80): " + ", ".join(ALL_RULES) + ". Default: all "
+            "of them."
         ),
     )
     p.add_argument(
@@ -3043,20 +3092,22 @@ def _build_lint_parser(subparsers: argparse._SubParsersAction) -> None:
     )
     p.add_argument(
         "--format",
-        choices=["json", "text", "sarif"],
+        choices=["json", "text", "sarif", "github"],
         default="json",
         dest="output_format",
         help=(
             "json (default) emits the full LintReport; text emits one "
             "grep-friendly 'file:line:column: severity [rule] message' line "
             "per finding plus a summary; sarif emits a SARIF 2.1.0 log "
-            "(GitHub code scanning, IDE problem panes)."
+            "(GitHub code scanning, IDE problem panes); github emits GitHub "
+            "Actions workflow commands (::error/::warning/::notice), which "
+            "annotate the pull request diff."
         ),
     )
     p.set_defaults(func=_cmd_lint)
 
 
-def _lint_text_report(report: Any, source_file: str) -> str:
+def _lint_text_report(report: Any, source_file: str, summary: bool = True) -> str:
     """Render a :class:`LintReport` as compiler-style diagnostic lines.
 
     Deliberately the same ``file:line:column: severity`` prefix an editor's
@@ -3099,11 +3150,106 @@ def _lint_text_report(report: Any, source_file: str) -> str:
         lines.append(
             f"{source_file}: note: rule {failure['rule']} did not run ({failure['error']})"
         )
-    lines.append(
-        f"{len(report.findings)} finding(s): {report.error_count} error, "
-        f"{report.warning_count} warning, {report.info_count} info "
-        f"({len(report.rules_run)} rule(s) ran)"
-    )
+    if summary:
+        lines.append(
+            f"{len(report.findings)} finding(s): {report.error_count} error, "
+            f"{report.warning_count} warning, {report.info_count} info "
+            f"({len(report.rules_run)} rule(s) ran)"
+        )
+    return "\n".join(lines)
+
+
+#: GitHub annotation level per lint severity; GitHub has no "info".
+_GITHUB_LEVELS = {"error": "error", "warning": "warning", "info": "notice"}
+
+
+def _github_escape(text: str, *, prop: bool = False) -> str:
+    """Escape *text* for a workflow command (message, or a property value)."""
+    text = text.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+    if prop:
+        text = text.replace(":", "%3A").replace(",", "%2C")
+    return text
+
+
+def _github_path(path: str) -> str:
+    """*path* relative to the workspace GitHub annotates against
+    (``$GITHUB_WORKSPACE``, else the current directory) when it is inside
+    it; an annotation on an absolute path lands nowhere."""
+    root = os.environ.get("GITHUB_WORKSPACE") or os.getcwd()
+    try:
+        relative = os.path.relpath(os.path.abspath(path), os.path.abspath(root))
+    except ValueError:  # another drive on Windows
+        return path
+    if relative.startswith(".."):
+        return path
+    return relative.replace(os.sep, "/")
+
+
+def _github_command(
+    level: str,
+    message: str,
+    *,
+    file: str | None = None,
+    line: int | None = None,
+    column: int | None = None,
+    title: str | None = None,
+) -> str:
+    props: list[str] = []
+    if file is not None:
+        props.append(f"file={_github_escape(_github_path(file), prop=True)}")
+    if line is not None:
+        props.append(f"line={line}")
+    if column is not None:
+        props.append(f"col={column}")
+    if title is not None:
+        props.append(f"title={_github_escape(title, prop=True)}")
+    head = f"::{level} " + ",".join(props) if props else f"::{level}"
+    return f"{head}::{_github_escape(message)}"
+
+
+def _lint_github_report(report: Any, source_file: str, summary: bool = True) -> str:
+    """Render a :class:`LintReport` as GitHub Actions workflow commands.
+
+    One ``::error`` / ``::warning`` / ``::notice`` per finding (info maps to
+    notice), placed like the text report: the file and line it is really on
+    (a copybook, when it came from one) and the on-disk column when known.
+    GitHub turns them into annotations on the pull request diff, with no
+    problem matcher to install. Caveats and rules that did not run print as
+    plain ``note:`` lines in the log, as in the text report.
+    """
+    lines: list[str] = []
+    for finding in report.findings:
+        file = source_file
+        line: int | None = None
+        column: int | None = None
+        if finding.location is not None:
+            if finding.origin_file is not None and finding.origin_line is not None:
+                file, line = finding.origin_file, finding.origin_line
+            else:
+                line = finding.location.line
+            column = finding.origin_column
+        lines.append(
+            _github_command(
+                _GITHUB_LEVELS.get(finding.severity, "warning"),
+                finding.message,
+                file=file,
+                line=line,
+                column=column,
+                title=f"cobol-lint [{finding.rule}]",
+            )
+        )
+    for caveat in report.caveats:
+        lines.append(f"{source_file}: note: {caveat}")
+    for failure in report.failed_rules:
+        lines.append(
+            f"{source_file}: note: rule {failure['rule']} did not run ({failure['error']})"
+        )
+    if summary:
+        lines.append(
+            f"{len(report.findings)} finding(s): {report.error_count} error, "
+            f"{report.warning_count} warning, {report.info_count} info "
+            f"({len(report.rules_run)} rule(s) ran)"
+        )
     return "\n".join(lines)
 
 
@@ -3174,9 +3320,14 @@ def _severity_at_least(severity: str, threshold: str) -> bool:
     return SEVERITIES.index(severity) <= SEVERITIES.index(threshold)
 
 
-def _cmd_lint(args: argparse.Namespace) -> None:
+def _lint_one(args: argparse.Namespace) -> tuple[Any, Any, Any]:
+    """Lint ``args.file``: ``(report, prof, ast)``, the report filtered by
+    ``--min-severity`` and every finding placed on disk. Exits 1 through
+    :func:`_fail` when the file cannot be read or parsed at all."""
     from ..analysis.lint import (
+        LINE_LENGTH_RULE,
         LintAnalyzer,
+        add_line_length_findings,
         add_parse_errors,
         apply_source_map,
         filter_by_severity,
@@ -3185,15 +3336,19 @@ def _cmd_lint(args: argparse.Namespace) -> None:
     result, prof = _parse_result_or_fail(args)
     ast = result.ast
 
+    selected = getattr(args, "rules", None)
     try:
-        analyzer = LintAnalyzer(getattr(args, "rules", None))
+        analyzer = LintAnalyzer(selected)
     except (
         ValueError
     ) as e:  # unreachable via argparse choices; direct callers can hit it
         _fail(str(e))
 
     report = analyzer.analyze(
-        ast, copybook_item_names=_lint_copybook_item_names(args, ast)
+        ast,
+        copybook_item_names=(
+            _lint_copybook_item_names(args, ast) if analyzer.rules else None
+        ),
     )
     # A partial AST lints quietly, so the errors it was recovered from are
     # findings of their own: --fail-on then sees them (#249).
@@ -3201,7 +3356,8 @@ def _cmd_lint(args: argparse.Namespace) -> None:
     # With --copybook-path the analyzers ran over expanded text, so every
     # location counts expanded lines. The expander's own map turns each one
     # back into the file and line a reader can open.
-    source_map = getattr(result, "expansion_source_map", None)
+    expansion_map = getattr(result, "expansion_source_map", None)
+    source_map = expansion_map
     if not source_map:
         # Nothing expanded: every line is this file's own. Mapped anyway, so
         # JSON carries the on-disk column in `origin` exactly as the
@@ -3215,21 +3371,79 @@ def _cmd_lint(args: argparse.Namespace) -> None:
     # on a fixed-format line; the offset turns them back into the column an
     # editor shows (#301).
     apply_source_map(report, source_map, _lint_column_offset(args))
+    if selected is None or LINE_LENGTH_RULE in selected:
+        # After the map: these findings are placed on disk already.
+        add_line_length_findings(
+            report,
+            args.file,
+            expansion_map,
+            _source_format_kwargs(args)["preprocess_fixed"],
+            getattr(result, "expansion_copybooks", None) or (),
+        )
     report.findings = filter_by_severity(report.findings, args.min_severity)
 
-    if args.output_format == "text":
+    for failure in report.failed_rules:
+        print(
+            f"warning: lint rule {failure['rule']} did not run: {failure['error']}",
+            file=sys.stderr,
+        )
+    return report, prof, ast
+
+
+def _lint_fails(report: Any, fail_on: str) -> bool:
+    """True when *report* holds a finding at or above *fail_on*."""
+    if fail_on == "never":
+        return False
+    worst = report.worst_severity()
+    return worst is not None and _severity_at_least(worst, fail_on)
+
+
+def _lint_wants_many(args: argparse.Namespace) -> bool:
+    """Whether this run is the multi-file form (anything but one FILE)."""
+    return bool(
+        len(args.files) != 1
+        or args.glob
+        or getattr(args, "files_from", None)
+        or getattr(args, "changed_since", None)
+    )
+
+
+def _cmd_lint(args: argparse.Namespace) -> None:
+    if not _lint_wants_many(args):
+        args.file = args.files[0]
+        _lint_single(args)
+        return
+    if not (
+        args.files
+        or args.glob
+        or getattr(args, "files_from", None)
+        or getattr(args, "changed_since", None)
+    ):
+        print(
+            "error: lint needs a FILE, --glob, --files-from or --changed-since",
+            file=sys.stderr,
+        )
+        sys.exit(2)
+    _lint_many(args)
+
+
+def _lint_single(args: argparse.Namespace) -> None:
+    """One FILE: the report shapes ``lint`` has always printed."""
+    report, prof, ast = _lint_one(args)
+
+    if args.output_format in ("text", "github"):
         if prof is not None:
             # The text report has nowhere to embed the profiling dict;
             # dropping it silently would make --profile look like a no-op.
             print(
                 "warning: --profile metrics are only included in --format json "
-                "output; ignoring for --format text",
+                f"output; ignoring for --format {args.output_format}",
                 file=sys.stderr,
             )
-        _text_out(
-            _lint_text_report(report, args.file),
-            getattr(args, "output", None),
+        render = (
+            _lint_text_report if args.output_format == "text" else _lint_github_report
         )
+        _text_out(render(report, args.file), getattr(args, "output", None))
     elif args.output_format == "sarif":
         from ..analysis.sarif import lint_notifications, lint_results, sarif_log
 
@@ -3244,17 +3458,225 @@ def _cmd_lint(args: argparse.Namespace) -> None:
     else:
         _emit_report(report.to_dict(), args, prof, ast)
 
-    for failure in report.failed_rules:
+    if _lint_fails(report, getattr(args, "fail_on", "never")):
+        sys.exit(3)
+
+
+def _lint_selection(args: argparse.Namespace) -> tuple[list[str], Any]:
+    """The files a multi-file lint covers, and the ``ChangeSelection`` when
+    ``--changed-since`` picked them (else ``None``)."""
+    from ._changed_files import (
+        DEFAULT_PROGRAM_EXTENSIONS,
+        ChangedFilesError,
+        changed_files,
+        program_candidates,
+        select_changed_programs,
+        tracked_files,
+    )
+
+    explicit = bool(args.files or args.glob or getattr(args, "files_from", None))
+    files = _collect_scan_files(args) if explicit else []
+    ref = getattr(args, "changed_since", None)
+    if not ref:
+        return files, None
+
+    extensions = tuple(getattr(args, "extensions", None) or DEFAULT_PROGRAM_EXTENSIONS)
+    copybook_dirs = list(getattr(args, "copybook_path", None) or [])
+    try:
+        changed = changed_files(ref)
+        candidates = (
+            files
+            if explicit
+            else program_candidates(tracked_files(), extensions, copybook_dirs)
+        )
+    except ChangedFilesError as exc:
+        _fail(f"--changed-since: {exc}")
+    selection = select_changed_programs(changed, candidates, copybook_dirs, extensions)
+    for program, members in selection.via_copybook.items():
         print(
-            f"warning: lint rule {failure['rule']} did not run: {failure['error']}",
+            f"note: {program}: linted because it copies changed "
+            f"copybook(s) {', '.join(members)}",
+            file=sys.stderr,
+        )
+    return selection.programs, selection
+
+
+def _lint_one_isolated(
+    args: argparse.Namespace, path: str
+) -> tuple[Any, Any, str | None]:
+    """Lint one file of a multi-file run: ``(report, ast, None)``, or
+    ``(None, None, why)`` when it could not be linted. Its diagnostics still
+    reach stderr; a failure never stops the other files."""
+    import contextlib
+    import io
+
+    one = argparse.Namespace(**vars(args))
+    one.file = path
+    one.profile = False
+    one.profile_top_n = _DEFAULT_PROFILE_TOP_N
+    one.profile_output = None
+    captured = io.StringIO()
+    try:
+        with contextlib.redirect_stderr(captured):
+            report, _prof, ast = _lint_one(one)
+    except SystemExit as exc:
+        sys.stderr.write(captured.getvalue())
+        errors = [
+            line[len("error: ") :]
+            for line in captured.getvalue().splitlines()
+            if line.startswith("error: ")
+        ]
+        return None, None, (errors[-1] if errors else f"exit {exc.code}")
+    except Exception as exc:  # noqa: BLE001 -- one file must not end the run
+        sys.stderr.write(captured.getvalue())
+        print(f"error: {path}: {type(exc).__name__}: {exc}", file=sys.stderr)
+        return None, None, f"{type(exc).__name__}: {exc}"
+    sys.stderr.write(captured.getvalue())
+    return report, ast, None
+
+
+def _drop_repeated_layout_findings(linted: list[tuple[str, Any, Any]]) -> None:
+    """Keep each ``line-length`` finding once per run.
+
+    It is a fact about a line of a file, not about the program that read it:
+    a copybook COPYed by twenty linted programs would otherwise print the
+    same finding twenty times. The first program to report it keeps it.
+    """
+    from pathlib import Path
+
+    from ..analysis.lint import LINE_LENGTH_RULE
+
+    seen: set[tuple[str, int | None, str | None]] = set()
+    for _path, report, _ast in linted:
+        kept = []
+        for finding in report.findings:
+            if finding.rule == LINE_LENGTH_RULE and finding.origin_file:
+                key = (
+                    str(Path(finding.origin_file).resolve()),
+                    finding.origin_line,
+                    finding.kind,
+                )
+                if key in seen:
+                    continue
+                seen.add(key)
+            kept.append(finding)
+        report.findings = kept
+
+
+def _lint_many(args: argparse.Namespace) -> None:
+    """Several files in one run; see the ``lint`` epilog for the shapes."""
+    if _profiling_requested(args):
+        print(
+            "warning: --profile is only supported when linting one file; ignoring",
+            file=sys.stderr,
+        )
+    files, selection = _lint_selection(args)
+    if not files and selection is None:
+        _fail("No input files: the FILE arguments, --glob and --files-from named none.")
+    if not files:
+        print(
+            f"note: no COBOL program changed since {args.changed_since}; "
+            "nothing to lint",
             file=sys.stderr,
         )
 
+    linted: list[tuple[str, Any, Any]] = []
+    failures: list[tuple[str, str]] = []
+    for path in files:
+        report, ast, why = _lint_one_isolated(args, path)
+        if report is None:
+            failures.append((path, why or "could not be linted"))
+        else:
+            linted.append((path, report, ast))
+
+    _drop_repeated_layout_findings(linted)
+
+    fmt = args.output_format
+    output = getattr(args, "output", None)
+    totals = {
+        "error": sum(r.error_count for _, r, _ in linted),
+        "warning": sum(r.warning_count for _, r, _ in linted),
+        "info": sum(r.info_count for _, r, _ in linted),
+    }
+    total = sum(totals.values())
+    summary_line = (
+        f"{total} finding(s) in {len(linted)} file(s): {totals['error']} error, "
+        f"{totals['warning']} warning, {totals['info']} info"
+        + (f"; {len(failures)} file(s) could not be linted" if failures else "")
+    )
+
+    if fmt in ("text", "github"):
+        chunks: list[str] = []
+        for path, report, _ast in linted:
+            if fmt == "text":
+                chunks.append(_lint_text_report(report, path, summary=False))
+            else:
+                chunks.append(_lint_github_report(report, path, summary=False))
+        for path, why in failures:
+            if fmt == "text":
+                chunks.append(f"{path}: error [lint] could not be linted: {why}")
+            else:
+                chunks.append(
+                    _github_command(
+                        "error", f"could not be linted: {why}", file=path, title="lint"
+                    )
+                )
+        chunks.append(summary_line)
+        _text_out("\n".join(c for c in chunks if c), output)
+    elif fmt == "sarif":
+        from ..analysis.sarif import (
+            SarifNotification,
+            lint_notifications,
+            lint_results,
+            sarif_log,
+        )
+
+        results = []
+        notes = []
+        for path, report, _ast in linted:
+            data = report.to_dict()
+            results += lint_results(data, path)
+            notes += lint_notifications(data, path)
+        notes += [
+            SarifNotification(
+                message=f"could not be linted: {why}", level="error", file=path
+            )
+            for path, why in failures
+        ]
+        _json_out(sarif_log(results, notes), args.compact, output)
+    else:
+        entries = []
+        for path, report, ast in linted:
+            one = argparse.Namespace(file=path)
+            entry = _identification(one, ast)
+            entry.update(report.to_dict())
+            entries.append(entry)
+        document: dict[str, Any] = {
+            "files": entries,
+            "failures": [{"source_file": path, "error": why} for path, why in failures],
+            "summary": {
+                "file_count": len(files),
+                "linted": len(linted),
+                "failed": len(failures),
+                "total": total,
+                **totals,
+            },
+        }
+        if selection is not None:
+            document["changed_since"] = {
+                "ref": args.changed_since,
+                "changed_files": selection.changed,
+                "via_copybook": selection.via_copybook,
+            }
+        _json_out(document, args.compact, output)
+
+    if fmt not in ("text", "github"):
+        print(summary_line, file=sys.stderr)
+    if failures:
+        sys.exit(1)
     fail_on = getattr(args, "fail_on", "never")
-    if fail_on != "never":
-        worst = report.worst_severity()
-        if worst is not None and _severity_at_least(worst, fail_on):
-            sys.exit(3)
+    if any(_lint_fails(report, fail_on) for _, report, _ in linted):
+        sys.exit(3)
 
 
 # -- Subcommand: data-items ----------------------------------------------------

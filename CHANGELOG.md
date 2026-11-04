@@ -9,6 +9,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+* **`lint` for CI.** `lint` takes many files in one run (`FILE...`,
+  `--glob`, `--files-from`): one exit code (1 if a file could not be linted,
+  else 3 on `--fail-on`), one total, json `{files, failures, summary}`, one
+  SARIF log. `--changed-since REF` lints only the programs changed since REF
+  (working-tree and untracked files included) plus every program that COPYs
+  a changed copybook, at any depth. `--format github` prints GitHub Actions
+  annotations. `.pre-commit-hooks.yaml` ships `cobol-lint` and
+  `cobol-lint-changed`. Guide: `docs/ci-lint.md`.
+* **`line-length` lint rule.** Fixed-format text past column 80 (error; a
+  warning when only comment text) and a word cut at column 72 (warning), in
+  the program and every copybook it reads. Sequence numbers and a file's own
+  identification stamps in columns 73-80 are not flagged. Runs in `lint` and
+  `scan`'s lint, and `--rule line-length` / `lint.rules` select it.
+
 * **Screen `DISPLAY` phrases are parsed.** `AT 0101`, `AT LINE n COLUMN m`,
   `LINE` / `COL` / `POSITION` with a literal or data name, `WITH HIGHLIGHT`,
   `BLANK SCREEN`, `FOREGROUND-COLOR IS n` and the other attributes go into

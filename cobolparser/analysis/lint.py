@@ -41,7 +41,7 @@ Two properties matter more than breadth here:
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -70,7 +70,19 @@ RULES: tuple[str, ...] = (
     "sql-cics-check",
 )
 
-_RULE_ORDER: dict[str, int] = {name: order for order, name in enumerate(RULES)}
+#: Rule id of the fixed-format layout check (:func:`add_line_length_findings`).
+#: It reads the files on disk rather than the AST, so it is not one of the
+#: :class:`LintAnalyzer` rules above; the ``lint`` CLI and ``scan`` run it
+#: next to them, and ``--rule`` selects it like any other.
+LINE_LENGTH_RULE = "line-length"
+
+#: Rules that check the source text itself rather than the parsed program.
+SOURCE_RULES: tuple[str, ...] = (LINE_LENGTH_RULE,)
+
+#: Every rule id a caller can select: the AST rules, then the source rules.
+ALL_RULES: tuple[str, ...] = RULES + SOURCE_RULES
+
+_RULE_ORDER: dict[str, int] = {name: order for order, name in enumerate(ALL_RULES)}
 
 # I/O sequencing: every kind but one describes an operation that fails at
 # run time (reading a file that was never opened, closing it twice). The
@@ -261,12 +273,12 @@ def _sort_key(finding: LintFinding) -> tuple[int, int, int, int, str]:
     byte-identical output.
     """
     if finding.location is None:
-        return (1, 0, 0, _RULE_ORDER.get(finding.rule, len(RULES)), finding.message)
+        return (1, 0, 0, _RULE_ORDER.get(finding.rule, len(ALL_RULES)), finding.message)
     return (
         0,
         finding.location.line,
         finding.location.column,
-        _RULE_ORDER.get(finding.rule, len(RULES)),
+        _RULE_ORDER.get(finding.rule, len(ALL_RULES)),
         finding.message,
     )
 
@@ -518,6 +530,267 @@ def source_column_offsets(
     return column_offset
 
 
+def _comment_start(line: str, indicators: Iterable[str]) -> int | None:
+    """0-based column where a fixed-format line's comment starts: 6 for a
+    comment line (indicator column), the ``*>`` of an inline comment outside
+    any literal, else ``None``."""
+    if len(line) > 6 and line[6] in indicators:
+        return 6
+    quote: str | None = None
+    for position in range(7, len(line) - 1):
+        ch = line[position]
+        if quote is not None:
+            if ch == quote:
+                quote = None
+        elif ch in "'\"":
+            quote = ch
+        elif ch == "*" and line[position + 1] == ">":
+            return position
+    return None
+
+
+def _id_shape(tail: str) -> str:
+    """The shape of an identification-area tail: digits as ``9``, letters as
+    ``A``, anything else as itself (``IX2094.2`` -> ``AA9999.9``)."""
+    return "".join("9" if ch.isdigit() else "A" if ch.isalpha() else ch for ch in tail)
+
+
+def _identification_shapes(lines: list[str]) -> set[str]:
+    """Tail shapes this file demonstrably stamps into columns 73-80.
+
+    Evidence is only a line no word can have been cut on: column 72 blank,
+    something in 73-80, nothing past 80. A shape seen on at least
+    ``MIN_ID_STAMP_EVIDENCE_LINES`` such lines is the file's convention (a
+    per-member id, a change tag), so the same shape right after a non-blank
+    column 72 is that stamp abutting the code, not the rest of a word. The
+    file-level generalization of ``_has_identification_stamp_convention``
+    to stamps that are not purely numeric.
+    """
+    from collections import Counter
+
+    from ..preprocess._normalize import (
+        IDENTIFICATION_END_COL,
+        MIN_ID_STAMP_EVIDENCE_LINES,
+        TEXT_END_COL,
+    )
+
+    counts: Counter[str] = Counter()
+    for raw in lines:
+        line = raw.rstrip("\r\n").expandtabs(8)
+        width = len(line.rstrip())
+        if width <= TEXT_END_COL or width > IDENTIFICATION_END_COL:
+            continue
+        if not line[TEXT_END_COL - 1].isspace():
+            continue
+        tail = line[TEXT_END_COL:].strip()
+        if tail:
+            counts[_id_shape(tail)] += 1
+    return {shape for shape, n in counts.items() if n >= MIN_ID_STAMP_EVIDENCE_LINES}
+
+
+def line_length_findings(
+    path: str, text: str, free_lines: list[bool] | None = None
+) -> list[LintFinding]:
+    """The ``line-length`` findings of one fixed-format file, on its own lines.
+
+    Two problems, both silent to the compiler and to the parse:
+
+    * **Past column 80** (error, ``kind`` ``LINE_PAST_COLUMN_80``): a
+      fixed-format record is 80 columns. Anything after column 80 is lost
+      when the member goes to a mainframe library (an RECFM=FB LRECL=80
+      dataset), and was never program text anyway. A line whose text past
+      column 72 is all comment (a comment line, or an inline ``*>`` comment)
+      is a warning instead: the transfer truncates it all the same, but
+      nothing the compiler reads is lost.
+    * **Text cut at column 72** (warning, ``kind`` ``TEXT_PAST_COLUMN_72``):
+      columns 73-80 are the identification area, which the compiler ignores.
+      When a word runs across the 72/73 boundary, the part in 73+ is dropped
+      without a message and the word that remains is a different word (a
+      data name, a literal, a verb). Judged exactly as
+      ``normalize_fixed_format`` judges it for its own warning: a numeric
+      identification stamp (the full 73-80 field, or a shorter one when the
+      file shows that convention) and a lone terminating period are not
+      flagged, and neither is a comment line or a cut inside an inline
+      ``*>`` comment. Neither is a tail with the
+      shape of the file's own identification stamps (NIST's ``IX2094.2``,
+      see :func:`_identification_shapes`).
+
+    *free_lines* flags the lines after a ``>>SOURCE FORMAT FREE`` (see
+    :func:`~cobolparser._source_directive.free_format_flags`); those have no
+    column limit here. Every finding carries its on-disk file, line and
+    column in both ``location`` and ``origin``, so no source map is needed.
+    """
+    from .._lines import split_source_lines
+    from ..preprocess._normalize import (
+        ALL_COMMENT_INDICATORS,
+        IDENTIFICATION_END_COL,
+        TEXT_END_COL,
+        _has_identification_stamp_convention,
+        _is_numeric_id_stamp_text,
+    )
+
+    lines = split_source_lines(text)
+    stamps: bool | None = None
+    shapes: set[str] | None = None
+    findings: list[LintFinding] = []
+
+    def found(
+        line_no: int, column: int, severity: str, kind: str, message: str
+    ) -> None:
+        findings.append(
+            LintFinding(
+                rule=LINE_LENGTH_RULE,
+                severity=severity,
+                message=message,
+                location=SourceLocation(line=line_no, column=column),
+                kind=kind,
+                origin_file=path,
+                origin_line=line_no,
+                origin_column=column,
+            )
+        )
+
+    for index, raw in enumerate(lines):
+        if free_lines is not None and index < len(free_lines) and free_lines[index]:
+            continue
+        line = raw.rstrip("\r\n").expandtabs(8)
+        width = len(line.rstrip())
+        if width <= TEXT_END_COL:
+            continue
+        line_no = index + 1
+        comment_at = _comment_start(line, ALL_COMMENT_INDICATORS)
+        if width > IDENTIFICATION_END_COL:
+            # Past column 80 only inside a comment loses nothing the
+            # compiler reads: still worth fixing, never worth failing a build.
+            in_comment = comment_at is not None and comment_at < IDENTIFICATION_END_COL
+            found(
+                line_no,
+                IDENTIFICATION_END_COL + 1,
+                "warning" if in_comment else "error",
+                "LINE_PAST_COLUMN_80",
+                f"line is {width} columns long; a fixed-format record ends at "
+                f"column {IDENTIFICATION_END_COL}, so columns "
+                f"{IDENTIFICATION_END_COL + 1}-{width} are lost"
+                + (" (comment text only)" if in_comment else ""),
+            )
+        if comment_at is not None and comment_at < TEXT_END_COL:
+            continue
+        before, after = line[TEXT_END_COL - 1], line[TEXT_END_COL]
+        if before.isspace() or after.isspace():
+            continue
+        dropped = line[TEXT_END_COL:IDENTIFICATION_END_COL].rstrip()
+        if dropped == ".":
+            continue
+        if _is_numeric_id_stamp_text(dropped):
+            if width == IDENTIFICATION_END_COL:
+                continue
+            if stamps is None:
+                stamps = _has_identification_stamp_convention(lines)
+            if stamps and width <= IDENTIFICATION_END_COL:
+                continue
+        if shapes is None:
+            shapes = _identification_shapes(lines)
+        if _id_shape(dropped.strip()) in shapes:
+            # The file's own identification-area convention (NIST's
+            # ``IX2094.2``): the stamp abuts column 72, nothing is cut.
+            continue
+        found(
+            line_no,
+            TEXT_END_COL + 1,
+            "warning",
+            "TEXT_PAST_COLUMN_72",
+            f"text runs past column {TEXT_END_COL}: {dropped!r} is in the "
+            "identification area (columns 73-80), which the compiler ignores, "
+            "so the word it ends is cut short",
+        )
+    return findings
+
+
+def add_line_length_findings(
+    report: LintReport,
+    main_file: str,
+    source_map: dict[int, tuple[str, int]] | None = None,
+    preprocess_fixed: bool | None = None,
+    copybooks: Iterable[str] = (),
+) -> LintReport:
+    """Run the ``line-length`` rule over *main_file* and every copybook its
+    parse read, and merge the findings into *report*.
+
+    Run it AFTER :func:`apply_source_map`: these findings are placed on disk
+    already, and the map would re-place them by their line number. Each file
+    is judged fixed or free the way the parse judged it (the program by
+    *preprocess_fixed*, else the detector; a copybook as the expander did); a
+    free-format file has no column limit and is skipped. A finding inside a
+    copybook names the copybook. Its ``location`` is the expanded-text line
+    that copybook line became, when *source_map* has one, so the report keeps
+    sorting by the listing; otherwise the on-disk line (``origin`` is always
+    the on-disk place, and what text and SARIF output print).
+
+    *copybooks* adds members the map does not show (one that only COPYs
+    another adds no line of its own). A file that cannot be read again is
+    skipped. Modified in place and returned.
+    """
+    from pathlib import Path
+
+    from .._lines import split_source_lines
+    from .._source_directive import free_format_flags
+    from ..preprocess import PreprocessingError, strip_compiler_directives
+    from ..preprocess.copybook_expander import (
+        _looks_fixed_format,
+        read_program_source,
+    )
+    from ..preprocess.source_format import detect_fixed_format
+
+    def key(path: str) -> str:
+        try:
+            return str(Path(path).resolve())
+        except OSError:
+            return path
+
+    files: dict[str, str] = {key(main_file): main_file}
+    for name, _ in (source_map or {}).values():
+        files.setdefault(key(name), name)
+    for name in copybooks:
+        files.setdefault(key(name), name)
+    # (file, line) -> the first expanded line it became.
+    listing: dict[tuple[str, int], int] = {}
+    for expanded, (name, line) in sorted((source_map or {}).items()):
+        listing.setdefault((key(name), line), expanded)
+
+    main_key = key(main_file)
+    added: list[LintFinding] = []
+    for file_key, name in files.items():
+        try:
+            text = read_program_source(name)
+        except (OSError, PreprocessingError):
+            continue
+        if file_key == main_key:
+            fixed = (
+                bool(preprocess_fixed)
+                if preprocess_fixed is not None
+                else detect_fixed_format(strip_compiler_directives(text))
+            )
+        else:
+            fixed = _looks_fixed_format(text)
+        if not fixed:
+            continue
+        flags = free_format_flags(split_source_lines(text))
+        for finding in line_length_findings(name, text, flags):
+            assert finding.location is not None and finding.origin_line is not None
+            listing_line = listing.get((file_key, finding.origin_line))
+            if listing_line is not None:
+                finding.location = SourceLocation(
+                    line=listing_line, column=finding.location.column
+                )
+            added.append(finding)
+
+    if LINE_LENGTH_RULE not in report.rules_run:
+        report.rules_run.append(LINE_LENGTH_RULE)
+    if added:
+        report.findings = _deduplicate(sorted(report.findings + added, key=_sort_key))
+    return report
+
+
 #: The location-shaped keys :func:`stamp_report_origins` stamps, each with
 #: the sibling key its origin goes under. A ``"location"`` keeps the plain
 #: ``"origin"`` every consumer already reads; the rest name their own, since
@@ -587,8 +860,11 @@ class LintAnalyzer:
         if unknown:
             raise ValueError(
                 f"unknown lint rule(s): {', '.join(sorted(unknown))} "
-                f"(expected one of {', '.join(RULES)})"
+                f"(expected one of {', '.join(ALL_RULES)})"
             )
+        # A source rule (line-length) is accepted so a caller can pass one
+        # selection list everywhere, but it is not run here: it reads files
+        # on disk, which an AST does not carry. See add_line_length_findings.
         # Deduplicated and put back into RULES order, so `--rule complexity
         # --rule dead-code` and the reverse produce the same report.
         self._rules = tuple(r for r in RULES if r in set(selected))

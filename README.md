@@ -96,14 +96,19 @@ cobol-parser lint prog.cbl --format text
 prog.cbl:5:8: warning [unused-variables] WORKING-STORAGE item WS-NEVER-USED (level 01) is never referenced in the PROCEDURE DIVISION
 prog.cbl:10:12: error [move-type-check] Illegal MOVE: cannot move NUMERIC item 'WS-COUNTER' to ALPHABETIC item 'WS-ALPHA'
 prog.cbl:12:8: warning [dead-code] paragraph ORPHAN-PARA can never be reached
-3 finding(s): 1 error, 2 warning, 0 info (9 rule(s) ran)
+3 finding(s): 1 error, 2 warning, 0 info (10 rule(s) ran)
 ```
 
 `lint` runs nine analyzers over one parse: dead code, unused variables, MOVE
 type checks, I/O sequencing, LINKAGE checks, recursion risk, complexity,
-DCLGEN and SQL/CICS checks. `--rule` narrows the run, `--min-severity` the
-output, and `--fail-on error` exits 3 when a finding at that severity was
-reported, so it can gate a build. Each analyzer is also its own subcommand
+DCLGEN and SQL/CICS checks, plus `line-length` (fixed-format text past
+column 80, or a word cut at column 72, in the program and its copybooks).
+`--rule` narrows the run, `--min-severity` the output, and `--fail-on error`
+exits 3 when a finding at that severity was reported, so it can gate a build.
+It takes many files at once, `--changed-since origin/main` lints only the
+programs a change touched (and those that COPY a changed copybook), and
+`--format github` annotates the pull request. CI recipe and pre-commit hooks:
+[`docs/ci-lint.md`](docs/ci-lint.md). Each analyzer is also its own subcommand
 (`dead-code`, `xref`, `program-flow`, `complexity`, `health`, ...).
 
 ### Check a whole codebase
