@@ -308,13 +308,13 @@ def _lint_rules(value: Any, source: Path) -> tuple[str, ...]:
     # Imported here rather than at module scope: `cobolparser.config` is
     # imported by other tools purely to read a file, and should not drag the
     # whole analysis package in with it.
-    from ..analysis.lint import RULES
+    from ..analysis.lint import ALL_RULES
 
-    unknown = sorted(set(rules) - set(RULES))
+    unknown = sorted(set(rules) - set(ALL_RULES))
     if unknown:
         raise ConfigError(
             f"{source}: unknown lint rule(s): {', '.join(unknown)} "
-            f"(recognized: {', '.join(RULES)})"
+            f"(recognized: {', '.join(ALL_RULES)})"
         )
     return rules
 

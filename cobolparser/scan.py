@@ -483,6 +483,7 @@ def _lint_file(
     from .analysis.lint import (
         LintAnalyzer,
         LintReport,
+        add_line_length_findings,
         add_parse_errors,
         apply_source_map,
         source_column_offsets,
@@ -499,6 +500,14 @@ def _lint_file(
             }
         apply_source_map(
             report, source_map, source_column_offsets(path, options.preprocess_fixed)
+        )
+        # After the map: line-length findings are placed on disk already.
+        add_line_length_findings(
+            report,
+            path,
+            getattr(result, "expansion_source_map", None),
+            options.preprocess_fixed,
+            getattr(result, "expansion_copybooks", None) or (),
         )
     except Exception as exc:  # noqa: BLE001 -- see the module docstring
         report = LintReport(

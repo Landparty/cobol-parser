@@ -8,6 +8,7 @@ Where each kind of documentation lives, so a fact is written down once.
 |---|---|
 | [mcp-server.md](mcp-server.md) | `cobol-parser mcp`: install, connect a client, every tool and prompt, how to read an answer |
 | [project-config.md](project-config.md) | `cobol.yml`: where it is looked for, every key and which subcommands it fills |
+| [ci-lint.md](ci-lint.md) | Linting in CI: many files, `--changed-since`, GitHub annotations, the `line-length` rule, a workflow and pre-commit hooks |
 | [fixture-bundle-schema.md](fixture-bundle-schema.md) | The JSON bundle `gen-fixtures` writes, field by field |
 | [enterprise-program-types.md](enterprise-program-types.md) | The IBM Enterprise COBOL program-type corpus and what each program proves |
 | [feature-ideas.md](feature-ideas.md) | The idea backlog, with what has shipped marked |

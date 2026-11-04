@@ -88,7 +88,7 @@ Report origins after copybook expansion: [analysis/lint.md](analysis/lint.md).
 | `ims_segment_analyzer.py` | `IMSSegmentAnalyzer`, `IMSDLICall`, `IMSEntryPoint` | [sql-cics-ims](analysis/sql-cics-ims.md) |
 | `language_env_analyzer.py` | `LanguageEnvironmentAnalyzer` | [sql-cics-ims](analysis/sql-cics-ims.md) |
 | `dialects/le_signatures.py` | `le_service_signature`, `intrinsic_signature`, `catalog_to_dict` | [sql-cics-ims](analysis/sql-cics-ims.md) |
-| `lint.py` | `LintAnalyzer`, `RULES`, `filter_by_severity`, `add_parse_errors`, `apply_source_map`, `stamp_report_origins`, `fixed_format_column_offset` | [lint](analysis/lint.md) |
+| `lint.py` | `LintAnalyzer`, `RULES`, `ALL_RULES`, `add_line_length_findings`, `line_length_findings`, `filter_by_severity`, `add_parse_errors`, `apply_source_map`, `stamp_report_origins`, `fixed_format_column_offset` | [lint](analysis/lint.md) |
 | `sarif.py` | `sarif_log`, `SarifResult`, `SarifNotification`, `lint_results`, `call_check_results` | [lint](analysis/lint.md#sarif-output) |
 | `field_lineage.py` | `FieldFlowAnalyzer` | [lineage](analysis/lineage.md) |
 | `lineage_graph.py` | `LineageGraph` | [lineage](analysis/lineage.md) |

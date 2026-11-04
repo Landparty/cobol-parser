@@ -186,7 +186,8 @@ worker's peak memory is one file's AST.
   `RedundancyAnalyzer` honouring `min_clone_statements`, `lineage` =
   `FieldFlowAnalyzer`). `lint` is in `FILE_ANALYZERS`: it runs once per
   file (it lints every unit itself) into `FileScan.reports["lint"]`
-  (serialized only when non-empty), not per unit; see
+  (serialized only when non-empty), not per unit, with the `line-length`
+  source rule run after the source map as the `lint` CLI does; see
   [analysis/lint.md](analysis/lint.md#sarif-output), which also covers
   `scan --format sarif`. `DEFAULT_ANALYZERS` = `("health", "redundancy")`:
   `health` is the grade a portfolio sorts on; `redundancy` is the only one

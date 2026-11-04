@@ -159,7 +159,7 @@ the same name on `gen-data`, `decode` and `compare`; `rows` fills `--rows` on
 
 | Key | Type |
 |-----|------|
-| `rules` | list of rule ids (`dead-code`, `unused-variables`, `move-type-check`, `io-sequence`, `linkage-check`, `recursion-check`, `complexity`, `dclgen-check`, `sql-cics-check`) |
+| `rules` | list of rule ids (`dead-code`, `unused-variables`, `move-type-check`, `io-sequence`, `linkage-check`, `recursion-check`, `complexity`, `dclgen-check`, `sql-cics-check`, `line-length`) |
 | `min_severity` | `error` \| `warning` \| `info` |
 | `fail_on` | `error` \| `warning` \| `info` \| `never` |
 
