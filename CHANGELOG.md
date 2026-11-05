@@ -358,6 +358,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Documentation
 
+* **README: every command and API entry point, with an example.** One
+  example per subcommand (all 41, in the groups `cobol-parser --help` uses)
+  and per public Python entry point (parse, copybooks, batch and scan, every
+  analyzer, codebase graph, lineage and widening, test data, JCL, CICS/DB2/IMS
+  definitions, LE catalogue, SARIF, `cobol.yml`), plus an exit-code table.
+  `tests/test_readme_examples.py` runs every one of them as written.
 * **Docs cleanup.** The README is rewritten around what the library does
   today (PyPI install and extras, `call-check`, `widen-check`, the scan
   cache, SARIF, FUNCTION-ID, the MCP server) with its stale test and coverage

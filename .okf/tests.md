@@ -60,6 +60,7 @@ tests/
   test_all_samples.py          # smoke-tests every tests/samples/*.cbl program
   test_okf_staleness_map.py    # OKF_MAP guard (see "OKF guards")
   test_okf_claims.py           # OKF content guard: the docs' claims vs the code
+  test_readme_examples.py      # every README command / Python API example, run as written (slow)
   unit/                        # 302 files: individual components (203 directly in unit/)
     test_copybook_data_generator.py  # copybook -> CSV: flattening, categories, value constraints, options, dataset surface, TestFloatValueClauses (#551)
     test_program_layout_index.py     # ProgramLayoutIndex: FD/record resolution, FD-vs-SD tagging, FileFacts, name resolution, qualified level-88 names (resolve/condition_values/gen-fixtures arms, #272), record_named(), multi-program units, from_file errors (see generators.md)
@@ -467,6 +468,16 @@ span must equal its generator's output. A failure after a code change is
 either a doc that needs a real edit or a generated span to refresh with
 `python scripts/okf_check.py --write`. Its `TestCheckerCatchesDrift` class
 pins that each check still flags the drift it exists for.
+
+`tests/test_readme_examples.py` (`integration`, `slow`, ~15 s) builds the
+project the README's examples assume (`src/`, `copybooks/`, `jcl/`,
+`proclib/`, `old/`, `defs/`, `cobol.yml`) from `tests/eval/shop/`,
+`tests/samples/enterprise/` and `tests/samples/definitions/`, then runs every
+`cobol-parser ...` line of the `bash` blocks and every `python` block between
+"Every command, with an example" and "Language coverage", in order. JCL
+examples skip without `jclparser`, `--changed-since` without `git`. A new
+README example needs no test change unless it names a sample file
+`_build_project()` does not copy.
 
 ## See also
 
