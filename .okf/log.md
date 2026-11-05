@@ -14,6 +14,19 @@ deliberate. Anything else appended to the bottom is a mistake: five
 entries, including both 2026-09-15 sections, were found there on
 2026-09-15 and moved back up.
 
+## 2026-11-05 -- hunt issues #826-#834
+
+- [analysis/fixtures-support.md](analysis/fixtures-support.md): OR
+  disjuncts isolated (#834), CALL RETURN-CODE modeled through the CALL mock
+  (#831), ODO counter in its own 01 bounded (#832), EXIT PARAGRAPH / forward
+  GO TO inside a PERFORMed range keeps invocation counts (#827).
+- DISPLAY `POSITION` screen phrase (#826); `lint --changed-since` matches a
+  COPY of a member named by its file stem (#829); `EXEC SQL DECLARE ...
+  STATEMENT` / `DECLARE VARIABLE` are not executable for WHENEVER (#830).
+  Tests in `test_display_parser.py`, `cli/test_lint_ci.py`,
+  `test_sql_whenever_references.py`, `test_invocation_counts.py`,
+  `test_scenario_verification.py`, `test_constraints_negation_and_88_values.py`.
+
 ## 2026-11-05 -- generated scenarios that never reached their branch (round 2)
 
 - [analysis/fixtures-support.md](analysis/fixtures-support.md): compound

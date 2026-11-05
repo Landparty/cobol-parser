@@ -94,9 +94,17 @@ class TestUnaryNot:
         )
         (branch,) = report.branches
         assert branch.unsupported == []
-        # NOT (A AND B) == NOT A OR NOT B: two THEN variants, one ELSE.
-        assert [(c.op, c.values) for c in branch.arms["THEN#1"]] == [("le", ("5",))]
-        assert [(c.op, c.values) for c in branch.arms["THEN#2"]] == [("ne", ("X",))]
+        # NOT (A AND B) == NOT A OR NOT B: two THEN variants, one ELSE. Each
+        # variant also negates the other disjunct, so it alone selects the
+        # arm (#834).
+        assert [(c.op, c.values) for c in branch.arms["THEN#1"]] == [
+            ("le", ("5",)),
+            ("eq", ("X",)),
+        ]
+        assert [(c.op, c.values) for c in branch.arms["THEN#2"]] == [
+            ("ne", ("X",)),
+            ("gt", ("5",)),
+        ]
         assert sorted((c.op, c.values) for c in branch.arms["ELSE"]) == [
             ("eq", ("X",)),
             ("gt", ("5",)),

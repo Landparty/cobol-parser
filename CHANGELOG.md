@@ -159,6 +159,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+* **Hunt issues #826-#834.** `DISPLAY ... POSITION n` is a screen phrase,
+  not an item (#826). Invocation counts survive an `EXIT PARAGRAPH`,
+  `EXIT SECTION` or forward GO TO that stays inside a `PERFORM A THRU B`
+  range (#827). `lint --changed-since` finds the programs that COPY a
+  changed copybook by its file stem (#829). `EXEC SQL DECLARE ... STATEMENT`
+  and `DECLARE ... VARIABLE` no longer count as executable statements for
+  WHENEVER (#830). A branch on a CALL's `RETURN-CODE` (directly or through
+  `MOVE RETURN-CODE TO field`) is driven by that CALL's mock: its fixture
+  row carries a `RETURN-CODE` column (#831). An ODO counter declared as its
+  own 01 stays inside its table's bounds (#832). The case named for one OR
+  disjunct negates the others (#834).
+
 * **Generated cases reach the branch they are named for (round 2).** A
   compound `EVALUATE TRUE` WHEN (`WHEN TYPE-R AND AGE < 18`) is modeled, and
   the WHENs after it negate it, so the case for the next `WHEN TYPE-R` no

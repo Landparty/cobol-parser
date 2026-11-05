@@ -14,6 +14,7 @@ import re
 from dataclasses import dataclass
 from typing import Any
 
+from ...models.ast_base import SourceLocation
 from ...models.data_items import CobolDataItem, ConditionNameItem
 from ...models.program import CobolProgram, CobolSection
 from ...models.statements.misc import SelectStatement
@@ -22,7 +23,9 @@ from ...preprocess import CircularReferenceError, CopybookNotFoundError
 from ...preprocess.copybook_expander import parse_cobol_with_expansion
 from .errors import ProgramLayoutError
 from .layout import (
+    FieldCategory,
     FieldSpec,
+    _link_odo_counters,
     expand_condition_values,
     flatten_record,
     layout_segment,
@@ -191,6 +194,43 @@ class ProgramLayoutIndex:
         #: True once :meth:`add_cics_interface` indexed a DFHEIBLK the
         #: program itself does not declare.
         self.synthetic_eib = False
+        #: CALL line -> the RETURN-CODE field a branch after it tests
+        #: (:meth:`call_return_code`).
+        self._call_return_codes: dict[int, ResolvedField] = {}
+
+    def call_return_code(self, line: int) -> ResolvedField:
+        """The RETURN-CODE the CALL on *line* leaves, as a field (#831).
+
+        RETURN-CODE is a special register (binary, ``S9(4)``), not a declared
+        item; after a CALL it holds what the callee set, which a CALL mock
+        supplies. Each call site gets its own field (qualified name
+        ``CALL@<line>.RETURN-CODE``) so a scenario's witness sets it for the
+        one CALL whose result the program tests.
+        """
+        found = self._call_return_codes.get(line)
+        if found is None:
+            spec = FieldSpec(
+                name="RETURN-CODE",
+                path=(f"CALL@{line}", "RETURN-CODE"),
+                column="RETURN-CODE",
+                level=1,
+                picture="S9(4)",
+                usage="BINARY",
+                category=FieldCategory.NUMERIC,
+                size=4,
+                integer_digits=4,
+                decimal_digits=0,
+                is_signed=True,
+                total_digits=4,
+            )
+            record = CobolDataItem("RETURN-CODE", 1, SourceLocation(line, 1))
+            found = ResolvedField(spec=spec, section="special", record=record)
+            self._call_return_codes[line] = found
+        return found
+
+    def call_return_code_at(self, line: int | None) -> ResolvedField | None:
+        """The RETURN-CODE field of the CALL on *line*, if a branch tests it."""
+        return self._call_return_codes.get(line) if line is not None else None
 
     # -- construction ------------------------------------------------------
 
@@ -529,8 +569,26 @@ class ProgramLayoutIndex:
                 self._section_records[attr] = records
                 for record in records:
                     self._index_record(record, attr)
+            self._link_odo_counters_across_records()
 
         self._collect_file_facts(ast)
+
+    def _link_odo_counters_across_records(self) -> None:
+        """Bound an ODO counter declared outside its table's record.
+
+        ``flatten_record`` stamps ``odo_counter_bounds`` within one record;
+        the usual WORKING-STORAGE layout gives the counter its own 01
+        (``01 WS-CNT PIC 99.`` / ``01 WS-TAB. 05 E OCCURS 1 TO 5 DEPENDING
+        ON WS-CNT``), so it never got the table's bounds and scenarios fed
+        it 0 or 99 (#832). Re-run the linking over every indexed field, so
+        the counter is stamped wherever it is declared (``OF`` qualifiers
+        still honoured).
+        """
+        specs = [
+            entry.spec for entries in self._name_index.values() for entry in entries
+        ]
+        if any(spec.odo_controls for spec in specs):
+            _link_odo_counters(list({id(spec): spec for spec in specs}.values()))
 
     def _index_record(self, record: CobolDataItem, section: str) -> None:
         self._records_by_name.setdefault(record.name.upper(), []).append(

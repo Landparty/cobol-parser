@@ -695,6 +695,23 @@ cleaning pass that recombines `NOT`-prefixed operators. Without that, `IF WS-X
 >= 5` parses as `GREATER` with right operand `= 5` for every consumer of
 `build_condition_expression`.
 
+### OR disjuncts and CALL RETURN-CODE (2026-11-05)
+
+* Each variant of an OR is isolated (`_isolate_disjuncts`): the variant for
+  one disjunct also carries the negation of every other disjunct, so a
+  scenario named for `A OR B`'s `B` does not satisfy `A` too.
+  `BranchConstraints.disjunct_lengths` records how many constraints are the
+  arm's own, and the scenario name uses only those (#834).
+* A comparison on `RETURN-CODE`, or on a field whose last write is
+  `MOVE RETURN-CODE TO field`, after a CALL in the same paragraph
+  constrains that CALL's synthetic field `CALL@<line>.RETURN-CODE`
+  (`ProgramLayoutIndex.call_return_code`, `S9(4)` binary). The CALL's
+  fixture row then gets a `RETURN-CODE` column: the scenario's witness, else
+  `0`. Any other RETURN-CODE read is unsupported: "RETURN-CODE is modeled
+  only in an IF after a CALL in the same paragraph" (#831).
+* An OCCURS DEPENDING ON counter declared as its own 01 gets its table's
+  bounds too (`_link_odo_counters_across_records`, #832).
+
 ## ConstantFolder
 
 Phase 7 tier 2 of the `gen-fixtures` initiative (see
@@ -1031,8 +1048,10 @@ and gives each statement it reaches an exact execution count or "unknown":
   variable-`TIMES` bodies and SORT / MERGE procedures are unknown;
 * a transfer (GO TO, EXIT PARAGRAPH / SECTION / PERFORM, NEXT SENTENCE,
   STOP RUN, GOBACK, EXIT PROGRAM) inside such a region makes everything
-  after it unknown; on the main line, GO TO / STOP ends the walk and a skip
-  makes the rest unknown; inside a literal `TIMES` body any transfer
+  after it unknown, except that an EXIT PARAGRAPH / EXIT SECTION or a
+  forward GO TO that stays inside the PERFORMed range (`_Frame.range_names`)
+  only skips the rest of that range (#827); on the main line, GO TO / STOP
+  ends the walk and a skip makes the rest unknown; inside a literal `TIMES` body any transfer
   discards every count (they would be overstated);
 * a main-line GO TO is followed forward (`push_chain` at the target) only
   when no statement of the target paragraph was walked yet; a backward jump

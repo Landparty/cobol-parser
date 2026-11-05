@@ -738,6 +738,15 @@ class ProgramFixtureGenerator:
                 return override.witnesses[spec.qualified_name]
         return factory.value_for(spec, row)
 
+    @staticmethod
+    def _return_code_value(spec: FieldSpec, override: PlannedScenario | None) -> str:
+        """A CALL's RETURN-CODE: the scenario's witness, else 0 (success)."""
+        if override is not None:
+            for pinned in (override.row_witnesses.get(0) or {}, override.witnesses):
+                if spec.qualified_name in pinned:
+                    return pinned[spec.qualified_name]
+        return "0"
+
     def _build_call_fixture(
         self,
         boundary: Boundary,
@@ -798,6 +807,11 @@ class ProgramFixtureGenerator:
                     )
                 )
 
+        # A branch after this CALL tests its RETURN-CODE (#831): the mock
+        # sets it, 0 unless the scenario pins another value.
+        return_code = index.call_return_code_at(ref.line)
+        if return_code is not None:
+            fields.append(return_code.spec)
         if not fields:
             return None, expectations, unresolved
 
@@ -806,7 +820,12 @@ class ProgramFixtureGenerator:
         # row entry, so one value would stand for two fields (#365).
         fields = self._unique_columns(fields)
         row = {
-            spec.column: self._value_for(spec, factory, 0, override) for spec in fields
+            spec.column: (
+                self._return_code_value(spec, override)
+                if return_code is not None and spec is return_code.spec
+                else self._value_for(spec, factory, 0, override)
+            )
+            for spec in fields
         }
         self._register_layout(layouts, boundary.record_names, boundary, fields)
         fixture = BoundaryFixture(

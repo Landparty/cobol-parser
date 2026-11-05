@@ -39,6 +39,13 @@ _NON_EXECUTABLE_PREFIXES = ("BEGIN DECLARE SECTION", "END DECLARE SECTION")
 #: SQLCODE, so WHENEVER covers it) even though the parser files it under
 #: ``DECLARE TABLE`` with the DCLGEN declarations.
 _EXECUTABLE_DECLARE_PREFIXES = ("DECLARE GLOBAL TEMPORARY TABLE",)
+#: Db2's other two declarations, which the parser files as ``UNKNOWN``:
+#: ``DECLARE s1, s2 STATEMENT`` and ``DECLARE :hv1, :hv2 VARIABLE ...``
+#: (the collector glues the colon on: ``DECLARE:WS-STMT``) (#830).
+_DECLARE_STATEMENT_OR_VARIABLE_RE = re.compile(
+    r"^DECLARE\s*:?\s*[A-Z0-9@#$_-]+(?:\s*,\s*:?\s*[A-Z0-9@#$_-]+)*\s+"
+    r"(?:STATEMENT|VARIABLE)\b"
+)
 
 
 def _directive(stmt: Any) -> tuple[str, str | None] | None:
@@ -67,6 +74,8 @@ def _is_executable(stmt: ExecSQLStatement) -> bool:
     if text.startswith(_EXECUTABLE_DECLARE_PREFIXES):
         return True
     if (stmt.sql_type or "").upper() in _NON_EXECUTABLE_SQL_TYPES:
+        return False
+    if _DECLARE_STATEMENT_OR_VARIABLE_RE.match(text):
         return False
     return not text.startswith(_NON_EXECUTABLE_PREFIXES)
 
