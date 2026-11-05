@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+* **A friendlier first run of the CLI.** `cobol-parser --help` groups the
+  41 commands by task (parse, lint and CI, one program, a codebase, test
+  data, reference) and ends with a quick start, the exit codes and where
+  defaults come from; a bare `cobol-parser` prints it (exit 2) instead of
+  "the following arguments are required: file". A mistyped command gets a
+  suggestion (`unknown command 'dead-cod' (did you mean 'dead-code'?)`,
+  exit 2) instead of "File not found: dead-cod". A directory passed as FILE,
+  a `--copybook-path` that is not a directory, and COPY statements left
+  unexpanded for want of `--copybook-path` now each say so on stderr.
 * **`lint` for CI.** `lint` takes many files in one run (`FILE...`,
   `--glob`, `--files-from`): one exit code (1 if a file could not be linted,
   else 3 on `--fail-on`), one total, json `{files, failures, summary}`, one

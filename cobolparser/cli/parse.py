@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import sys
 from collections.abc import Callable
 from typing import Any, NoReturn
@@ -13,7 +14,7 @@ from ..config import ConfigError, ProjectConfig, load_project_config
 from ..models.program import CobolDivision, CobolParagraph, CobolProgram, CobolSection
 from ..parser import parse_cobol
 from ..plugins.core import DialectType, ErrorRecoveryMode
-from . import _project_config
+from . import _help, _project_config
 
 _SUBCOMMANDS = frozenset(
     {
@@ -311,6 +312,12 @@ def _read_source(filepath: str, encoding: str | None = None) -> str:
 
     if not os.path.exists(filepath):
         _fail(f"File not found: {filepath}")
+    if os.path.isdir(filepath):
+        _fail(
+            f"{filepath} is a directory; pass a COBOL source file (for a "
+            "whole tree use `cobol-parser lint --glob 'DIR/**/*.cbl'` or "
+            "`cobol-parser scan DIR/*.cbl`)"
+        )
     warnings: list[str] = []
     try:
         text = read_program_source(filepath, encoding, warnings=warnings)
@@ -599,6 +606,7 @@ def _parse_result_or_fail(args: argparse.Namespace) -> tuple[Any, Any]:
     on disk rather than in the expanded text -- calls this instead.
     """
     result, prof = _do_parse(args)
+    _hint_unexpanded_copybooks(args, result)
     if result.ast is None:
         error_lines = [str(e) for e in result.errors]
         _fail(f"Parse failed for {args.file}\n" + "\n".join(error_lines))
@@ -615,6 +623,36 @@ def _parse_result_or_fail(args: argparse.Namespace) -> tuple[Any, Any]:
     # every report location (see `stamp_report_origins`).
     args._expansion_source_map = getattr(result, "expansion_source_map", None)
     return result, prof
+
+
+_UNEXPANDED_COPY = re.compile(r"^COPY (\S+) was not expanded")
+
+
+def _hint_unexpanded_copybooks(args: argparse.Namespace, result: Any) -> None:
+    """Say on stderr when COPY statements were left out for want of a
+    copybook path.
+
+    Without ``--copybook-path`` the parse still succeeds, so the only trace
+    of the missing copybooks was a warning inside the JSON, and an analyzer
+    report silently covered less of the program than the user expected.
+    """
+    if getattr(args, "copybook_path", None):
+        return
+    names = []
+    for warning in getattr(result, "warnings", None) or []:
+        match = _UNEXPANDED_COPY.match(str(warning))
+        if match and match.group(1) not in names:
+            names.append(match.group(1))
+    if not names:
+        return
+    shown = ", ".join(names[:5]) + (
+        f" and {len(names) - 5} more" if len(names) > 5 else ""
+    )
+    print(
+        f"warning: {args.file}: {len(names)} copybook(s) not expanded ({shown}); "
+        "pass --copybook-path DIR or set project.copybook_path in cobol.yml",
+        file=sys.stderr,
+    )
 
 
 def _select_program_unit(args: argparse.Namespace, result: Any) -> None:
@@ -5420,9 +5458,11 @@ def _cmd_config(args: argparse.Namespace) -> None:
 def _build_parser() -> argparse.ArgumentParser:
     from .. import __version__
 
-    parser = argparse.ArgumentParser(
+    parser = _help.TopLevelParser(
         prog="cobol-parser",
+        usage="cobol-parser <command> [options] FILE ...",
         description="Parse, tokenize, preprocess, and analyze COBOL source files.",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument(
         "--version",
@@ -5441,7 +5481,9 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help=_project_config.NO_CONFIG_FLAG_HELP,
     )
-    subparsers = parser.add_subparsers(dest="command")
+    subparsers = parser.add_subparsers(
+        dest="command", metavar="<command>", prog="cobol-parser"
+    )
 
     _build_parse_parser(subparsers)
     _build_batch_parser(subparsers)
@@ -5614,6 +5656,55 @@ def _config_fail(message: str, argv: list[str]) -> NoReturn:
     _fail(message)
 
 
+def _warn_missing_search_dirs(args: argparse.Namespace, config: ProjectConfig) -> None:
+    """Warn once per ``--copybook-path`` / ``--callee-path`` / ``--proc-path``
+    entry typed on the command line that is not a directory.
+
+    A typo there was silently accepted and only showed up later as COPY
+    statements that were "not found". Entries that came from cobol.yml are
+    already reported by name (with the file) in :func:`main`.
+    """
+    from_config = {
+        entry
+        for entries in (config.copybook_path, config.callee_path, config.proc_path)
+        for entry in entries
+    }
+    for dest, flag in (
+        ("copybook_path", "--copybook-path"),
+        ("callee_path", "--callee-path"),
+        ("proc_path", "--proc-path"),
+    ):
+        value = getattr(args, dest, None)
+        entries = [value] if isinstance(value, str) else list(value or [])
+        for entry in entries:
+            if entry in from_config or os.path.isdir(entry):
+                continue
+            print(
+                f"warning: {flag} {entry} is not an existing directory", file=sys.stderr
+            )
+
+
+def _reject_mistyped_command(word: str) -> None:
+    """Exit 2 when *word* reads as a typo of a command, not a file name.
+
+    The legacy ``cobol-parser FILE`` form means any unknown first word is
+    taken as a source file, so ``cobol-parser dead-cod x.cbl`` used to say
+    "File not found: dead-cod". A word that exists on disk, or has a path
+    separator or an extension, is still a file.
+    """
+    if os.path.exists(word) or os.sep in word or "/" in word or "." in word:
+        return
+    suggestion = _help.suggest_command(word, _SUBCOMMANDS)
+    if suggestion is None:
+        return
+    print(
+        f"error: unknown command '{word}' (did you mean '{suggestion}'?)\n"
+        "Run 'cobol-parser --help' to list every command.",
+        file=sys.stderr,
+    )
+    sys.exit(2)
+
+
 def main() -> None:
     argv = sys.argv[1:]
 
@@ -5625,17 +5716,20 @@ def main() -> None:
     except ConfigError as exc:
         _config_fail(str(exc), argv)
 
+    if not argv:
+        # A bare `cobol-parser` used to fall through to `parse` and print
+        # only "the following arguments are required: file". Show the grouped
+        # command overview instead; still a usage error (exit 2).
+        _build_parser().print_help()
+        sys.exit(2)
+
     # Backward compatibility: if the first non-flag argument is not a known
     # subcommand, assume the user is using the legacy syntax and prepend "parse".
-    if argv:
-        first_positional = None
-        for arg in argv:
-            if not arg.startswith("-"):
-                first_positional = arg
-                break
-        if first_positional is not None and first_positional not in _SUBCOMMANDS:
-            argv = ["parse", *argv]
-    else:
+    first_positional = next((arg for arg in argv if not arg.startswith("-")), None)
+    if first_positional is not None and first_positional not in _SUBCOMMANDS:
+        _reject_mistyped_command(first_positional)
+        argv = ["parse", *argv]
+    elif first_positional is None and not {"-h", "--help", "--version"} & set(argv):
         argv = ["parse", *argv]
 
     parser = _build_parser()
@@ -5681,6 +5775,8 @@ def main() -> None:
                     "an existing directory",
                     file=sys.stderr,
                 )
+
+    _warn_missing_search_dirs(args, config)
 
     if not hasattr(args, "func"):
         parser.print_help()
