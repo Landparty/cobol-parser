@@ -431,7 +431,9 @@ class DisplayStatementParser(IStatementParser):
         word = token.value.upper()
         if word in data_names:
             return False
-        if token.type not in (TokenType.IDENTIFIER, TokenType.LINE):
+        # POSITION lexes as its own keyword (START ... POSITION), not as an
+        # identifier like the other screen words (#826).
+        if token.type not in (TokenType.IDENTIFIER, TokenType.LINE, TokenType.POSITION):
             return False
         if word in _SCREEN_WORDS:
             if not bare_attributes:

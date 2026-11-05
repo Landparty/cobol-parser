@@ -39,7 +39,12 @@ cobolparser.cli.coverage` is a **separate** program (see
 (the `cobol.yml` → argv merge), `cli/coverage.py`, `cobolparser/config/`
 (`project.py` schema + discovery, `_yaml.py` reader).
 
-`cobol-parser --help` lists subcommands; `<name> --help` shows flags,
+`cobol-parser --help` prints the subcommands grouped by task (`cli/_help.py`
+`COMMAND_GROUPS`, rendered by `TopLevelParser.format_help()` instead of
+argparse's flat `{parse,batch,...}` block), then a quick start, the exit
+codes and where defaults come from. Every registered subcommand must sit in
+exactly one group (`tests/unit/cli/test_cli_help_overview.py`), so a new one
+needs a line there too. `<name> --help` shows flags,
 defaults and runnable examples. **Adding a single-file analyzer:** call `_build_analyzer_parser(subparsers,
 name, help, func, profiling=..., examples=...)` in `_build_parser()` (the
 standard flag set **A**; `examples` is required and becomes the `--help`
@@ -52,7 +57,22 @@ epilog — hand-built parsers set `epilog=` themselves) and emit through
   are global and may sit on either side of the subcommand.
 * **Legacy spelling**: if the first non-flag argument is not in
   `_SUBCOMMANDS`, `parse` is prepended (`cobol-parser prog.cbl` is `parse
-  prog.cbl`). An empty argv also becomes `parse` (exit 2, "file required").
+  prog.cbl`). Before that, a first word that does not exist on disk, has no
+  `/` or `.`, and is a close match of a command is rejected as a typo:
+  `error: unknown command 'dead-cod' (did you mean 'dead-code'?)`, exit 2
+  (`_reject_mistyped_command`). An empty argv prints the grouped `--help`
+  overview and exits 2.
+* `FILE` naming a directory is `error: X is a directory; ...` (pointing at
+  `lint --glob` / `scan`), not an encoding error.
+* A `--copybook-path` / `--callee-path` / `--proc-path` entry typed on the
+  command line that is not a directory prints `warning: --copybook-path X is
+  not an existing directory` (`_warn_missing_search_dirs`; `cobol.yml`
+  entries are warned about with the file name instead).
+* A single-program command run without `--copybook-path` whose program has
+  `COPY` statements prints `warning: FILE: N copybook(s) not expanded (A, B);
+  pass --copybook-path DIR ...` to stderr (`_hint_unexpanded_copybooks`):
+  the parse still succeeds, and before this the only trace was a warning
+  inside the JSON.
 * A closed stdout (`... | head`) exits **141** quietly, no `BrokenPipeError`.
 * CLI errors go through `_fail()`: one `error: ...` line on stderr, exit 1,
   never a traceback.

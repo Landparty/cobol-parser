@@ -1097,6 +1097,10 @@ def _scenario_name(
     name = f"{proc}: {where} {arm}"
     if "#" in arm_id:
         constraints = branch.arms.get(arm_id) or []
+        # Named for the disjunct itself, not the negations of the others.
+        own = branch.disjunct_lengths.get(arm_id)
+        if own is not None:
+            constraints = constraints[:own]
         disjunct = " AND ".join(
             [_render_constraint(c) for c in constraints]
             + [_render_correlation(c) for c in branch.correlations.get(arm_id, [])]

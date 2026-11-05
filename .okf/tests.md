@@ -496,6 +496,11 @@ README example needs no test change unless it names a sample file
   nested in a copybook or under an FD is expanded by `gen-data` / `decode` /
   `compare` from `--copybook-path` or `cobol.yml`, and one left unexpanded
   is a stderr warning and a caveat, never a silently short record
+* `tests/unit/cli/test_cli_help_overview.py` -- every registered subcommand
+  sits in exactly one `--help` group (`cli/_help.py`), the bare-invocation
+  overview, command typo suggestions (while a file-like or existing word is
+  still parsed as a file), and the directory / missing `--copybook-path` /
+  unexpanded-COPY messages
 * `tests/unit/cli/test_cli_coverage_gaps.py` -- `preprocess` (#271) and
   `expand` (#583) evaluate `>>IF` / `>>DEFINE` with or without `--define`:
   one arm survives, in the program and in an inlined copybook

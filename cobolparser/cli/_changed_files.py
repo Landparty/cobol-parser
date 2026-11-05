@@ -17,7 +17,8 @@ is nothing to lint.
 Copybook dependencies are found by name, the way the compiler finds them: the
 COPY statements of each program (and of each copybook it reaches in the
 copybook directories) are read with the same shallow lexer the expander uses,
-and a member is matched to a changed file by its name without extension.
+and a member is matched to a changed file by its name without extension (a
+quoted file name, ``COPY "custrec.cpy"``, by its file stem as well).
 Nothing is parsed, so selecting the files costs a fraction of linting them.
 """
 
@@ -147,7 +148,16 @@ def _copy_members(path: str) -> set[str]:
         statements = extract_copy_statements(text, path, sql_include=True)
     except Exception:  # noqa: BLE001 -- a lexer slip must not drop the run
         return set()
-    return {s.member_name.strip("'\"").upper() for s in statements if s.member_name}
+    members: set[str] = set()
+    for statement in statements:
+        if not statement.member_name:
+            continue
+        name = statement.member_name.strip("'\"")
+        members.add(name.upper())
+        # A quoted file name (``COPY "custrec.cpy"``, ``COPY "cpy/custrec.cpy"``)
+        # resolves to that file, whose member name is its stem (#829).
+        members.add(_member(name.replace("\\", "/")))
+    return members
 
 
 def _copybook_index(directories: Iterable[str]) -> dict[str, list[str]]:

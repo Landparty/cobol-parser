@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+* **A friendlier first run of the CLI.** `cobol-parser --help` groups the
+  41 commands by task (parse, lint and CI, one program, a codebase, test
+  data, reference) and ends with a quick start, the exit codes and where
+  defaults come from; a bare `cobol-parser` prints it (exit 2) instead of
+  "the following arguments are required: file". A mistyped command gets a
+  suggestion (`unknown command 'dead-cod' (did you mean 'dead-code'?)`,
+  exit 2) instead of "File not found: dead-cod". A directory passed as FILE,
+  a `--copybook-path` that is not a directory, and COPY statements left
+  unexpanded for want of `--copybook-path` now each say so on stderr.
 * **`lint` for CI.** `lint` takes many files in one run (`FILE...`,
   `--glob`, `--files-from`): one exit code (1 if a file could not be linted,
   else 3 on `--fail-on`), one total, json `{files, failures, summary}`, one
@@ -158,6 +167,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `MCP_SURFACE_VERSION` stays "1".
 
 ### Fixed
+
+* **Hunt issues #826-#834.** `DISPLAY ... POSITION n` is a screen phrase,
+  not an item (#826). Invocation counts survive an `EXIT PARAGRAPH`,
+  `EXIT SECTION` or forward GO TO that stays inside a `PERFORM A THRU B`
+  range (#827). `lint --changed-since` finds the programs that COPY a
+  changed copybook by its file stem (#829). `EXEC SQL DECLARE ... STATEMENT`
+  and `DECLARE ... VARIABLE` no longer count as executable statements for
+  WHENEVER (#830). A branch on a CALL's `RETURN-CODE` (directly or through
+  `MOVE RETURN-CODE TO field`) is driven by that CALL's mock: its fixture
+  row carries a `RETURN-CODE` column (#831). An ODO counter declared as its
+  own 01 stays inside its table's bounds (#832). The case named for one OR
+  disjunct negates the others (#834).
 
 * **Generated cases reach the branch they are named for (round 2).** A
   compound `EVALUATE TRUE` WHEN (`WHEN TYPE-R AND AGE < 18`) is modeled, and

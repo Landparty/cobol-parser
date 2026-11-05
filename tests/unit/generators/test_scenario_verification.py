@@ -541,3 +541,188 @@ class TestSearchAtEndIsAnArm:
         nested = [b for b in constraints.branches if b.enclosing]
         assert nested, [b.branch_id for b in constraints.branches]
         assert nested[0].enclosing == ((search.branch_id, "AT_END"),)
+
+
+class TestOdoCounterInItsOwnRecord:
+    """An ODO counter declared as its own 01 is still bounded (#832)."""
+
+    SOURCE = """       IDENTIFICATION DIVISION.
+       PROGRAM-ID. NUMG.
+       DATA DIVISION.
+       WORKING-STORAGE SECTION.
+       01  WS-CNT      PIC 9(2).
+       01  WS-TAB.
+           05  WS-ENT  PIC X(3) OCCURS 1 TO 5 DEPENDING ON WS-CNT.
+       PROCEDURE DIVISION.
+           ACCEPT WS-CNT
+           IF WS-CNT > 3
+              DISPLAY 'BIG'
+           ELSE
+              DISPLAY 'SMALL'
+           END-IF
+           GOBACK.
+"""
+
+    def test_index_stamps_the_bounds_on_the_separate_counter(self):
+        result = parse_cobol(self.SOURCE, filename="t.cbl")
+        index = ProgramLayoutIndex.build(result.ast)
+        resolved = index.resolve("WS-CNT")
+        assert resolved is not None
+        assert resolved.spec.odo_counter_bounds == (1, 5)
+
+    def test_every_scenario_keeps_the_counter_inside_the_table(self):
+        bundle = _bundle(self.SOURCE, mode="all")
+        values = [
+            int(row["WS-CNT"])
+            for scenario in bundle.scenarios
+            for fixture in scenario.fixtures
+            for row in fixture.sequence
+            if "WS-CNT" in row
+        ]
+        assert values
+        assert all(1 <= value <= 5 for value in values), values
+
+
+class TestOrDisjunctsAreIsolated:
+    """A scenario named for one OR disjunct negates the others (#834)."""
+
+    SOURCE = """       IDENTIFICATION DIVISION.
+       PROGRAM-ID. EV.
+       DATA DIVISION.
+       WORKING-STORAGE SECTION.
+       01  WS-TYPE     PIC X.
+           88  TYPE-R  VALUE 'R'.
+           88  TYPE-B  VALUE 'B' 'C'.
+       01  WS-AMT      PIC 9(5)V99.
+       01  WS-MSG      PIC X(10).
+       PROCEDURE DIVISION.
+           ACCEPT WS-TYPE
+           ACCEPT WS-AMT
+           EVALUATE TRUE
+              WHEN TYPE-R                   MOVE 'RETAIL' TO WS-MSG
+              WHEN TYPE-B OR WS-AMT > 1000  MOVE 'BIZBIG' TO WS-MSG
+              WHEN OTHER                    MOVE 'OTHER' TO WS-MSG
+           END-EVALUATE
+           IF WS-AMT > 50 OR TYPE-R
+              DISPLAY 'X'
+           END-IF
+           GOBACK.
+"""
+
+    @staticmethod
+    def _values(scenario):
+        found = {}
+        for fixture in scenario.fixtures:
+            for row in fixture.sequence[:1]:
+                found.update(row)
+        return found
+
+    def test_amount_disjunct_gets_a_non_business_type(self):
+        bundle = _bundle(self.SOURCE, mode="all")
+        named = [s for s in bundle.scenarios if "[WS-AMT > 1000]" in s.name]
+        assert named, [s.name for s in bundle.scenarios]
+        for scenario in named:
+            values = self._values(scenario)
+            assert values["WS-TYPE"] not in ("B", "C", "R"), (scenario.name, values)
+            assert Decimal(values["WS-AMT"]) > 1000
+        boundary = [s for s in named if "at WS-AMT = 1000.01" in s.name]
+        assert boundary
+
+    def test_if_disjuncts_are_isolated_too(self):
+        result = parse_cobol(self.SOURCE, filename="t.cbl")
+        index = ProgramLayoutIndex.build(result.ast)
+        report = BoundaryInventoryAnalyzer().analyze(result.ast, index)
+        constraints = ConstraintExtractor().extract(result.ast, index, report)
+        (branch,) = [b for b in constraints.branches if b.arms.get("THEN#1")]
+        first = [(c.op, c.values) for c in branch.arms["THEN#1"]]
+        second = [(c.op, c.values) for c in branch.arms["THEN#2"]]
+        assert first == [("gt", ("50",)), ("not_in_set", ("R",))]
+        assert second[0] == ("in_set", ("R",))
+        assert ("le", ("50",)) in second
+        assert branch.disjunct_lengths == {"THEN#1": 1, "THEN#2": 1}
+
+
+class TestCallReturnCode:
+    """A branch on a CALL's RETURN-CODE is driven by the CALL mock (#831)."""
+
+    SOURCE = """       IDENTIFICATION DIVISION.
+       PROGRAM-ID. RC.
+       DATA DIVISION.
+       WORKING-STORAGE SECTION.
+       01  WS-IN       PIC X(5).
+       01  WS-OUT      PIC X(5).
+       01  WS-RC       PIC S9(4) COMP.
+       01  WS-MSG      PIC X(20).
+       PROCEDURE DIVISION.
+       MAIN-PARA.
+           CALL 'SUBX' USING WS-IN WS-OUT
+           END-CALL
+           MOVE RETURN-CODE TO WS-RC
+           IF WS-RC NOT = 0
+              MOVE 'CALL FAILED' TO WS-MSG
+           ELSE
+              MOVE 'OK' TO WS-MSG
+           END-IF
+           CALL 'SUBY' USING WS-IN
+           IF RETURN-CODE > 4
+              MOVE 'BAD' TO WS-MSG
+           END-IF
+           DISPLAY WS-MSG
+           GOBACK.
+"""
+
+    def _constraints(self):
+        result = parse_cobol(self.SOURCE, filename="t.cbl")
+        index = ProgramLayoutIndex.build(result.ast)
+        report = BoundaryInventoryAnalyzer().analyze(result.ast, index)
+        return ConstraintExtractor().extract(result.ast, index, report)
+
+    def test_both_comparisons_constrain_the_calls_return_code(self):
+        fields = {
+            branch.line: {
+                c.field.spec.qualified_name
+                for arm in branch.arms.values()
+                for c in arm
+                if isinstance(c, FieldConstraint)
+            }
+            for branch in self._constraints().branches
+        }
+        assert fields[14] == {"CALL@11.RETURN-CODE"}
+        assert fields[20] == {"CALL@19.RETURN-CODE"}
+
+    def test_each_scenario_feeds_its_witness_through_the_call_mock(self):
+        bundle = _bundle(self.SOURCE, mode="all")
+
+        def return_codes(scenario):
+            return {
+                fixture.ref.key: fixture.sequence[0].get("RETURN-CODE")
+                for fixture in scenario.fixtures
+                if fixture.ref.category == "CALL"
+            }
+
+        by_name = {s.name: return_codes(s) for s in bundle.scenarios}
+        then_14 = next(v for k, v in by_name.items() if "IF@14 THEN" in k)
+        else_14 = next(v for k, v in by_name.items() if "IF@14 ELSE" in k)
+        assert then_14["SUBX"] not in (None, "0")
+        assert else_14["SUBX"] == "0"
+        then_20 = by_name["MAIN-PARA: IF@20 THEN at RETURN-CODE = 5"]
+        else_20 = by_name["MAIN-PARA: IF@20 ELSE at RETURN-CODE = 4"]
+        assert int(then_20["SUBY"]) > 4
+        assert int(else_20["SUBY"]) <= 4
+        # The other CALL's mock still reports success.
+        assert then_20["SUBX"] == "0"
+
+    def test_a_call_in_another_branch_arm_does_not_drive_the_comparison(self):
+        source = self.SOURCE.replace(
+            "           CALL 'SUBY' USING WS-IN\n",
+            "           IF WS-IN = 'X'\n"
+            "              CALL 'SUBY' USING WS-IN\n"
+            "           END-IF\n",
+        )
+        result = parse_cobol(source, filename="t.cbl")
+        index = ProgramLayoutIndex.build(result.ast)
+        report = BoundaryInventoryAnalyzer().analyze(result.ast, index)
+        constraints = ConstraintExtractor().extract(result.ast, index, report)
+        (branch,) = [b for b in constraints.branches if b.line == 22]
+        assert not any(branch.arms.values())
+        assert any("RETURN-CODE" in note for note in branch.unsupported)
