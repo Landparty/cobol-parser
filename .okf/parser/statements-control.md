@@ -78,6 +78,14 @@ arm.
   `THRU` / `THROUGH` and the condition words (`AND OR NOT = < > <= >= <>`) are
   keywords only when not a `STRING_LITERAL`, so `WHEN "ANY"` / `"THRU"` / `"AND"`
   stay literals. Pinned by `tests/regression/test_evaluate_keyword_literal_when.py`.
+- **A Condition selector also has a tree.** `parse` builds each `Condition`
+  selector's structural tree from its tokens (`_selector_tree`, through
+  `build_condition_expression` with the parse context's symbols, as SEARCH
+  WHEN does) into `WhenClause.condition_trees`, one entry per selector (None
+  for any other). The tokens ride on the dict only between `_build_selector`
+  and `parse` (`_TOKENS_KEY`), so the selector dict's shape is unchanged; the
+  trees are not serialized. The constraint extractor reads a compound
+  `EVALUATE TRUE` WHEN from it.
 - **Single-token selectors say what they were** (#313): a one-token `Literal`
   carries `"identifier": True`, `"figurative": True` (`WHEN SPACES`) or
   `"quoted": True` (`WHEN 'SPACES'`); a `Range` carries `"start_quoted"` /

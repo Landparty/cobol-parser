@@ -33,6 +33,7 @@ from typing import Any
 from ..analysis.boundary_inventory import Boundary, BoundaryReport
 from ..analysis.constraints import (
     _FLIPPED_RELATIONAL,
+    GUARD_ALTERNATIVES,
     BranchConstraints,
     ConstraintReport,
     CorrelationConstraint,
@@ -201,6 +202,9 @@ class PlannedScenario:
     #: produce -- so the arm may not actually be reached, and saying so
     #: beats a silently optimistic label.
     path_gaps: list[str] = field(default_factory=list)
+    #: The scenario's arm ends the run or a loop
+    #: (`BranchConstraints.ending_arms`): never merged with another arm.
+    ends_run: bool = False
 
     def to_dict(self) -> dict[str, Any]:
         extra: dict[str, Any] = {}
@@ -415,6 +419,7 @@ class ScenarioPlanner:
                     correlations=correlations,
                     arm_keys=[arm_key],
                     path_gaps=path_gaps,
+                    ends_run=_base_arm_id(arm_id) in branch.ending_arms,
                 )
                 spanned = _view_conflicts(_record_areas(scenario, shared_areas))
                 if spanned:
@@ -528,6 +533,26 @@ def _path_options(
     options: list[list[list[FieldConstraint]]] = []
     gaps: list[str] = []
     for branch_id, arm_id in enclosing:
+        if GUARD_ALTERNATIVES in arm_id:
+            # A guard with several staying arms: any one of them reaches
+            # what follows. One with no modeled constraints is skipped, which
+            # narrows the choice but stays sound.
+            alternatives: list[list[FieldConstraint]] = []
+            for alternative in arm_id.split(GUARD_ALTERNATIVES):
+                alternative_options, _ = _path_options(
+                    ((branch_id, alternative),), arms_by_key
+                )
+                if alternative_options:
+                    alternatives.extend(alternative_options[0])
+            if alternatives:
+                options.append(alternatives)
+            else:
+                gaps.append(
+                    f"enclosing arms {branch_id}/{arm_id} have no modeled "
+                    "constraints, so reaching this arm is not pinned by the "
+                    "generated data"
+                )
+            continue
         exact = arms_by_key.get((branch_id, arm_id))
         if exact:
             options.append([exact])
@@ -1224,12 +1249,17 @@ def _merge_candidates(
                     for s in open_scenarios
                     if s.field_constraints
                     and not s.row_witnesses
+                    and not s.ends_run
                     and _compatible(s, candidate, shared_areas)
                 ),
                 None,
             )
             # Two pinned rows are one scenario's own sequence: never merged.
-            if candidate.field_constraints and not candidate.row_witnesses
+            # Nor an arm that ends the run or a loop: the other arm, after it,
+            # would never run.
+            if candidate.field_constraints
+            and not candidate.row_witnesses
+            and not candidate.ends_run
             else None
         )
         if target is None:

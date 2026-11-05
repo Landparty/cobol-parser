@@ -434,6 +434,13 @@ before solving. Consequences:
   candidate brings its own unpinned enclosing arms with it; dropping them
   would let the merged scenario report `verified` while an arm it claims is
   not pinned — the silent false positive `path_gaps` exists to prevent.
+* **`_merge_candidates` never merges an `ends_run` scenario** (its arm is in
+  `BranchConstraints.ending_arms`: STOP RUN / GOBACK, or a write to an item a
+  `PERFORM ... UNTIL` tests), in either direction: what the other arm needs
+  comes after the run or the loop ended.
+* A guard arm id joining several staying arms (`WHEN_1|WHEN_2`,
+  `GUARD_ALTERNATIVES`) gives `_path_options` one alternative per modeled
+  staying arm.
 * IF/EVALUATE/SEARCH arms join the chain, including **SEARCH's `AT END`**
   (`_ARM_BEARING_ATTRS`): `_extract_search` registers an `arms["AT_END"]`
   entry, so a statement nested under it has an enclosing arm to join to, even

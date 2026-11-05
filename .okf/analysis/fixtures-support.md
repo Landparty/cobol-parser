@@ -349,7 +349,11 @@ carries `(guard branch_id, staying arm)` in its `enclosing`, exactly as if it
 were nested in that arm. `IF RC NOT = 'V' ... GO TO 2200-EXIT END-IF`
 followed by the branch a scenario targets used to leave RC to chance, and the
 case took the exit (ACHPROC: six "verified" cases never reached their IF).
-Two staying arms are a disjunction the chain cannot carry: nothing is added.
+Several staying arms (with at least one leaving: `WHEN OTHER ... STOP RUN`)
+join as one arm id, the staying ids joined by `GUARD_ALTERNATIVES` (`|`,
+`WHEN_1|WHEN_2`); `_path_options` reads it as alternatives, one per modeled
+staying arm (an unmodeled one is skipped). Leaving it out let a case for an IF
+below such an EVALUATE take the STOP RUN arm while reported verified.
 The other `_walk_statements` callers (correlation carriers' "unconditional
 MOVE", literal-table scans) walk without guards; `_statement_sites` keeps its
 own walk. `TransferSite.enclosing` gets the guards, so a paragraph PERFORMed
@@ -469,9 +473,27 @@ exhaustive `in_set`<->`not_in_set`, class/figurative flip). Without it
 `WHEN A > 50 / WHEN A > 10` witnessed 51 for the second arm — a value that
 takes the first — and a duplicate `WHEN 1 / WHEN 1` reported the unreachable
 second arm as satisfiable (it is `Unsatisfiable`). An earlier arm that cannot
-be negated into one constraint (a `THRU` range, a conjunction, an
-unsupported selector) is left out and noted in `unsupported`. `WHEN OTHER`
-still negates only each arm's *own* selector constraints.
+be negated into one constraint is still negated through one of its
+conjuncts (either one implies NOT of the whole): first one on a field the
+later arm leaves free, then any whose negation `_admits` (still solvable
+with the later arm's own constraints and the negations chosen so far) --
+`WHEN TYPE-R AND AGE < 18 / WHEN TYPE-R` gives AGE >= 18, `WHEN 0 THRU 17 /
+WHEN 18 THRU 64` gives > 17. Only an arm with no such conjunct, or an
+unsupported selector, is left out and noted in `unsupported`. `WHEN OTHER`
+negates only each arm's *own* selector constraints; when they do not make
+one `not_in_set`, it falls back to the same one-conjunct-per-arm
+conjunction (`WHEN 0 THRU 17 / 18 THRU 64 / OTHER` is > 64, arms over
+different fields each negated, `WHEN SPACES / 'GB' / OTHER` both negated)
+and is unmodeled only when some arm has no usable conjunct.
+
+**An arm that ends the run or a loop is never merged.**
+`_mark_ending_arms` fills `BranchConstraints.ending_arms`: an arm whose
+statements (nested ones included) hold a `STOP RUN` / `GOBACK` or a MOVE /
+SET to an item some `PERFORM ... UNTIL` tests (`_until_keys`, names compared
+through `_name_key`). The planner's scenario carries `ends_run`, and
+`_merge_candidates` merges nothing into or out of it: `1000-INITIALIZE: WHEN
+GB` (sets the EOF flag) merged with an arm of the loop body was a case that
+never entered the loop (LNRECOV), reported verified.
 
 **A figurative `WHEN` selector is a `figurative` constraint** (see #313).
 `_build_selector` marks a single-token selector `"figurative": True` (`WHEN
@@ -584,8 +606,14 @@ selector: `evaluate_parser.py`'s `_build_selector` never emits an
 `"Identifier"` selector type at all -- a bare condition-name like `WHEN
 F1-VALID` and a simple comparison like `WHEN F1-QTY = 5` both arrive as
 `{"type": "Literal", ...}` / `{"type": "Condition", "text": ...}` with no
-`"operator"` key. Those route through `_parse_relational_text`; a compound
-`AND`/`OR` selector (`sel["operator"]` present) stays unsupported in v1.
+`"operator"` key. Those route through `_parse_relational_text`. A compound
+`AND`/`OR` selector (`sel["operator"]` present) is read from its structural
+tree: `evaluate_parser.parse` builds it from the selector's tokens with
+`build_condition_expression` (as SEARCH WHEN does) into
+`WhenClause.condition_trees` (parallel to `selectors`, not serialized), and
+`_evaluate_compound_variants` extracts it like an IF (one variant per OR
+leg, `WHEN_n#k`). A tree with any unextractable part keeps the arm
+unsupported, so later arms are not negated against half of it.
 `_parse_relational_text` itself reports any text holding an `AND`/`OR`
 outside a quoted literal as unsupported rather than splitting it on its first
 operator.

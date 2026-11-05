@@ -140,9 +140,10 @@ def _outcome(bundle, arm_suffix: str) -> dict:
     return outcome
 
 
+# A WHEN OTHER after a THRU range or after arms on different fields used to
+# be unmodeled too; it is now the conjunction of one negated conjunct per
+# earlier arm (see TestWhenOtherAfterRangesAndMixedFields).
 UNMODELED = [
-    pytest.param(EVALUATE_THRU, "/WHEN_OTHER", "WHEN OTHER", id="evaluate-thru"),
-    pytest.param(EVALUATE_GT, "/WHEN_OTHER", "WHEN OTHER", id="evaluate-true-gt"),
     pytest.param(SEARCH_AT_END, "/AT_END", "AT_END", id="search-at-end"),
 ]
 
@@ -306,3 +307,32 @@ class TestWhenOtherAfterUnfedSiblings:
         )
         main()
         assert capsys.readouterr().out
+
+
+class TestWhenOtherAfterRangesAndMixedFields:
+    """Bug hunt 2026-11-05 (round 2): NOT(WHEN_1) AND NOT(WHEN_2) ... needs
+    no disjunction when each earlier arm has one conjunct whose negation is
+    still satisfiable alongside the others: `WHEN 1 / WHEN 2 THRU 50` is
+    IN-CODE outside 1..50, `WHEN IN-AMT > 1000 / WHEN IN-CODE = 5` is both
+    negated. The WHEN OTHER case was never generated before."""
+
+    @pytest.mark.parametrize("seed", [1, 2, 3])
+    def test_when_other_after_a_range_is_targeted_outside_it(self, seed):
+        bundle = _bundle(EVALUATE_THRU, seed)
+        assert _outcome(bundle, "/WHEN_OTHER")["status"] == "targeted"
+        (scenario,) = [s for s in bundle.scenarios if "WHEN OTHER" in s.name]
+        codes = {
+            int(row["IN-CODE"])
+            for fixture in scenario.fixtures
+            for row in fixture.sequence
+            if "IN-CODE" in row
+        }
+        assert codes and all(code == 0 or code > 50 for code in codes), codes
+
+    def test_when_other_after_arms_on_different_fields(self):
+        ast, index, report = _analyze(EVALUATE_GT)
+        (branch,) = ConstraintExtractor().extract(ast, index, report).branches
+        assert sorted(
+            (c.field.spec.name, c.op, c.values) for c in branch.arms["WHEN_OTHER"]
+        ) == [("IN-AMT", "le", ("1000",)), ("IN-CODE", "ne", ("5",))]
+        assert branch.unmodeled_arms == {}
