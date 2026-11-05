@@ -144,7 +144,12 @@ class TextDomain:
     def _matches_classes(self, candidate: str) -> bool:
         stripped = candidate.strip()
         if self.require_numeric is not None:
-            is_numeric = bool(stripped) and stripped.isdigit()
+            # NUMERIC tests every character position of the item: a value
+            # shorter than the field is space-padded when moved in, and a
+            # space is not a digit -- "00000000" in a PIC X(10) is NOT
+            # NUMERIC. Only a value filling the whole width can be numeric.
+            padded = candidate.ljust(self.size)
+            is_numeric = padded.isascii() and padded.isdigit()
             if is_numeric is not self.require_numeric:
                 return False
         if self.require_alphabetic is not None:
@@ -162,6 +167,10 @@ class TextDomain:
                     return candidate
             return None
         n = max(1, min(self.size, 8))
+        if self.require_numeric:
+            # Short of the field's width the value is space-padded, which
+            # no NUMERIC test accepts (see `_matches_classes`).
+            n = max(1, self.size)
         # Digits first when the field must be numeric, letters otherwise --
         # then the other alphabet as a fallback, so a `forbidden` entry
         # covering every candidate of one shape can still be escaped.
@@ -330,6 +339,15 @@ def _initial_numeric_domain(spec: FieldSpec) -> NumericDomain:
         else Decimal(10**digits) - Decimal(1).scaleb(-decimals)
     )
     lo = -ceiling if spec.is_signed else Decimal(0)
+    bounds = getattr(spec, "odo_counter_bounds", None)
+    if bounds is not None:
+        # The counter of an `OCCURS m TO n DEPENDING ON` table: any value
+        # outside m..n is not a record the program can be handed (the
+        # table would run past the record), and a loop over the table
+        # driven by it runs off the end -- `PIC 99` at its picture's 99
+        # with `OCCURS 0 TO 5` made a generated case loop forever.
+        lo = max(lo, Decimal(bounds[0]))
+        ceiling = min(ceiling, Decimal(bounds[1]))
     return NumericDomain(lo=lo, hi=ceiling, decimals=decimals)
 
 

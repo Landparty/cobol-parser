@@ -44,6 +44,7 @@ from ..models.statements.control import (
     IfStatement,
     PerformStatement,
     SearchStatement,
+    StopStatement,
 )
 from ..models.statements.data import MoveStatement
 from ..models.statements.io import (
@@ -53,7 +54,7 @@ from ..models.statements.io import (
     IOStartStatement,
     IOWriteStatement,
 )
-from ..models.statements.misc import ReturnStatement
+from ..models.statements.misc import ExitStatement, GobackStatement, ReturnStatement
 from .boundary_inventory import (
     BoundaryRef,
     BoundaryReport,
@@ -557,7 +558,9 @@ class ConstraintExtractor:
         eof_flags = _collect_eof_flags(ast)
         carriers = _Carriers(ast, procedure, index, fed_names)
 
-        for paragraph_name, statement, enclosing in _walk_statements(procedure):
+        for paragraph_name, statement, enclosing in _walk_statements(
+            procedure, guards=True
+        ):
             _record_transfer_site(statement, paragraph_name, enclosing, report)
             if isinstance(statement, IfStatement) and statement.condition is not None:
                 self._extract_if(
@@ -2404,19 +2407,94 @@ _ARM_BEARING_ATTRS: dict[type, dict[str, str]] = {
 }
 
 
-def _walk_statements(procedure_division: CobolDivision) -> Any:
+def _walk_statements(procedure_division: CobolDivision, *, guards: bool = False) -> Any:
     for paragraph in _all_paragraphs(procedure_division):
-        yield from _walk_list(paragraph.paragraph_name, paragraph.statements, ())
+        yield from _walk_list(
+            paragraph.paragraph_name, paragraph.statements, (), guards=guards
+        )
+
+
+def _leaves_list(statement: Any) -> bool:
+    """Whether *statement* always ends the statement list it sits in: a
+    plain ``GO TO p``, ``GOBACK``, ``STOP RUN``, ``EXIT PARAGRAPH`` /
+    ``EXIT SECTION``. Nothing after it in the same list runs on that pass.
+
+    ``GO TO ... DEPENDING ON`` falls through when the index is out of
+    range, ``EXIT PROGRAM`` is a no-op in a main program, ``STOP literal``
+    waits and continues: none of them count."""
+    if isinstance(statement, GoStatement):
+        return bool(statement.target_paragraphs) and not statement.depending_on_variable
+    if isinstance(statement, GobackStatement):
+        return True
+    if isinstance(statement, StopStatement):
+        return str(getattr(statement, "stop_type", "") or "").upper() == "RUN"
+    if isinstance(statement, ExitStatement):
+        return (statement.exit_type or "").upper() in ("PARAGRAPH", "SECTION")
+    return False
+
+
+def _arm_leaves(statements: list[Any]) -> bool:
+    """Whether running this arm's statements always leaves the list the
+    branch sits in -- an exit statement at the arm's top level, or a nested
+    IF/EVALUATE every one of whose arms (implicit ones included) leaves."""
+    for statement in statements or []:
+        if _leaves_list(statement):
+            return True
+        arms = _branch_arms(statement)
+        if arms and all(_arm_leaves(body) for _, body in arms):
+            return True
+    return False
+
+
+def _branch_arms(statement: Any) -> list[tuple[str, list[Any]]]:
+    """Every arm of an IF / EVALUATE as ``(arm_id, statements)``, with an
+    absent ELSE / WHEN OTHER as an empty arm (it runs nothing and falls
+    through). Empty for any other statement."""
+    if isinstance(statement, IfStatement):
+        return [
+            ("THEN", list(statement.then_statements or [])),
+            ("ELSE", list(statement.else_statements or [])),
+        ]
+    if isinstance(statement, EvaluateStatement):
+        arms = [
+            (f"WHEN_{index}", list(group[-1].statements or []))
+            for index, group in enumerate(statement.when_groups(), start=1)
+        ]
+        default = statement.default_when
+        arms.append(("WHEN_OTHER", list(default.statements) if default else []))
+        return arms
+    return []
+
+
+def _guard_arm(statement: Any) -> str | None:
+    """The one arm of *statement* that does not leave its statement list,
+    when every other arm does: the statements after it in the list run only
+    when that arm was taken (``IF X NOT = 'V' ... GO TO EXIT-PARA END-IF``
+    guards everything below it with the ELSE arm). ``None`` when several
+    arms fall through (a disjunction the path model cannot carry) or none
+    does."""
+    arms = _branch_arms(statement)
+    staying = [arm_id for arm_id, body in arms if not _arm_leaves(body)]
+    if len(arms) > 1 and len(staying) == 1:
+        return staying[0]
+    return None
 
 
 def _walk_list(
     paragraph_name: str,
     statements: list[Any],
     enclosing: tuple[tuple[str, str], ...],
+    *,
+    guards: bool = False,
 ) -> Any:
     """Yield `(paragraph_name, statement, enclosing)`, where `enclosing` is
     the chain of `(branch_id, arm_id)` pairs -- outermost first -- whose arms
-    must all be taken for `statement` to execute."""
+    must all be taken for `statement` to execute.
+
+    With *guards*, the chain also holds every earlier branch in the same
+    statement list whose other arms all leave the list (`_guard_arm`): a
+    statement below ``IF RC NOT = 0 GO TO 9000-EXIT END-IF`` runs only on
+    that IF's ELSE arm, exactly as if it were nested inside it."""
     for statement in statements:
         yield paragraph_name, statement, enclosing
         is_branch = isinstance(
@@ -2431,7 +2509,11 @@ def _walk_list(
                 if arm_id is not None and branch_id is not None
                 else enclosing
             )
-            yield from _walk_list(paragraph_name, nested, deeper)
+            yield from _walk_list(paragraph_name, nested, deeper, guards=guards)
+        if guards and branch_id is not None:
+            guard = _guard_arm(statement)
+            if guard is not None:
+                enclosing = enclosing + ((branch_id, guard),)
 
 
 def _record_transfer_site(

@@ -119,6 +119,108 @@ class TestPathConditionAccumulation:
         assert any("path condition from" in s.intent for s in bundle.scenarios)
 
 
+GUARDED_SOURCE = """\
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. GUARDED.
+       ENVIRONMENT DIVISION.
+       INPUT-OUTPUT SECTION.
+       FILE-CONTROL.
+           SELECT INV-FILE ASSIGN TO "INV.DAT".
+       DATA DIVISION.
+       FILE SECTION.
+       FD  INV-FILE.
+       01  INV-REC.
+           05  INV-RC         PIC X.
+           05  INV-QTY        PIC 9(4).
+           05  INV-TYPE       PIC X(2).
+       WORKING-STORAGE SECTION.
+       01  WS-EOF             PIC X VALUE "N".
+       01  WS-TOTAL           PIC 9(6) VALUE 0.
+       01  WS-ERRORS          PIC 9(4) VALUE 0.
+       PROCEDURE DIVISION.
+       MAIN-PROCESS.
+           OPEN INPUT INV-FILE
+           PERFORM READ-ONE THRU READ-ONE-EXIT UNTIL WS-EOF = "Y"
+           CLOSE INV-FILE.
+       READ-ONE.
+           READ INV-FILE
+               AT END MOVE "Y" TO WS-EOF
+                      GO TO READ-ONE-EXIT
+           END-READ
+           IF INV-RC NOT = "V"
+               ADD 1 TO WS-ERRORS
+               GO TO READ-ONE-EXIT
+           END-IF
+           EVALUATE INV-TYPE
+               WHEN "AA"
+                   CONTINUE
+               WHEN OTHER
+                   ADD 1 TO WS-ERRORS
+                   GO TO READ-ONE-EXIT
+           END-EVALUATE
+           IF INV-QTY > 500
+               ADD INV-QTY TO WS-TOTAL
+           END-IF.
+       READ-ONE-EXIT.
+           EXIT.
+"""
+
+
+class TestEarlyExitGuards:
+    """A branch below ``IF bad ... GO TO exit END-IF`` runs only when that
+    guard's other arm is taken -- exactly as if it were nested in it.
+    Scenarios used to pin only the target arm, so with the guard's field
+    left to chance the case left the paragraph before reaching its arm
+    (ACHPROC's account checks sat below `IF WS-AV-RESULT-CODE NOT = 'V'
+    ... GO TO 2200-EXIT`: all six cases ran the routing-error exit)."""
+
+    def test_the_guards_staying_arm_is_part_of_the_enclosing_path(self):
+        result = parse_cobol(GUARDED_SOURCE, filename="t.cbl")
+        index = ProgramLayoutIndex.build(result.ast)
+        report = BoundaryInventoryAnalyzer().analyze(result.ast, index)
+        constraints = ConstraintExtractor().extract(result.ast, index, report)
+        by_line = {b.line: b for b in constraints.branches}
+        guard, evaluate, target = (by_line[line] for line in sorted(by_line))
+        assert guard.enclosing == ()
+        assert evaluate.enclosing == ((guard.branch_id, "ELSE"),)
+        assert target.enclosing == (
+            (guard.branch_id, "ELSE"),
+            (evaluate.branch_id, "WHEN_1"),
+        )
+
+    def test_a_scenario_below_the_guards_passes_them(self):
+        bundle = _bundle(GUARDED_SOURCE)
+        scenario = next(
+            s
+            for s in bundle.scenarios
+            if s.intent.split(" (")[0].endswith("/THEN")
+            and s.name == "READ-ONE: IF@39 THEN"
+        )
+        rows = _read_rows(scenario)
+        assert rows
+        for row in rows:
+            assert row["INV-RC"] == "V"
+            assert row["INV-TYPE"].rstrip() == "AA"
+            assert Decimal(row["INV-QTY"]) > 500
+        assert scenario.verification["status"] == "verified"
+
+    def test_a_branch_with_two_staying_arms_is_no_guard(self):
+        """Both arms fall through: reaching the next statement needs either,
+        a disjunction the path cannot carry, so nothing is added."""
+        source = GUARDED_SOURCE.replace(
+            "               ADD 1 TO WS-ERRORS\n               GO TO READ-ONE-EXIT\n"
+            "           END-IF",
+            "               ADD 1 TO WS-ERRORS\n           END-IF",
+        )
+        result = parse_cobol(source, filename="t.cbl")
+        index = ProgramLayoutIndex.build(result.ast)
+        report = BoundaryInventoryAnalyzer().analyze(result.ast, index)
+        constraints = ConstraintExtractor().extract(result.ast, index, report)
+        by_line = {b.line: b for b in constraints.branches}
+        _guard, evaluate, _target = (by_line[line] for line in sorted(by_line))
+        assert evaluate.enclosing == ()
+
+
 class TestSelfVerification:
     def test_every_branch_scenario_carries_a_verdict(self):
         bundle = _bundle(NESTED_SOURCE)
@@ -249,6 +351,37 @@ class TestSatisfies:
         assert satisfies(self._constraint("class_numeric"), "AB") is False
         assert satisfies(self._constraint("class_numeric", negated=True), "AB") is True
         assert satisfies(self._constraint("class_alphabetic"), "AB") is True
+
+    def test_numeric_class_on_alphanumeric_field_needs_every_position(self):
+        """ "00000000" in a PIC X(10) is padded with two spaces: NOT
+        NUMERIC, so a THEN arm seeded with it must not read as verified."""
+        from cobolparser.generators.data.layout import FieldCategory, FieldSpec
+        from cobolparser.generators.data.program_layout import ResolvedField
+        from cobolparser.models.ast_base import SourceLocation
+        from cobolparser.models.data_items import CobolDataItem
+
+        spec = FieldSpec(
+            name="IN-NAME",
+            path=("IN-NAME",),
+            column="IN-NAME",
+            level=5,
+            picture="X(10)",
+            usage="DISPLAY",
+            category=FieldCategory.ALPHANUMERIC,
+            size=10,
+            integer_digits=0,
+            decimal_digits=0,
+            is_signed=False,
+        )
+        record = CobolDataItem(name="IN-REC", level=1, location=SourceLocation(1, 1))
+        field_ = ResolvedField(spec=spec, section="file", record=record)
+        numeric = FieldConstraint(field_, "class_numeric", (), origin="test")
+        assert satisfies(numeric, "00000000") is False
+        assert satisfies(numeric, "0000000000") is True
+        not_numeric = FieldConstraint(
+            field_, "class_numeric", (), origin="test", negated=True
+        )
+        assert satisfies(not_numeric, "00000000") is True
 
     def test_figurative_space_and_zero(self):
         assert satisfies(self._constraint("figurative", "SPACES"), "   ") is True

@@ -423,3 +423,64 @@ class TestEnumDomainHonoursRelationalConjuncts:
             ],
         )
         assert isinstance(result, Unsatisfiable)
+
+
+class TestNumericClassOnAlphanumeric:
+    """`IF X IS NUMERIC` tests every character position of the item."""
+
+    def test_numeric_witness_fills_the_whole_field(self):
+        """A value shorter than a PIC X(10) is space-padded when moved in,
+        and "00000000  " is NOT NUMERIC: the THEN arm was never reached."""
+        spec = _text_spec("IN-NAME", size=10)
+        result = solve(spec, [_constraint(spec, "class_numeric", ())])
+        assert isinstance(result, Witness)
+        assert result.value.isdigit()
+        assert len(result.value) == 10
+
+    def test_not_numeric_witness_is_still_found(self):
+        spec = _text_spec("IN-NAME", size=10)
+        result = solve(spec, [_constraint(spec, "class_numeric", (), negated=True)])
+        assert isinstance(result, Witness)
+        assert not result.value.ljust(10).isdigit()
+
+    def test_short_allowed_literal_is_not_numeric(self):
+        """`IF X = '123' AND X IS NUMERIC` on a PIC X(5): "123  " is not
+        numeric, so the conjunction has no witness."""
+        spec = _text_spec("IN-CODE", size=5)
+        result = solve(
+            spec,
+            [
+                _constraint(spec, "eq", ("'123'",)),
+                _constraint(spec, "class_numeric", ()),
+            ],
+        )
+        assert isinstance(result, Unsatisfiable)
+
+
+class TestOdoCounterDomain:
+    """The counter of an `OCCURS m TO n DEPENDING ON` table only holds m..n."""
+
+    @staticmethod
+    def _counter(low: int = 1, high: int = 5) -> FieldSpec:
+        spec = _numeric_spec("DTL-CNT", integer_digits=2)
+        spec.odo_counter_bounds = (low, high)
+        return spec
+
+    def test_gt_witness_stays_inside_the_occurs_bounds(self):
+        """`IF DTL-CNT > 3` used to get 51 (the picture's midpoint) for an
+        `OCCURS 1 TO 5`: a loop over the table then ran past its end."""
+        spec = self._counter()
+        result = solve(spec, [_constraint(spec, "gt", ("3",))])
+        assert isinstance(result, Witness)
+        assert 3 < int(result.value) <= 5
+
+    def test_value_outside_the_bounds_is_unsatisfiable(self):
+        spec = self._counter()
+        result = solve(spec, [_constraint(spec, "gt", ("5",))])
+        assert isinstance(result, Unsatisfiable)
+
+    def test_lower_bound_is_kept(self):
+        spec = self._counter(low=1)
+        result = solve(spec, [_constraint(spec, "lt", ("2",))])
+        assert isinstance(result, Witness)
+        assert int(result.value) == 1

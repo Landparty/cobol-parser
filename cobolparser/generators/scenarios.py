@@ -1598,6 +1598,10 @@ def _boundary_value_scenarios(
         spec = sample.field.spec
         ceiling = _picture_ceiling(spec)
         floor = f"-{ceiling}" if spec.is_signed or _is_float(spec) else "0"
+        if spec.odo_counter_bounds is not None:
+            # An OCCURS DEPENDING ON counter's extremes are its table's
+            # occurrence bounds, not its picture's.
+            floor, ceiling = (str(bound) for bound in spec.odo_counter_bounds)
         # eq pins the domain to a single point -- ge/le alone only narrow the
         # interval, and solve()'s witness is always the interval's midpoint,
         # not either edge (found writing this family's own test).

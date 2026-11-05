@@ -167,7 +167,16 @@ def satisfies(constraint: FieldConstraint, value: str) -> bool | None:
         )
         return member if op == "in_set" else not member
     if op == "class_numeric":
-        result = _decimal(value) is not None
+        if _is_numeric_field(constraint):
+            result = _decimal(value) is not None
+        else:
+            # On an alphanumeric item NUMERIC needs a digit in every
+            # character position: the space padding of a value shorter
+            # than the field fails it ("0000" in a PIC X(6)).
+            field_ = getattr(constraint, "field", None)
+            size = field_.spec.character_positions if field_ is not None else 0
+            padded = value.ljust(size)
+            result = bool(padded) and padded.isascii() and padded.isdigit()
         return not result if constraint.negated else result
     if op == "class_alphabetic":
         stripped = value.strip()
