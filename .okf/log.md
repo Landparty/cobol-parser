@@ -3,7 +3,7 @@ type: Log
 title: OKF Update Log
 description: Dated log of OKF bundle updates, newest first.
 tags: [log, changelog, history]
-timestamp: 2026-10-16T00:00:00Z
+timestamp: 2026-11-05T00:00:00Z
 ---
 
 # OKF Update Log
@@ -13,6 +13,19 @@ follows up on even when a day or two out of order -- that adjacency is
 deliberate. Anything else appended to the bottom is a mistake: five
 entries, including both 2026-09-15 sections, were found there on
 2026-09-15 and moved back up.
+
+## 2026-11-05 -- generated scenarios that never reached their branch
+
+- [analysis/fixtures-support.md](analysis/fixtures-support.md): early-exit
+  guards (`_guard_arm`) now join `BranchConstraints.enclosing` and
+  `TransferSite.enclosing`; NUMERIC on an alphanumeric item is tested over
+  the whole width (witness and `verification.satisfies`); an OCCURS
+  DEPENDING ON counter is solved within its table's bounds, also in the
+  boundary-values family. Found by running each generated mocky-mock case
+  under `--trace` and checking it reaches its arm. Tests:
+  `tests/unit/generators/test_scenario_verification.py::TestEarlyExitGuards`,
+  `tests/unit/analysis/test_domains.py::TestNumericClassOnAlphanumeric`,
+  `::TestOdoCounterDomain`.
 
 ## 2026-11-04 -- issue sweep: #821, #822, #823
 

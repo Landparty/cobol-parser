@@ -381,7 +381,12 @@ never enters the outer arm. `ConstraintExtractor` records on every
 `BranchConstraints` the `enclosing` `(branch_id, arm_id)` chain whose arms
 must all be taken for that decision point to be reached (`_walk_list` threads
 it down through `_nested_statement_lists`, which pairs each nested statement
-list with the arm id it sits under). `scenarios._path_options()` joins
+list with the arm id it sits under; an earlier early-exit guard in the same
+list -- `IF RC NOT = 'V' ... GO TO EXIT-PARA END-IF` -- joins the chain with
+its staying arm, see `_guard_arm` in
+[../analysis/fixtures-support.md](../analysis/fixtures-support.md)).
+The "boundary values" family takes an OCCURS DEPENDING ON counter's extremes
+from its table's bounds, not its picture. `scenarios._path_options()` joins
 on those pairs (offering each OR-split `#N` variant as an alternative, picked by
 `_solve_with_path()`) and `ScenarioPlanner.plan()` folds the enclosing conjuncts into the targeted arm's own
 before solving. Consequences:

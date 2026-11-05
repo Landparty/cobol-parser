@@ -159,6 +159,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+* **Generated scenarios reach the branch they are named for more often.**
+  A branch below an early exit (`IF RC NOT = 'V' ... GO TO 2200-EXIT
+  END-IF`) now carries that guard's staying arm as a path condition, so its
+  scenario no longer leaves RC to chance and takes the exit. An `IS NUMERIC`
+  test on a PIC X item gets a value filling the whole field (an 8-digit
+  value in a PIC X(10) is space-padded, so not numeric), and verification
+  checks the same. An OCCURS DEPENDING ON counter is generated within its
+  table's bounds, also in the "boundary values" scenarios (99 for `OCCURS 1
+  TO 5` made a table loop run forever).
 * **Parentheses inside a literal are not a subscript.** `MOVE "TEST(S)
   FAILED" TO X`, in every NIST CCVS85 program, made the cross-reference
   report `S` as an undeclared data name.

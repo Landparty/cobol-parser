@@ -3,7 +3,7 @@ type: Module
 title: Fixture-Generation Analyses
 description: The analyses behind gen-fixtures -- BoundaryInventoryAnalyzer (boundary_inventory.py, every mockable touchpoint and its CALL argument directions), ConstraintExtractor + domains.solve (constraints.py / domains.py, branch conditions on boundary data and witness values), ConstantFolder (const_fold.py, field_equals expectations) and count_invocations (invocation_counts.py, call_count expectations).
 tags: [analysis, fixtures, gen-fixtures, boundary-inventory, constraints, domains, const-fold, invocation-counts]
-timestamp: 2026-10-15T00:00:00Z
+timestamp: 2026-11-05T00:00:00Z
 ---
 
 # Fixture-Generation Analyses
@@ -339,6 +339,22 @@ untagged made such a statement look top-level, so a scenario for a branch
 inside it could be reported verified without its data establishing that the
 table search found nothing.
 
+**Early-exit guards join the chain too.** `ConstraintExtractor.extract` walks
+with `_walk_statements(procedure, guards=True)`: after an IF / EVALUATE whose
+arms all leave the statement list but one (`_guard_arm`; an arm leaves when it
+holds a plain `GO TO`, `GOBACK`, `STOP RUN`, `EXIT PARAGRAPH` / `EXIT
+SECTION`, or a nested branch every arm of which leaves -- an absent ELSE /
+WHEN OTHER is an empty arm that stays), every later statement of that list
+carries `(guard branch_id, staying arm)` in its `enclosing`, exactly as if it
+were nested in that arm. `IF RC NOT = 'V' ... GO TO 2200-EXIT END-IF`
+followed by the branch a scenario targets used to leave RC to chance, and the
+case took the exit (ACHPROC: six "verified" cases never reached their IF).
+Two staying arms are a disjunction the chain cannot carry: nothing is added.
+The other `_walk_statements` callers (correlation carriers' "unconditional
+MOVE", literal-table scans) walk without guards; `_statement_sites` keeps its
+own walk. `TransferSite.enclosing` gets the guards, so a paragraph PERFORMed
+below a guard inherits it through `_ParagraphReach`.
+
 This exists because the planner's v1 simplification -- take only the targeted
 arm's own conjuncts -- was the biggest single source of scenarios whose data
 never reached their own arm. On `IF INV-QTY > 500 / IF INV-TYPE = "AB"`, the
@@ -404,17 +420,21 @@ the caller's argument list, not data. `negated` only carries meaning for
 op name (unlike `eq`/`ne` or `in_set`/`not_in_set`, which absorb negation
 directly into the op choice).
 
-**`class_numeric`/`class_alphabetic` extract cleanly but do not narrow a
-witness in v1.** `domains.py`'s `solve()` treats both ops as a no-op on
-whichever domain (`NumericDomain`/`TextDomain`) the field's category picked —
-the arm containing an `IS NUMERIC`/`IS ALPHABETIC` test is still correctly
-`"targeted"` (or `"merged"`) in `ScenarioPlanner`'s coverage accounting, and
-every *other* constraint on the same field still narrows normally, but the
-generated value for a field constrained *only* by a class test is not
-guaranteed to actually satisfy that test — found producing
-`docs/fixture-bundle-schema.md`'s worked example (Phase 6): an `IS NUMERIC`
-arm's witness rendered as an arbitrary alphanumeric value, not a digit
-string. Every other op in the vocabulary above is fully solved.
+**`class_numeric`/`class_alphabetic` narrow a text domain, not a numeric
+one.** On a `TextDomain` they set `require_numeric` / `require_alphabetic`
+and `pick()` honours them; on a `NumericDomain` they are a no-op. NUMERIC is
+tested over the item's whole width: a candidate is padded to `size` before
+the digit test, and a numeric witness fills the field (`"0000000000"` for a
+PIC X(10)) -- the old 8-character cap gave `"00000000"`, space-padded and so
+NOT NUMERIC, and the THEN arm was never reached. `verification.satisfies`
+applies the same width rule to an alphanumeric field.
+
+**An OCCURS DEPENDING ON counter's domain is its table's bounds.**
+`_initial_numeric_domain` clamps a field with `odo_counter_bounds` to
+`min..max` occurrences, and the "boundary values" scenario family uses those
+bounds as the counter's extremes. `PIC 99` driving `OCCURS 1 TO 5` used to get
+51 or 99, and a `PERFORM VARYING I ... UNTIL I > CNT` over the table ran off
+its end (with `I PIC 99`, forever).
 
 **`WHEN OTHER` is the negation of every prior arm, not "unconstrained".**
 `_negate_prior_arms` models the shape that dominates real COBOL — an
