@@ -637,6 +637,14 @@ backs `NEXT SENTENCE`. Deliberately its own node rather than reusing
 `ContinueStatement`: NEXT SENTENCE transfers control past the rest of the
 current sentence, not a true fall-through no-op.
 
+### `WhenClause.condition_trees`
+
+Parallel to `selectors`: for a `Condition` selector (`WHEN A > 1 AND B =
+'X'`), the structural tree the IF machinery builds from its tokens, else
+None. Not part of `to_dict()` (the selector dict keeps its documented
+shape); the constraint extractor reads a compound `EVALUATE TRUE` WHEN
+from it.
+
 ### Stacked WHENs
 
 `WHEN 'A' WHEN 'B' stmt` parses into one

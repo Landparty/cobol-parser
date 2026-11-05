@@ -21,8 +21,14 @@ from ...core.exceptions import ParseError, UnexpectedEndOfInput
 from ...core.interfaces import IStatementParser, ITokenStream
 from ...lexer import TokenType
 from ...models.ast_base import SourceLocation
-from ...models.statements import EvaluateStatement, WhenClause
-from ._conditions import condition_token_text, join_operand, typed_literal_prefix
+from ...models.statements import CobolExpression, EvaluateStatement, WhenClause
+from ._conditions import (
+    build_condition_expression,
+    condition_symbols,
+    condition_token_text,
+    join_operand,
+    typed_literal_prefix,
+)
 
 # Words that make a WHEN phrase a condition rather than a value. Symbols
 # and logical connectives count anywhere; the relational words
@@ -102,6 +108,28 @@ def _has_logical_or(words: list[str]) -> bool:
         word == "OR" and words[index + 1 : index + 2] not in (["EQUAL"], ["EQUALS"])
         for index, word in enumerate(words)
     )
+
+
+#: A Condition selector's tokens, kept on the dict only between
+#: `_build_selector` and `parse` (the selector's shape stays as documented).
+_TOKENS_KEY = "_condition_tokens"
+
+
+def _selector_tree(
+    selector: dict, location: SourceLocation, context: Any
+) -> CobolExpression | None:
+    """The structural tree of a Condition selector (``WHEN A > 1 AND B =
+    'X'``), built with the machinery IF and SEARCH WHEN use; None for any
+    other selector or a condition that machinery cannot build."""
+    tokens = selector.pop(_TOKENS_KEY, None)
+    if not tokens:
+        return None
+    try:
+        return build_condition_expression(
+            list(tokens), location, symbols=condition_symbols(context)
+        )
+    except Exception:
+        return None
 
 
 class EvaluateStatementParser(IStatementParser):
@@ -243,7 +271,12 @@ class EvaluateStatementParser(IStatementParser):
                         when_location,
                     )
 
+                trees = [
+                    _selector_tree(selector, when_location, context)
+                    for selector in selectors
+                ]
                 when_clause = WhenClause(selectors, when_location)
+                when_clause.condition_trees = trees
                 # Use add_when_clause (not direct list append) so the clause is
                 # registered as an AST child and its nested statements are
                 # reachable via find_all_by_type / traverse_depth_first.
@@ -552,6 +585,11 @@ class EvaluateStatementParser(IStatementParser):
 
         if _is_condition_phrase(flat_words):
             selector: dict[str, Any] = {"type": "Condition", "text": condition_text}
+            # The tokens as written (literals re-quoted), taken back out by
+            # `parse` to build the condition's structural tree: the text
+            # alone cannot be re-split safely (a quoted literal may hold a
+            # blank or an operator word).
+            selector[_TOKENS_KEY] = [text for _, _, text in kept]
             if _has_logical_or(flat_words):
                 selector["operator"] = "OR"
             elif "AND" in flat_words:

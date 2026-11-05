@@ -63,6 +63,10 @@ class WhenClause(ASTNode):
     def __init__(self, selectors: list, location: SourceLocation):
         super().__init__("WhenClause", location)
         self.selectors: list = selectors  # List of selector dicts
+        # Per selector, the structural tree of a Condition selector (``WHEN
+        # A > 1 AND B = 'X'`` in an EVALUATE TRUE) or None: the same
+        # expression IF builds, which `selectors` holds only as text.
+        self.condition_trees: list[CobolExpression | None] = []
         self.statements: list[CobolStatement] = []
         # True when the source has no imperative statement between this WHEN
         # and the next (non-OTHER) WHEN: the two are one stacked arm. Set by

@@ -374,11 +374,10 @@ class TestEvaluate:
         assert branch.arms["WHEN_OTHER"][0].values == ("05", "09")
         assert branch.arms["WHEN_OTHER"][0].op == "not_in_set"
 
-    def test_when_other_over_different_fields_stays_unconstrained_and_says_so(self):
-        """Negating arms that test *different* fields needs a real
-        disjunction the FieldConstraint vocabulary cannot express. The arm
-        stays unconstrained -- but records why, rather than passing silently
-        for a satisfiable one."""
+    def test_when_other_over_different_fields_negates_each_arm(self):
+        """NOT(F1-QTY = 1) AND NOT(F1-STATUS = 'Z') is a conjunction, which
+        the FieldConstraint vocabulary expresses (bug hunt 2026-11-05,
+        round 2: it used to stay unconstrained)."""
         _, _, _, report = _extract(
             "           EVALUATE TRUE\n"
             "               WHEN F1-QTY = 1\n"
@@ -390,8 +389,11 @@ class TestEvaluate:
             "           END-EVALUATE.\n"
         )
         branch = _branch(report)
-        assert branch.arms["WHEN_OTHER"] == []
-        assert any("different fields" in reason for reason in branch.unsupported)
+        assert sorted((c.op, c.values) for c in branch.arms["WHEN_OTHER"]) == [
+            ("ne", ("1",)),
+            ("ne", ("Z",)),
+        ]
+        assert branch.unmodeled_arms == {}
 
     def test_evaluate_data_driven_literal_and_range(self):
         _, _, _, report = _extract(
@@ -409,13 +411,18 @@ class TestEvaluate:
             c for c in branch.arms["WHEN_1"] if c.op == "eq" and c.values == ("1",)
         ]
         # EVALUATE is first-match: each later arm also carries the negation
-        # of every earlier arm it can negate (the THRU range cannot be).
+        # of every earlier arm. A THRU range negates through one of its
+        # bounds, the one still satisfiable with the rest (2..10 -> < 2,
+        # since ANY leaves F1-QTY free).
         assert [(c.op, c.values) for c in branch.arms["WHEN_2"]] == [
             ("ge", ("2",)),
             ("le", ("10",)),
             ("ne", ("1",)),
         ]
-        assert [(c.op, c.values) for c in branch.arms["WHEN_3"]] == [("ne", ("1",))]
+        assert [(c.op, c.values) for c in branch.arms["WHEN_3"]] == [
+            ("ne", ("1",)),
+            ("lt", ("2",)),
+        ]
 
 
 class TestSearch:

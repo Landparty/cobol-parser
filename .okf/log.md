@@ -14,6 +14,19 @@ deliberate. Anything else appended to the bottom is a mistake: five
 entries, including both 2026-09-15 sections, were found there on
 2026-09-15 and moved back up.
 
+## 2026-11-05 -- generated scenarios that never reached their branch (round 2)
+
+- [analysis/fixtures-support.md](analysis/fixtures-support.md): compound
+  `EVALUATE TRUE` WHENs are extracted from a structural tree
+  (`WhenClause.condition_trees`); a later WHEN negates a conjunction or THRU
+  range through one admissible conjunct, and WHEN OTHER falls back to that
+  conjunction; arms ending the run or a loop (`ending_arms`) are never
+  merged; a guard with several staying arms joins the path as alternatives
+  (`GUARD_ALTERNATIVES`). Tests:
+  `tests/regression/test_bug_hunt_2026_11_05_generation.py`, updated
+  `test_issue_509_unmodeled_arms.py`, `test_evaluate_figurative_when.py`,
+  `tests/unit/analysis/test_constraints.py::TestEvaluate`.
+
 ## 2026-11-05 -- generated scenarios that never reached their branch
 
 - [analysis/fixtures-support.md](analysis/fixtures-support.md): early-exit

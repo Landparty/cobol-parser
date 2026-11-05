@@ -46,7 +46,7 @@ from ..models.statements.control import (
     SearchStatement,
     StopStatement,
 )
-from ..models.statements.data import MoveStatement
+from ..models.statements.data import MoveStatement, SetStatement
 from ..models.statements.io import (
     IOOpenStatement,
     IOReadStatement,
@@ -389,6 +389,13 @@ class BranchConstraints:
     #: constraints. An arm listed here is never unconditional, even when its
     #: `arms` entry is empty.
     correlations: dict[str, list[CorrelationConstraint]] = field(default_factory=dict)
+    #: Arm ids whose statements end the run or a loop: a STOP RUN / GOBACK,
+    #: or a write to a data item a `PERFORM ... UNTIL` tests (`SET WS-EOF TO
+    #: TRUE` after a priming read found nothing). Data reaching such an arm
+    #: stops what comes after it, so a planner must not merge it with an arm
+    #: elsewhere into one scenario: the merged case ran the ending arm and
+    #: never the other while it was reported verified (bug hunt 2026-11-05).
+    ending_arms: frozenset[str] = frozenset()
 
     def to_dict(self) -> dict[str, Any]:
         extra: dict[str, Any] = {}
@@ -595,6 +602,7 @@ class ConstraintExtractor:
                     report,
                 )
         _roll_up_branch_gaps(report)
+        _mark_ending_arms(report, procedure, index)
         return report
 
     # -- IF ---------------------------------------------------------------
@@ -703,7 +711,21 @@ class ConstraintExtractor:
             arm_id = f"WHEN_{idx}"
             origin = f"EVALUATE@{line}/WHEN#{idx}"
             variants: list[list[FieldConstraint]] = []
+            completed = True
             for member in group:
+                compound = (
+                    _evaluate_compound_variants(
+                        member, index, fed_names, origin, unsupported
+                    )
+                    if is_true_form
+                    else None
+                )
+                if compound is not None:
+                    if not compound:
+                        completed = False
+                        break
+                    variants.extend(compound)
+                    continue
                 constraints = _extract_evaluate_selector(
                     member.selectors,
                     subject,
@@ -714,20 +736,26 @@ class ConstraintExtractor:
                     unsupported,
                 )
                 if constraints is None:
+                    completed = False
                     break
                 variants.append(constraints)
-            if len(variants) == len(group):
+            if completed and variants:
                 # EVALUATE is first-match: WHEN_n runs only when every earlier
                 # WHEN failed, so its data must also falsify each of them. A
                 # witness solved from WHEN_n's own selector alone could land in
                 # an earlier arm (``WHEN A > 50 / WHEN A > 10`` witnessing 55
                 # for the second) and the scenario named for WHEN_n would never
                 # reach it.
-                negations = _negate_earlier_whens(
-                    own_arms, any_when_unsupported, origin, unsupported
-                )
                 _register_variants(
-                    arms, arm_id, [variant + negations for variant in variants]
+                    arms,
+                    arm_id,
+                    [
+                        variant
+                        + _negate_earlier_whens(
+                            own_arms, any_when_unsupported, origin, unsupported, variant
+                        )
+                        for variant in variants
+                    ],
                 )
                 _register_variants(own_arms, arm_id, variants)
             else:
@@ -747,7 +775,20 @@ class ConstraintExtractor:
                     "itself unsupported"
                 )
             else:
-                negation = _negate_prior_arms(own_arms, other_origin, unsupported)
+                tried: list[str] = []
+                negation = _negate_prior_arms(own_arms, other_origin, tried)
+                if negation is None:
+                    # Not one not_in_set: still, NOT(each arm) conjoined, one
+                    # conjunct negated per arm (`WHEN 0 THRU 17 / WHEN 18
+                    # THRU 64 / WHEN OTHER` is > 64), when every arm has one.
+                    fallback: list[str] = []
+                    conjoined = _negate_earlier_whens(
+                        own_arms, False, other_origin, fallback
+                    )
+                    if not fallback:
+                        negation = conjoined
+                    else:
+                        unsupported.extend(tried)
                 if negation is None:
                     arms["WHEN_OTHER"] = []
                     unmodeled_arms["WHEN_OTHER"] = unsupported[-1]
@@ -1192,30 +1233,82 @@ def _negate_earlier_whens(
     any_earlier_unsupported: bool,
     origin: str,
     unsupported: list[str],
+    own: list[FieldConstraint] | None = None,
 ) -> list[FieldConstraint]:
     """The conjunction NOT(WHEN_1) AND ... AND NOT(WHEN_n-1), as far as it goes.
 
-    Only a single-conjunct earlier arm negates into one FieldConstraint;
-    NOT(a AND b) is a disjunction the vocabulary cannot express. Such an arm,
-    or one that was itself unsupported, is left out and said so in
-    `unsupported` -- the later arm's witness may then still be shadowed.
+    A single-conjunct earlier arm negates into one FieldConstraint. NOT(a AND
+    b) is a disjunction the vocabulary cannot express, but either disjunct
+    implies it: the negation of one conjunct on a field this arm's own
+    selector (`own`) does not test is used, so `WHEN TYPE-R AND AGE < 18 /
+    WHEN TYPE-R` gives the second arm AGE >= 18 instead of leaving AGE to
+    chance (the generated minor ran the first arm while the case was
+    reported verified). An arm with no such conjunct, or one that was itself
+    unsupported, is left out and said so in `unsupported` -- the later arm's
+    witness may then still be shadowed.
     """
+    own_fields = {c.field.spec.qualified_name for c in own or []}
     negations: list[FieldConstraint] = []
     skipped = any_earlier_unsupported
     for arm_id, conjuncts in arms.items():
         if not arm_id.startswith("WHEN_") or arm_id == "WHEN_OTHER":
             continue
-        negated = _negate_constraint(conjuncts[0]) if len(conjuncts) == 1 else None
+        negated: FieldConstraint | None = None
+        if len(conjuncts) == 1:
+            negated = _negate_constraint(conjuncts[0])
+        else:
+            # A conjunct on a field this arm leaves free first; then one on a
+            # field it tests, if the negation still admits its own value
+            # (`WHEN 0 THRU 17 / WHEN 18 THRU 64`: NOT <= 17, not NOT >= 0).
+            ordered = sorted(
+                conjuncts,
+                key=lambda c: c.field.spec.qualified_name in own_fields,
+            )
+            for conjunct in ordered:
+                candidate = _negate_constraint(conjunct)
+                if candidate is None:
+                    continue
+                if not _admits(candidate, [*(own or []), *negations]):
+                    continue
+                negated = candidate
+                break
         if negated is None:
             skipped = True
             continue
-        negations.append(negated)
+        if not any(_same_constraint(negated, other) for other in negations):
+            negations.append(negated)
     if skipped:
-        unsupported.append(
+        note = (
             f"{origin}: not every earlier WHEN arm could be negated, so this "
             "arm's witness may satisfy an earlier arm and never reach it"
         )
+        if note not in unsupported:
+            unsupported.append(note)
     return negations
+
+
+def _same_constraint(a: FieldConstraint, b: FieldConstraint) -> bool:
+    return (
+        a.field.spec.qualified_name == b.field.spec.qualified_name
+        and a.op == b.op
+        and tuple(a.values) == tuple(b.values)
+        and a.negated == b.negated
+    )
+
+
+def _admits(candidate: FieldConstraint, own: list[FieldConstraint]) -> bool:
+    """Whether `candidate` and the constraints of `own` on its field have a
+    common value."""
+    from .domains import Unsatisfiable, solve
+
+    name = candidate.field.spec.qualified_name
+    same = [c for c in own if c.field.spec.qualified_name == name]
+    try:
+        return not isinstance(
+            solve(candidate.field.spec, [*same, candidate]), Unsatisfiable
+        )
+    except Exception:
+        return False
 
 
 def _negate_prior_arms(
@@ -1479,6 +1572,39 @@ def _build_relational_constraint(
 
 
 # -- EVALUATE selector dispatch -----------------------------------------------
+
+
+def _evaluate_compound_variants(
+    member: Any,
+    index: ProgramLayoutIndex,
+    fed_names: set[str],
+    origin: str,
+    unsupported: list[str],
+) -> list[list[FieldConstraint]] | None:
+    """An EVALUATE TRUE ``WHEN`` holding a compound condition (``WHEN
+    TYPE-RETAIL AND IN-AGE < 18``), as AND-conjunct variants built through
+    the tree IF uses (one per OR leg); ``[]`` when it could not be
+    extracted (the reason is in `unsupported`), None for any other
+    selector, which the ordinary selector path handles."""
+    selectors = getattr(member, "selectors", None) or []
+    trees = getattr(member, "condition_trees", None) or []
+    if len(selectors) != 1 or not isinstance(selectors[0], dict) or not trees:
+        return None
+    sel = selectors[0]
+    if sel.get("type") != "Condition" or "operator" not in sel:
+        return None
+    tree = trees[0]
+    if tree is None:
+        return None
+    local: list[str] = []
+    variants = _extract_expr(tree, False, index, fed_names, origin, local)
+    unsupported.extend(local)
+    if local:
+        # A conjunction is only as modeled as every one of its conjuncts,
+        # and a disjunction missing a leg cannot be negated for the arms
+        # after it: both stay unsupported, as before.
+        return []
+    return variants
 
 
 def _extract_evaluate_selector(
@@ -2333,6 +2459,80 @@ def _find_read_boundary_ref(
 # -- statement walk (paragraph-aware) -----------------------------------------
 
 
+def _name_key(name: str, index: ProgramLayoutIndex) -> str:
+    """One spelling for a data name (its qualified name when it resolves),
+    so `SET WS-EOF TO TRUE` and `UNTIL WS-EOF` meet."""
+    text = str(name or "").strip()
+    base = text.split("(", 1)[0].strip()
+    try:
+        resolved = index.resolve(base)
+    except Exception:
+        resolved = None
+    if resolved is not None:
+        return resolved.spec.qualified_name.upper()
+    return base.upper()
+
+
+def _until_keys(procedure: CobolDivision, index: ProgramLayoutIndex) -> set[str]:
+    keys: set[str] = set()
+    for _paragraph, statement, _enclosing in _walk_statements(procedure):
+        if not isinstance(statement, PerformStatement):
+            continue
+        until = statement.until_condition
+        if until is None:
+            continue
+        tree = getattr(until, "condition_tree", None) or until
+        for name in _condition_field_names(tree):
+            keys.add(_name_key(name, index))
+    return keys
+
+
+def _statements_end(
+    statements: list[Any], until: set[str], index: ProgramLayoutIndex
+) -> bool:
+    """Whether running `statements` may end the run or a loop: a STOP RUN or
+    GOBACK, or a MOVE/SET to an item a loop's UNTIL tests, anywhere in them
+    (a nested arm included -- merging is refused on "may")."""
+    for statement in statements or []:
+        if isinstance(statement, GobackStatement):
+            return True
+        if isinstance(statement, StopStatement) and (
+            str(getattr(statement, "stop_type", "") or "").upper() == "RUN"
+        ):
+            return True
+        if isinstance(statement, (MoveStatement, SetStatement)):
+            if any(_name_key(t, index) in until for t in statement.targets or []):
+                return True
+        for _arm, nested in _nested_statement_lists(statement):
+            if _statements_end(nested, until, index):
+                return True
+    return False
+
+
+def _mark_ending_arms(
+    report: ConstraintReport, procedure: CobolDivision, index: ProgramLayoutIndex
+) -> None:
+    """Fill `BranchConstraints.ending_arms` for every IF/EVALUATE."""
+    until = _until_keys(procedure, index)
+    by_position = {(b.line, b.column): b for b in report.branches}
+    for _paragraph, statement, _enclosing in _walk_statements(procedure):
+        if not isinstance(statement, (IfStatement, EvaluateStatement)):
+            continue
+        location = statement.location
+        branch = by_position.get(
+            (location.line, location.column) if location else (None, None)
+        )
+        if branch is None:
+            continue
+        ending = {
+            arm
+            for arm, nested in _nested_statement_lists(statement)
+            if arm is not None and _statements_end(nested, until, index)
+        }
+        if ending:
+            branch.ending_arms = frozenset(ending)
+
+
 def _all_paragraphs(procedure_division: CobolDivision) -> list[CobolParagraph]:
     paragraphs = list(procedure_division.paragraphs)
     for section in procedure_division.sections:
@@ -2466,6 +2666,10 @@ def _branch_arms(statement: Any) -> list[tuple[str, list[Any]]]:
     return []
 
 
+#: Joins the arm ids of a guard with several staying arms (`_guard_arm`).
+GUARD_ALTERNATIVES = "|"
+
+
 def _guard_arm(statement: Any) -> str | None:
     """The one arm of *statement* that does not leave its statement list,
     when every other arm does: the statements after it in the list run only
@@ -2477,6 +2681,14 @@ def _guard_arm(statement: Any) -> str | None:
     staying = [arm_id for arm_id, body in arms if not _arm_leaves(body)]
     if len(arms) > 1 and len(staying) == 1:
         return staying[0]
+    if 1 < len(staying) < len(arms):
+        # Several arms fall through and at least one leaves (`WHEN OTHER
+        # ... STOP RUN`): what follows runs on any of the staying arms, a
+        # disjunction joined as one arm id the planner reads as alternatives
+        # (`WHEN_1|WHEN_2`). Leaving it out let a case for a later branch
+        # take the STOP RUN arm while reported verified (bug hunt
+        # 2026-11-05, round 2).
+        return GUARD_ALTERNATIVES.join(staying)
     return None
 
 

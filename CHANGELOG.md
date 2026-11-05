@@ -159,6 +159,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+* **Generated cases reach the branch they are named for (round 2).** A
+  compound `EVALUATE TRUE` WHEN (`WHEN TYPE-R AND AGE < 18`) is modeled, and
+  the WHENs after it negate it, so the case for the next `WHEN TYPE-R` no
+  longer gets a minor. A WHEN after a `THRU` range or a conjunction, and a
+  `WHEN OTHER` after ranges, `SPACES` or arms on different fields, negate
+  each earlier arm through one conjunct: those `WHEN OTHER` cases are now
+  generated instead of missed. An arm that ends the run or a loop
+  (`STOP RUN`, `SET WS-EOF TO TRUE` with a loop `UNTIL WS-EOF`) is never
+  merged with another arm, and a branch below an EVALUATE with a `STOP RUN`
+  arm keeps one of the staying arms on its path.
+
 * **Generated scenarios reach the branch they are named for more often.**
   A branch below an early exit (`IF RC NOT = 'V' ... GO TO 2200-EXIT
   END-IF`) now carries that guard's staying arm as a path condition, so its
