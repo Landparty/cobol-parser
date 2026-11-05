@@ -284,3 +284,36 @@ def test_declare_global_temporary_table_is_covered() -> None:
     assert ast is not None
     assert [d.name for d in DeadCodeAnalyzer().analyze(ast).dead_items] == []
     assert ProgramFlowAnalyzer().analyze(ast).unreachable_nodes == []
+
+
+class TestDeclareStatementAndVariable:
+    """`DECLARE s STATEMENT` / `DECLARE :hv VARIABLE` set no SQLCODE (#830)."""
+
+    SOURCE = """       IDENTIFICATION DIVISION.
+       PROGRAM-ID. WD.
+       DATA DIVISION.
+       WORKING-STORAGE SECTION.
+       01 WS-STMT PIC X(100).
+       PROCEDURE DIVISION.
+       MAIN-PARA.
+           EXEC SQL WHENEVER SQLERROR GO TO ERR-PARA END-EXEC.
+           EXEC SQL DECLARE S1 STATEMENT END-EXEC.
+           EXEC SQL DECLARE S2, S3 STATEMENT END-EXEC.
+           EXEC SQL DECLARE :WS-STMT VARIABLE CCSID 37 END-EXEC.
+           EXEC SQL WHENEVER SQLERROR CONTINUE END-EXEC.
+           EXEC SQL COMMIT END-EXEC.
+           GOBACK.
+       ERR-PARA.
+           DISPLAY 'ERR'.
+           GOBACK.
+"""
+
+    def test_handler_reached_only_through_declarations_is_dead(self) -> None:
+        assert _dead(self.SOURCE) == ["ERR-PARA"]
+        assert _whenever_edges(self.SOURCE) == set()
+
+    def test_an_executable_statement_still_branches(self) -> None:
+        source = self.SOURCE.replace(
+            "           EXEC SQL WHENEVER SQLERROR CONTINUE END-EXEC.\n", ""
+        )
+        assert _dead(source) == []

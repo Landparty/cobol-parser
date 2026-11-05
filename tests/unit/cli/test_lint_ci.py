@@ -486,6 +486,22 @@ class TestSelection:
         assert selection.programs == [str(program)]
         assert selection.via_copybook[str(program)] == ["INNER"]
 
+    @pytest.mark.parametrize("operand", ['"custrec.cpy"', '"cpy/custrec.cpy"'])
+    def test_quoted_file_name_copy(self, tmp_path: Path, operand: str) -> None:
+        """`COPY "custrec.cpy"` uses the changed custrec.cpy (#829)."""
+        cpy = tmp_path / "cpy"
+        cpy.mkdir()
+        (cpy / "custrec.cpy").write_text("           05 X PIC X.\n")
+        quoted = tmp_path / "QUOT.cbl"
+        quoted.write_text(USES_CUST.replace("COPY CUST.", f"COPY {operand}."))
+        bare = tmp_path / "BARE.cbl"
+        bare.write_text(USES_CUST.replace("COPY CUST.", "COPY CUSTREC."))
+        selection = select_changed_programs(
+            [str(cpy / "custrec.cpy")], [str(bare), str(quoted)], [str(cpy)]
+        )
+        assert selection.programs == sorted([str(bare), str(quoted)])
+        assert selection.via_copybook[str(quoted)] == ["CUSTREC"]
+
     def test_copybook_cycle_terminates(self, tmp_path: Path) -> None:
         cpy = tmp_path / "cpy"
         cpy.mkdir()

@@ -361,3 +361,61 @@ def test_sqlcode_error_arm_that_ends_the_run_stays_exempt():
            STOP RUN.
 """)
     assert found["CALL:ERRLOG"] == [1]
+
+
+@pytest.mark.parametrize(
+    "body, perform",
+    [
+        (
+            "CALL 'LOOPED' USING WS-RATE\n           EXIT PARAGRAPH.",
+            "PERFORM P4 2 TIMES",
+        ),
+        (
+            "CALL 'LOOPED' USING WS-RATE\n           EXIT PARAGRAPH\n"
+            "           CALL 'NEVER' USING WS-RATE.",
+            "PERFORM P4 2 TIMES",
+        ),
+        (
+            "CALL 'LOOPED' USING WS-RATE\n           GO TO P4-EXIT\n"
+            "           CALL 'NEVER' USING WS-RATE.",
+            "PERFORM P4 THRU P4-EXIT 2 TIMES",
+        ),
+    ],
+)
+def test_skip_inside_a_times_range_keeps_every_count(body, perform):
+    """An EXIT PARAGRAPH / GO TO the range end only ends one iteration (#827)."""
+    found = _counts(f"""\
+       MAIN-PARA.
+           CALL 'FIRST' USING WS-RATE
+           {perform}
+           CALL 'LAST' USING WS-RATE
+           STOP RUN.
+       P4.
+           {body}
+       P4-EXIT.
+           EXIT.
+""")
+    assert found["CALL:FIRST"] == [1]
+    assert found["CALL:LOOPED"] == [2]
+    assert found["CALL:LAST"] == [1]
+    if "CALL:NEVER" in found:
+        assert found["CALL:NEVER"] == [None]
+
+
+def test_exit_section_inside_a_performed_section_moves_to_its_end():
+    found = _counts("""\
+       MAIN SECTION.
+       MAIN-PARA.
+           PERFORM WORK-SEC 3 TIMES
+           CALL 'LAST' USING WS-RATE
+           STOP RUN.
+       WORK-SEC SECTION.
+       W1.
+           CALL 'LOOPED' USING WS-RATE
+           EXIT SECTION.
+       W2.
+           CALL 'NEVER' USING WS-RATE.
+""")
+    assert found["CALL:LOOPED"] == [3]
+    assert found["CALL:NEVER"] == [None]
+    assert found["CALL:LAST"] == [1]
