@@ -2028,7 +2028,7 @@ class _Carriers:
         self._fed = fed_names
         self._moves: dict[str, list[tuple[str, MoveStatement, bool]]] | None = None
         self._xref: Any = None
-        self._by_paragraph: dict[str, list[Any]] | None = None
+        self._by_paragraph: dict[str, list[tuple[Any, Any]]] | None = None
 
     def _collect(self) -> dict[str, list[tuple[str, MoveStatement, bool]]]:
         if self._moves is None:
@@ -2044,13 +2044,14 @@ class _Carriers:
                         ).append((paragraph or "", statement, bool(enclosing)))
         return self._moves
 
-    def _paragraph_statements(self, paragraph: str) -> list[Any]:
-        """Every statement of *paragraph*, nested ones included, in source order."""
+    def _paragraph_statements(self, paragraph: str) -> list[tuple[Any, Any]]:
+        """Every statement of *paragraph*, nested ones included, in source
+        order, each with its enclosing ``(branch_id, arm_id)`` chain."""
         if self._by_paragraph is None:
             self._by_paragraph = {}
-            for name, statement, _enclosing in _walk_statements(self._procedure):
+            for name, statement, enclosing in _walk_statements(self._procedure):
                 self._by_paragraph.setdefault((name or "").upper(), []).append(
-                    statement
+                    (statement, tuple(enclosing))
                 )
         return self._by_paragraph.get(paragraph.upper(), [])
 
@@ -2072,10 +2073,17 @@ class _Carriers:
             return None
         name = text.strip().upper()
         statements = [
-            s
-            for s in self._paragraph_statements(site.paragraph)
+            (s, enclosing)
+            for s, enclosing in self._paragraph_statements(site.paragraph)
             if s.location is not None and s.location.line < site.line
         ]
+        here = tuple(site.enclosing)
+
+        def always_runs(enclosing: Any) -> bool:
+            # On every path to the comparison: its branch arms are the
+            # comparison's own, or enclose them.
+            return tuple(enclosing) == here[: len(enclosing)]
+
         read_at = site.line
         if name != "RETURN-CODE":
             resolved = self._index.resolve(name)
@@ -2083,7 +2091,7 @@ class _Carriers:
                 return None
             qualified = resolved.spec.qualified_name.upper()
             move = None
-            for statement in reversed(statements):
+            for statement, enclosing in reversed(statements):
                 written = {
                     (r.spec.qualified_name.upper() if r is not None else None)
                     for r in (
@@ -2095,16 +2103,20 @@ class _Carriers:
                 if (
                     isinstance(statement, MoveStatement)
                     and str(statement.source or "").strip().upper() == "RETURN-CODE"
+                    and always_runs(enclosing)
                 ):
                     move = statement
                 break
             if move is None:
                 return None
             read_at = move.location.line
-        for statement in reversed(statements):
+        for statement, enclosing in reversed(statements):
             if statement.location.line >= read_at:
                 continue
             if isinstance(statement, CallStatement):
+                if not always_runs(enclosing):
+                    # A CALL in another branch arm may not have run (#831).
+                    break
                 return self._index.call_return_code(statement.location.line)
             if any(
                 str(t).strip().upper() == "RETURN-CODE"

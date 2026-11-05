@@ -704,7 +704,8 @@ cleaning pass that recombines `NOT`-prefixed operators. Without that, `IF WS-X
   arm's own, and the scenario name uses only those (#834).
 * A comparison on `RETURN-CODE`, or on a field whose last write is
   `MOVE RETURN-CODE TO field`, after a CALL in the same paragraph
-  constrains that CALL's synthetic field `CALL@<line>.RETURN-CODE`
+  (the CALL, and the MOVE, on every path to the comparison: not in another
+  IF / EVALUATE arm) constrains that CALL's synthetic field `CALL@<line>.RETURN-CODE`
   (`ProgramLayoutIndex.call_return_code`, `S9(4)` binary). The CALL's
   fixture row then gets a `RETURN-CODE` column: the scenario's witness, else
   `0`. Any other RETURN-CODE read is unsupported: "RETURN-CODE is modeled

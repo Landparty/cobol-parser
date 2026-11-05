@@ -711,3 +711,18 @@ class TestCallReturnCode:
         assert int(else_20["SUBY"]) <= 4
         # The other CALL's mock still reports success.
         assert then_20["SUBX"] == "0"
+
+    def test_a_call_in_another_branch_arm_does_not_drive_the_comparison(self):
+        source = self.SOURCE.replace(
+            "           CALL 'SUBY' USING WS-IN\n",
+            "           IF WS-IN = 'X'\n"
+            "              CALL 'SUBY' USING WS-IN\n"
+            "           END-IF\n",
+        )
+        result = parse_cobol(source, filename="t.cbl")
+        index = ProgramLayoutIndex.build(result.ast)
+        report = BoundaryInventoryAnalyzer().analyze(result.ast, index)
+        constraints = ConstraintExtractor().extract(result.ast, index, report)
+        (branch,) = [b for b in constraints.branches if b.line == 22]
+        assert not any(branch.arms.values())
+        assert any("RETURN-CODE" in note for note in branch.unsupported)
