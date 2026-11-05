@@ -142,6 +142,15 @@ class TestDisplayScreenPhrases:
             "FOREGROUND-COLOR IS 2",
         ]
 
+    def test_position_is_a_phrase(self):
+        """POSITION lexes as TokenType.POSITION, not an identifier (#826)."""
+        stmt = self._display("DISPLAY WS-IDX POSITION 5 HIGHLIGHT")
+        assert stmt.display_items == ["WS-IDX"]
+        assert stmt.screen_phrases == ["POSITION 5", "HIGHLIGHT"]
+        assert stmt.is_screen_display
+        stmt = self._display("DISPLAY WS-IDX LINE 2 POSITION 5 REVERSE-VIDEO")
+        assert stmt.screen_phrases == ["LINE 2", "POSITION 5", "REVERSE-VIDEO"]
+
     def test_one_position_per_item(self):
         stmt = self._display("DISPLAY 'YOU: ' AT 0204 WS-IDX AT 0217")
         assert stmt.display_items == ['"YOU: "', "WS-IDX"]

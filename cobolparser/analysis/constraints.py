@@ -38,6 +38,7 @@ from ..models.statements.base import (
     ConditionalExpression,
     LogicalExpression,
 )
+from ..models.statements.call import CallStatement
 from ..models.statements.control import (
     EvaluateStatement,
     GoStatement,
@@ -59,6 +60,7 @@ from .boundary_inventory import (
     BoundaryRef,
     BoundaryReport,
     _condition_field_names,
+    _write_targets,
     call_argument_data_name,
 )
 
@@ -396,6 +398,11 @@ class BranchConstraints:
     #: elsewhere into one scenario: the merged case ran the ending arm and
     #: never the other while it was reported verified (bug hunt 2026-11-05).
     ending_arms: frozenset[str] = frozenset()
+    #: OR-split arm id (``THEN#2``, ``WHEN_3#2``) -> how many of its leading
+    #: `arms` conjuncts are the disjunct itself; the rest negate the other
+    #: disjuncts and earlier WHENs (#834). The scenario is named for the
+    #: disjunct alone.
+    disjunct_lengths: dict[str, int] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         extra: dict[str, Any] = {}
@@ -638,6 +645,9 @@ class ConstraintExtractor:
             unsupported,
             site,
         )
+        disjunct_lengths: dict[str, int] = {}
+        _record_disjunct_lengths(disjunct_lengths, "THEN", then_variants)
+        then_variants = _isolate_disjuncts(then_variants, f"IF@{line}", unsupported)
         _register_variants(arms, "THEN", then_variants, correlations)
 
         else_variants = _extract_expr(
@@ -648,6 +658,10 @@ class ConstraintExtractor:
             f"IF@{line}/ELSE",
             unsupported,
             site,
+        )
+        _record_disjunct_lengths(disjunct_lengths, "ELSE", else_variants)
+        else_variants = _isolate_disjuncts(
+            else_variants, f"IF@{line}/ELSE", unsupported
         )
         _register_variants(arms, "ELSE", else_variants, correlations)
 
@@ -662,6 +676,7 @@ class ConstraintExtractor:
                     unsupported=unsupported,
                     enclosing=enclosing,
                     correlations=correlations,
+                    disjunct_lengths=disjunct_lengths,
                 )
             )
 
@@ -701,6 +716,7 @@ class ConstraintExtractor:
         is_true_form = isinstance(subject, str) and subject.strip().upper() == "TRUE"
 
         any_when_unsupported = False
+        disjunct_lengths: dict[str, int] = {}
         # Each WHEN arm's own selector constraints, before the earlier arms'
         # negations are conjoined -- what WHEN OTHER and later arms negate.
         own_arms: dict[str, list[FieldConstraint]] = {}
@@ -754,10 +770,11 @@ class ConstraintExtractor:
                         + _negate_earlier_whens(
                             own_arms, any_when_unsupported, origin, unsupported, variant
                         )
-                        for variant in variants
+                        for variant in _isolate_disjuncts(variants, origin, unsupported)
                     ],
                 )
                 _register_variants(own_arms, arm_id, variants)
+                _record_disjunct_lengths(disjunct_lengths, arm_id, variants)
             else:
                 any_when_unsupported = True
 
@@ -806,6 +823,7 @@ class ConstraintExtractor:
                     unsupported=unsupported,
                     enclosing=enclosing,
                     unmodeled_arms=unmodeled_arms,
+                    disjunct_lengths=disjunct_lengths,
                 )
             )
 
@@ -1287,6 +1305,77 @@ def _negate_earlier_whens(
     return negations
 
 
+def _record_disjunct_lengths(
+    lengths: dict[str, int],
+    base_arm_id: str,
+    variants: list[list[FieldConstraint]],
+) -> None:
+    """Note each OR-split variant's own conjunct count, under the arm id
+    :func:`_register_variants` gives it."""
+    if len(variants) < 2:
+        return
+    for position, variant in enumerate(variants, start=1):
+        lengths[f"{base_arm_id}#{position}"] = sum(
+            1 for c in variant if not isinstance(c, CorrelationConstraint)
+        )
+
+
+def _isolate_disjuncts(
+    variants: list[list[FieldConstraint]],
+    origin: str,
+    unsupported: list[str],
+) -> list[list[FieldConstraint]]:
+    """Each OR disjunct's variant, with every other disjunct negated (#834).
+
+    A scenario named for one disjunct (``WHEN TYPE-B OR WS-AMT > 1000
+    [WS-AMT > 1000]``) must reach the arm through that disjunct: left free,
+    the others could hold too (WS-TYPE 'B'), and the boundary case derived
+    from it (1000.01) would test nothing about the comparison. A disjunct is
+    negated as an earlier WHEN is (one conjunct, on a field this variant
+    leaves free first), and only when the negation still admits this
+    variant's own values; one that cannot be is left free, and `unsupported`
+    says so.
+    """
+    if len(variants) < 2:
+        return variants
+    isolated: list[list[FieldConstraint]] = []
+    for position, variant in enumerate(variants):
+        own = [c for c in variant if not isinstance(c, CorrelationConstraint)]
+        own_fields = {c.field.spec.qualified_name for c in own}
+        extra: list[FieldConstraint] = []
+        complete = True
+        for other_position, other in enumerate(variants):
+            if other_position == position:
+                continue
+            conjuncts = [c for c in other if not isinstance(c, CorrelationConstraint)]
+            if len(conjuncts) != len(other) or not conjuncts:
+                complete = False
+                continue
+            ordered = sorted(
+                conjuncts, key=lambda c: c.field.spec.qualified_name in own_fields
+            )
+            negated: FieldConstraint | None = None
+            for conjunct in ordered:
+                candidate = _negate_constraint(conjunct)
+                if candidate is not None and _admits(candidate, [*own, *extra]):
+                    negated = candidate
+                    break
+            if negated is None:
+                complete = False
+            elif not any(_same_constraint(negated, done) for done in [*own, *extra]):
+                extra.append(negated)
+        if not complete:
+            note = (
+                f"{origin}: disjunct {position + 1} is not isolated from the "
+                "other OR disjuncts; its scenario may reach the arm through "
+                "another one"
+            )
+            if note not in unsupported:
+                unsupported.append(note)
+        isolated.append(variant + extra)
+    return isolated
+
+
 def _same_constraint(a: FieldConstraint, b: FieldConstraint) -> bool:
     return (
         a.field.spec.qualified_name == b.field.spec.qualified_name
@@ -1495,6 +1584,32 @@ def _build_relational_constraint(
         return None
     left_text = _fold_cics_value(left_text)
     right_text = _fold_cics_value(right_text) if right_text else right_text
+    if site is not None:
+        # RETURN-CODE (or a field MOVEd from it) right after a CALL: the
+        # callee sets it, so the CALL's mock supplies it (#831).
+        for text, other, flip in (
+            (left_text, right_text, False),
+            (right_text, left_text, True),
+        ):
+            returned = site.carriers.call_return_code(site, text)
+            if returned is None:
+                continue
+            if isinstance(returned, str):
+                unsupported.append(f"{origin}: {returned}")
+                return None
+            if not other or not _is_literal_operand(other, quoted=quoted_operands):
+                unsupported.append(
+                    f"{origin}: RETURN-CODE compared with a non-literal operand: "
+                    f"{other!r}"
+                )
+                return None
+            return FieldConstraint(
+                returned,
+                _FLIPPED_RELATIONAL[op] if flip else op,
+                (_literal_value(other),),
+                origin,
+                negated=False,
+            )
     left_field = index.resolve(left_text)
     right_field = index.resolve(right_text) if right_text else None
     if left_field is not None and right_field is not None:
@@ -1525,6 +1640,15 @@ def _build_relational_constraint(
         field_ref, value_text = right_field, left_text
         op = _FLIPPED_RELATIONAL[op]
     else:
+        if "RETURN-CODE" in (
+            left_text.strip().upper(),
+            (right_text or "").strip().upper(),
+        ):
+            unsupported.append(
+                f"{origin}: RETURN-CODE is modeled only in an IF after a CALL in "
+                "the same paragraph"
+            )
+            return None
         unsupported.append(
             f"{origin}: unresolvable operand(s) in comparison: {left_text!r} / {right_text!r}"
         )
@@ -1904,6 +2028,7 @@ class _Carriers:
         self._fed = fed_names
         self._moves: dict[str, list[tuple[str, MoveStatement, bool]]] | None = None
         self._xref: Any = None
+        self._by_paragraph: dict[str, list[tuple[Any, Any]]] | None = None
 
     def _collect(self) -> dict[str, list[tuple[str, MoveStatement, bool]]]:
         if self._moves is None:
@@ -1918,6 +2043,90 @@ class _Carriers:
                             resolved.spec.qualified_name.upper(), []
                         ).append((paragraph or "", statement, bool(enclosing)))
         return self._moves
+
+    def _paragraph_statements(self, paragraph: str) -> list[tuple[Any, Any]]:
+        """Every statement of *paragraph*, nested ones included, in source
+        order, each with its enclosing ``(branch_id, arm_id)`` chain."""
+        if self._by_paragraph is None:
+            self._by_paragraph = {}
+            for name, statement, enclosing in _walk_statements(self._procedure):
+                self._by_paragraph.setdefault((name or "").upper(), []).append(
+                    (statement, tuple(enclosing))
+                )
+        return self._by_paragraph.get(paragraph.upper(), [])
+
+    def call_return_code(self, site: _CarrierSite, text: str | None) -> Any:
+        """The RETURN-CODE a CALL leaves for the comparison at *site* (#831).
+
+        *text* is ``RETURN-CODE`` itself, or a working field whose last write
+        before the comparison is ``MOVE RETURN-CODE TO it``. Its value is
+        the RETURN-CODE of the nearest CALL before that, in the same
+        paragraph, with nothing else writing RETURN-CODE (or the field) in
+        between -- exact by construction, the callee's mock sets it.
+
+        Returns the CALL's synthetic RETURN-CODE field
+        (:meth:`ProgramLayoutIndex.call_return_code`), a reason string when
+        RETURN-CODE is read but no such CALL is found, or None when *text*
+        has nothing to do with RETURN-CODE.
+        """
+        if not text:
+            return None
+        name = text.strip().upper()
+        statements = [
+            (s, enclosing)
+            for s, enclosing in self._paragraph_statements(site.paragraph)
+            if s.location is not None and s.location.line < site.line
+        ]
+        here = tuple(site.enclosing)
+
+        def always_runs(enclosing: Any) -> bool:
+            # On every path to the comparison: its branch arms are the
+            # comparison's own, or enclose them.
+            return tuple(enclosing) == here[: len(enclosing)]
+
+        read_at = site.line
+        if name != "RETURN-CODE":
+            resolved = self._index.resolve(name)
+            if resolved is None or _is_boundary_fed(resolved, self._fed):
+                return None
+            qualified = resolved.spec.qualified_name.upper()
+            move = None
+            for statement, enclosing in reversed(statements):
+                written = {
+                    (r.spec.qualified_name.upper() if r is not None else None)
+                    for r in (
+                        self._index.resolve(str(t)) for t in _write_targets(statement)
+                    )
+                }
+                if qualified not in written:
+                    continue
+                if (
+                    isinstance(statement, MoveStatement)
+                    and str(statement.source or "").strip().upper() == "RETURN-CODE"
+                    and always_runs(enclosing)
+                ):
+                    move = statement
+                break
+            if move is None:
+                return None
+            read_at = move.location.line
+        for statement, enclosing in reversed(statements):
+            if statement.location.line >= read_at:
+                continue
+            if isinstance(statement, CallStatement):
+                if not always_runs(enclosing):
+                    # A CALL in another branch arm may not have run (#831).
+                    break
+                return self._index.call_return_code(statement.location.line)
+            if any(
+                str(t).strip().upper() == "RETURN-CODE"
+                for t in _write_targets(statement)
+            ):
+                break
+        return (
+            "RETURN-CODE is read with no CALL before it in the same paragraph, "
+            "so which call sets it is not modeled"
+        )
 
     def _references(self) -> Any:
         if self._xref is None:

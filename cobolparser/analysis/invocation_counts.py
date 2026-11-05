@@ -19,6 +19,9 @@ statement it reaches either an exact execution count or "unknown":
   PARAGRAPH / SECTION / PERFORM, NEXT SENTENCE, STOP RUN, GOBACK, EXIT
   PROGRAM), everything after it is unknown too: the walk cannot tell whether
   it still runs;
+* an EXIT PARAGRAPH / SECTION, or a GO TO forward inside the range, on the
+  certain path of a PERFORMed range (n TIMES included) just moves on inside
+  that range: what it skips never runs, every other count stays exact (#827);
 * a GO TO on the certain path is followed only forward, into code not yet
   walked. A jump back is a loop with a data-dependent trip count, so no
   count is reported at all; the same for a GO TO out of a PERFORMed
@@ -89,6 +92,7 @@ from .const_fold import (
     _ordered_paragraphs,
     _perform_body_statements,
     _procedure_ranges,
+    _procedure_span,
     _range_statements,
     _transfer_kind,
 )
@@ -243,6 +247,11 @@ class _Frame:
     #: Inside a `PERFORM n TIMES` body: a transfer here leaves the loop
     #: early, so counts already multiplied would overstate.
     looped: bool = False
+    #: An out-of-line PERFORM's range: the procedure names (paragraphs and
+    #: section markers, as in ``ordered_names``) its statements come from, so
+    #: an EXIT PARAGRAPH / SECTION or a forward GO TO inside the range can
+    #: resume the frame where control goes (#827).
+    range_names: list[str] | None = None
 
 
 @dataclass
@@ -283,6 +292,12 @@ class _Walk:
         self.has_alter = any(
             isinstance(stmt, AlterStatement) for stmt in ast.get_all_statements()
         )
+        #: ``id(statement)`` -> UPPERCASED paragraph, for top-level statements.
+        self.paragraph_of: dict[int, str] = {
+            id(stmt): name
+            for name, paragraph in self.by_name.items()
+            for stmt in paragraph.statements
+        }
 
     # -- bookkeeping ------------------------------------------------------
 
@@ -364,6 +379,10 @@ class _Walk:
         if self._transfers(stmt):
             if frame.multiplier is None:
                 self.region_transfer = True
+            elif self.skip_within_range(stmt, frame):
+                # The frame resumes where control goes inside the range: the
+                # statements skipped never run, the others keep their count.
+                pass
             elif frame.looped:
                 self.poisoned = True
             elif _transfer_kind(stmt) == "skip":
@@ -396,6 +415,58 @@ class _Walk:
                 self.uncertain = True
             else:
                 self.push_region([body], exempt=False)
+
+    def skip_within_range(self, stmt: Any, frame: _Frame) -> bool:
+        """Resume *frame* past *stmt* when it jumps forward inside the range.
+
+        In a PERFORMed range, EXIT PARAGRAPH goes to the next paragraph,
+        EXIT SECTION to the next section, and a GO TO to a later procedure of
+        the range goes there; reaching the range's end returns from the
+        PERFORM. None of that changes how often the code before it runs, or
+        whether the code after the PERFORM runs (#827), so the frame's
+        iterator is moved instead of the counts being dropped. False, changing
+        nothing, for any other transfer.
+        """
+        names = frame.range_names
+        paragraph = self.paragraph_of.get(id(stmt))
+        if names is None or paragraph is None or paragraph not in names:
+            return False
+        here = names.index(paragraph)
+        resume: int | None = None
+        if isinstance(stmt, ExitStatement) and stmt.exit_type == "PARAGRAPH":
+            resume = here + 1
+        elif isinstance(stmt, ExitStatement) and stmt.exit_type == "SECTION":
+            resume = next(
+                (
+                    i
+                    for i in range(here + 1, len(names))
+                    if names[i].startswith(_SECTION_KEY)
+                ),
+                len(names),
+            )
+        elif isinstance(stmt, GoStatement) and not (
+            self.has_alter or stmt.depending_on_variable
+        ):
+            targets = list(stmt.target_paragraphs) or (
+                [stmt.target_paragraph] if stmt.target_paragraph else []
+            )
+            if len(targets) == 1:
+                key = targets[0].upper()
+                marker = f"{_SECTION_KEY}{key}"
+                target = key if key in names else marker
+                if target in names[here + 1 :]:
+                    resume = names.index(target, here + 1)
+        if resume is None:
+            return False
+        frame.statements = iter(
+            [
+                inner
+                for name in names[resume:]
+                if name in self.by_name
+                for inner in self.by_name[name].statements
+            ]
+        )
+        return True
 
     def push_if(self, stmt: IfStatement) -> None:
         """An IF's arms; only the arm a success status never takes is exempt.
@@ -509,10 +580,28 @@ class _Walk:
             inner = None
             if multiplier is not None:
                 inner = multiplier * (times if times is not None else 1)
-            self.stack.append(_Frame(iter(body), inner, target, looped))
+            self.stack.append(
+                _Frame(iter(body), inner, target, looped, self._range_names(stmt))
+            )
             return
         # UNTIL / VARYING / a TIMES count held in a data item: zero or more.
         self.push_region([body], exempt=False)
+
+    def _range_names(self, stmt: PerformStatement) -> list[str] | None:
+        """The ``ordered_names`` slice an out-of-line PERFORM runs, else None."""
+        if stmt.inline_statements or not stmt.target_paragraph:
+            return None
+        start = _procedure_span(
+            stmt.target_paragraph.upper(), self.ordered_names, last=False
+        )
+        end = _procedure_span(
+            (stmt.thru_paragraph or stmt.target_paragraph).upper(),
+            self.ordered_names,
+            last=True,
+        )
+        if start is None or end is None or end < start:
+            return None
+        return self.ordered_names[start : end + 1]
 
     # -- predicates -------------------------------------------------------
 
