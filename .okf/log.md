@@ -14,6 +14,12 @@ deliberate. Anything else appended to the bottom is a mistake: five
 entries, including both 2026-09-15 sections, were found there on
 2026-09-15 and moved back up.
 
+## 2026-11-05 -- CLI first-run friendliness
+
+- [cli.md](cli.md): the grouped top-level `--help` (`cli/_help.py`), the
+  bare-invocation overview, `_reject_mistyped_command`, the directory-as-FILE
+  error, `_warn_missing_search_dirs` and `_hint_unexpanded_copybooks`.
+
 ## 2026-11-05 -- generated scenarios that never reached their branch (round 2)
 
 - [analysis/fixtures-support.md](analysis/fixtures-support.md): compound
