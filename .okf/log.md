@@ -14,6 +14,13 @@ deliberate. Anything else appended to the bottom is a mistake: five
 entries, including both 2026-09-15 sections, were found there on
 2026-09-15 and moved back up.
 
+## 2026-11-05 -- README lists every command and API entry point
+
+- README.md: one example per subcommand (all 41, grouped as `cli/_help.py`
+  `COMMAND_GROUPS` groups them) and per public Python entry point, against
+  one sample project layout; exit-code table. [tests.md](tests.md): the new
+  `tests/test_readme_examples.py` runs them all.
+
 ## 2026-11-05 -- generated scenarios that never reached their branch (round 2)
 
 - [analysis/fixtures-support.md](analysis/fixtures-support.md): compound
