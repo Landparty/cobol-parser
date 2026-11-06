@@ -419,7 +419,23 @@ class CopybookDataGenerator:
             varying=varying,
             declared_lengths=lengths,
             caveats=caveats,
+            record_image_gap=self._record_image_gap(record, fields),
         )
+
+    def _record_image_gap(
+        self, record: CobolDataItem, fields: list[FieldSpec]
+    ) -> tuple[int, int] | None:
+        """``(covered, full)`` byte lengths when these options' layout is
+        shorter than the record-image one; ``None`` when it is not."""
+        full_options = self.options.for_record_image()
+        if full_options == self.options:
+            return None
+        try:
+            full = record_length(flatten_record(record, full_options))
+            have = record_length(fields)
+        except Exception:  # noqa: BLE001 -- a diagnostic, never a failure
+            return None
+        return (have, full) if have < full else None
 
     def _unique_caveats(
         self, record: CobolDataItem, fields: list[FieldSpec], factory: ValueFactory

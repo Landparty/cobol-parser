@@ -7,7 +7,7 @@ entry points.
 
 from collections import deque
 
-from .edges import INTERNAL_EDGE_TYPES
+from .edges import INTERNAL_EDGE_TYPES, PERFORM_EDGE_TYPES
 from .models import BranchNode, FlowEdge, FlowEdgeType, FlowNode
 
 
@@ -20,6 +20,7 @@ def build_fall_through_edges(
     section_ends: dict[str, str] | None = None,
     sections_entered: set[str] | None = None,
     declarative_sections: set[str] | None = None,
+    entry_points: list[str] | None = None,
 ) -> None:
     """Build fall-through edges between sequential paragraphs.
 
@@ -41,6 +42,12 @@ def build_fall_through_edges(
     into the next declarative section or past END DECLARATIVES into the
     main code (#533). Its last member, and an EXIT SECTION in it, get no
     fall-through edge.
+
+    Given *entry_points* (the first procedure and every ENTRY), a procedure
+    control only ever reaches by PERFORM, as the last procedure of the
+    performed range, gets no fall-through edge either: when it ends, control
+    returns to the performer (see :func:`_sequential_procedures`). Without
+    it, every paragraph that does not stop falls through, as before.
     """
     exits = exit_section_procedures or {}
     ends = section_ends or {}
@@ -48,6 +55,20 @@ def build_fall_through_edges(
     declarative = declarative_sections or set()
     declarative_ends = {ends.get(section, section) for section in declarative}
     position = {name: i for i, name in enumerate(ordered_procedures)}
+    falls_on = (
+        None
+        if entry_points is None
+        else _sequential_procedures(
+            nodes,
+            edges,
+            ordered_procedures,
+            terminating_paragraphs,
+            entry_points,
+            ends,
+            entered,
+            declarative,
+        )
+    )
     fallen_into: set[str] = set()
     for i in range(len(ordered_procedures) - 1):
         current = ordered_procedures[i]
@@ -96,6 +117,8 @@ def build_fall_through_edges(
             continue
         if current in declarative_ends:
             continue
+        if falls_on is not None and current not in falls_on:
+            continue
 
         fallen_into.add(next_proc)
         edges.append(
@@ -106,6 +129,76 @@ def build_fall_through_edges(
                 location=node.location,
             )
         )
+
+
+def _sequential_procedures(
+    nodes: dict[str, FlowNode],
+    edges: list[FlowEdge],
+    ordered_procedures: list[str],
+    terminating_paragraphs: set[str],
+    entry_points: list[str],
+    section_ends: dict[str, str],
+    sections_entered: set[str],
+    declarative_sections: set[str],
+) -> set[str]:
+    """The procedures whose end can run on into the next procedure.
+
+    A PERFORM of ``A`` (``THRU C``) returns to its performer at the end of
+    ``C`` (of ``A`` without THRU; of a section's last member when the range
+    ends on a section): only ``A`` up to the procedure before that end fall
+    through *because of* the PERFORM. Any procedure control can also reach
+    otherwise -- the entry point or an ENTRY, the target of a GO TO, ALTER,
+    CICS HANDLE or SQL WHENEVER, a member of a section entered from outside,
+    a DECLARATIVES procedure, a procedure nothing at all reaches and no
+    performed range holds (left as it was, so dead-code results do not
+    move), or the one after another such
+    procedure that does not stop -- falls through as well.
+
+    So ``1000-READ-EMP`` (only ever PERFORMed, from a main paragraph that
+    ends in GOBACK) no longer gets an edge into ``2000-PAY-EMP`` and a
+    "cycle" back through it (cobol-test run on PAYMAIN, 2026-11-06).
+    """
+    position = {name: i for i, name in enumerate(ordered_procedures)}
+    in_range: set[str] = set()
+    covered: set[str] = set()  # every procedure some performed range holds
+    incoming: dict[str, set[FlowEdgeType]] = {}
+    for edge in edges:
+        if edge.target not in position:
+            continue
+        incoming.setdefault(edge.target, set()).add(edge.edge_type)
+        if edge.edge_type not in PERFORM_EDGE_TYPES:
+            continue
+        start = position[edge.target]
+        last_name = edge.thru_target or edge.target
+        last_name = section_ends.get(last_name, last_name)
+        last = position.get(last_name)
+        if last is None or last < start:
+            continue
+        in_range.update(ordered_procedures[start:last])
+        covered.update(ordered_procedures[start : last + 1])
+
+    free: set[str] = set(entry_points)
+    for name in ordered_procedures:
+        node = nodes.get(name)
+        kinds = incoming.get(name)
+        if kinds and any(kind not in PERFORM_EDGE_TYPES for kind in kinds):
+            free.add(name)
+        elif not kinds and name not in covered:
+            free.add(name)
+        elif node is not None and node.is_declarative:
+            free.add(name)
+    for section in sections_entered | declarative_sections:
+        first_at = position.get(section)
+        last_at = position.get(section_ends.get(section, section))
+        if first_at is not None and last_at is not None:
+            free.update(ordered_procedures[first_at : last_at + 1])
+
+    falls_on = set(in_range)
+    for index, name in enumerate(ordered_procedures[:-1]):
+        if name in free and name not in terminating_paragraphs:
+            falls_on.add(name)
+            free.add(ordered_procedures[index + 1])
+    return falls_on
 
 
 def compute_convergence_nodes(

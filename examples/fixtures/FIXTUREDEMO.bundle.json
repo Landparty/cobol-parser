@@ -151,7 +151,7 @@
           "key": "LOGALERT",
           "paragraph": "MAIN-PROCESS",
           "line": 52,
-          "direction": "",
+          "direction": "BIDIRECTIONAL",
           "layout": [
             {
               "name": "WS-ALERT-STATUS",

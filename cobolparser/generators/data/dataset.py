@@ -5,6 +5,7 @@ from __future__ import annotations
 import csv
 import io
 import os
+import warnings
 from dataclasses import dataclass, field, replace
 from typing import Any
 
@@ -19,6 +20,16 @@ from .layout import FieldSpec, VaryingLength
 # .write_csv must agree, or the same seed writes different bytes to stdout
 # than to --output.
 _DEFAULT_LINE_TERMINATOR = "\n"
+
+
+class IncompleteRecordImageWarning(UserWarning):
+    """A record image was built from a layout that leaves bytes out.
+
+    :class:`~.options.DataGeneratorOptions`' defaults are CSV-shaped: they
+    skip FILLER and cap OCCURS, which is right for columns and wrong for a
+    record image.  Before this warning the short records went out with
+    nothing saying so (ORDREC: 101 bytes written for a 110-byte record).
+    """
 
 
 @dataclass
@@ -49,6 +60,14 @@ class GeneratedDataset:
             says so.  :attr:`RecordFormat.FIXED` records are padded out to
             it with spaces, so the file is the one ``decode`` frames.
             ``None`` means the layout's own length is the LRECL.
+        record_image_gap: ``(bytes these fields cover, bytes the record
+            holds)`` when the options left part of the record out -- the
+            CSV-shaped defaults skip FILLER and cap OCCURS.  The record-image
+            outputs (:meth:`to_records`, :meth:`write_records`,
+            :meth:`to_hex_dump`, :meth:`record_length`) then emit an
+            :class:`IncompleteRecordImageWarning`, since their records would
+            be short with nothing else saying so.  ``None`` when every byte
+            is covered.
     """
 
     record_name: str
@@ -59,6 +78,21 @@ class GeneratedDataset:
     declared_lengths: list[int] | None = None
     caveats: list[str] = field(default_factory=list)
     lrecl: int | None = None
+    record_image_gap: tuple[int, int] | None = None
+
+    def _warn_if_incomplete(self, what: str) -> None:
+        """Warn once per call that *what* is built from a lossy layout."""
+        if self.record_image_gap is None:
+            return
+        have, full = self.record_image_gap
+        warnings.warn(
+            f"{self.record_name}: {what} covers {have} of the record's {full} "
+            "bytes -- the options skip FILLER or cap OCCURS, so every record "
+            "is short. Generate with DataGeneratorOptions(...)"
+            ".for_record_image() for a record image a program can read.",
+            IncompleteRecordImageWarning,
+            stacklevel=3,
+        )
 
     @property
     def header(self) -> list[str]:
@@ -105,8 +139,10 @@ class GeneratedDataset:
         Only meaningful when the dataset was generated with
         :meth:`~.options.DataGeneratorOptions.for_record_image` options --
         otherwise FILLER and capped OCCURS leave holes, and this reports the
-        length of a record that no program would recognise.
+        length of a record that no program would recognise, and an
+        :class:`IncompleteRecordImageWarning` says so.
         """
+        self._warn_if_incomplete("record_length()")
         return _record_length(self.fields)
 
     def minimum_record_length(self) -> int:
@@ -188,7 +224,12 @@ class GeneratedDataset:
         nibbles, a ``COMP`` field a big-endian integer, a signed DISPLAY
         field an overpunched sign.  See :mod:`.encoding` for the conventions
         and their documented limits.
+
+        Emits an :class:`IncompleteRecordImageWarning` when the dataset was
+        generated with options that leave bytes out (see
+        :attr:`record_image_gap`).
         """
+        self._warn_if_incomplete("to_records()")
         options = self._resolved_options(opts)
         return b"".join(
             encode_record(
@@ -213,7 +254,11 @@ class GeneratedDataset:
         0x0A and 0x0D, and a text-mode write would corrupt them on Windows.
         """
         with open(path, "wb") as handle:
-            handle.write(self.to_records(opts))
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore", IncompleteRecordImageWarning)
+                records = self.to_records(opts)
+            self._warn_if_incomplete("write_records()")
+            handle.write(records)
 
     def to_hex_dump(self, opts: EncodingOptions | None = None) -> str:
         """Render the record images as an annotated hex dump.
@@ -222,6 +267,7 @@ class GeneratedDataset:
         offset, length, and field each one belongs to.  Use this when a human
         is looking at the output; use :meth:`to_records` when a program is.
         """
+        self._warn_if_incomplete("to_hex_dump()")
         return hex_dump(
             self.fields,
             self.rows,

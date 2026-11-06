@@ -323,7 +323,8 @@ must *agree*: generating from `--record CUST-REC` and decoding through
 `--record CUST-REC` must land on the same 01, or a round trip through the
 record image silently changes layout.
 The rest of `copybook.py` is generation-only (value drawing, `unique_fields`
-caveats, #526) and never reaches the decoder.
+caveats, #526, the `record_image_gap` that makes short record images warn)
+and never reaches the decoder.
 
 ## Tests
 
