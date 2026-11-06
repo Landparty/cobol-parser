@@ -347,6 +347,15 @@ before the next chunk, so few ASTs are live at once. Backs the `call-check`
 CLI subcommand. Over the 459 NIST programs: 121 checked calls, 0 findings.
 Tests: `tests/unit/analysis/test_call_interface.py`.
 
+`CalleeResolver(callee_paths, copybook_paths=...)` checks one program's CALLs
+against callees found on disk (`find_callee_file`: `NAME` plus
+`CALLEE_EXTENSIONS`, as written or lower case, first directory wins), parsing each
+callee once per resolver. `check_program(path, ast)` returns a `CalleeCheck`
+(`report`, `not_found`); a callee that fails to parse or has no PROCEDURE
+DIVISION is noted in `unchecked`, never compared. It backs `lint
+--callee-path` (the `call-check` lint rule, see
+[lint.md](lint.md)). Tests: `tests/unit/analysis/test_bug_patterns.py`.
+
 ## ProgramDiffer
 
 A line-based `diff` over COBOL answers "what lines moved", which is almost never

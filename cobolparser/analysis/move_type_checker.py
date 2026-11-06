@@ -551,6 +551,19 @@ def _classify_literal(value: str) -> DataCategory:
     return DataCategory.UNKNOWN
 
 
+def _is_digit_string_literal(value: str) -> bool:
+    """Whether *value* is a quoted literal made only of digits (``'05'``).
+
+    Moved to a numeric item it is read as an unsigned integer of those
+    digits, exactly as the numeric literal ``05`` would be, so it can never
+    put non-numeric data in the target.
+    """
+    text = value.strip()
+    if len(text) < 3 or text[0] not in "'\"" or text[-1] != text[0]:
+        return False
+    return text[1:-1].isdigit()
+
+
 def _item_entry(node: CobolDataItem) -> tuple[DataCategory, bool, bool] | None:
     """``(category, non-integer, is-group)`` of a data item, or ``None`` when
     its description gives it no category this checker models."""
@@ -996,7 +1009,10 @@ class MoveTypeChecker:
                     ),
                 )
             )
-        elif pair in _WARN_MOVES:
+        elif pair in _WARN_MOVES and not (
+            target_cat in (DataCategory.NUMERIC, DataCategory.NUMERIC_EDITED)
+            and _is_digit_string_literal(source_name)
+        ):
             violations.append(
                 MoveTypeViolation(
                     kind=MoveViolationKind.WARNING,

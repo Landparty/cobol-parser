@@ -195,6 +195,11 @@ class UnusedVariableItem:
     #: ``"AMT OF OUT-REC"`` (every enclosing item, innermost first) when
     #: another declared item shares this one's name, else ``None``.
     qualified_name: str | None = None
+    #: The nearest enclosing group the PROCEDURE DIVISION names directly
+    #: (``IF ACCTFILE-STATUS = '00'`` for ``ACCTFILE-STAT1``), else ``None``.
+    #: The item's storage is then read or written through that group; only
+    #: its own name goes unused, so lint grades it info rather than warning.
+    used_group: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         result: dict[str, Any] = {
@@ -206,6 +211,8 @@ class UnusedVariableItem:
         }
         if self.qualified_name:
             result["qualified_name"] = self.qualified_name
+        if self.used_group:
+            result["used_group"] = self.used_group
         return result
 
 
@@ -858,6 +865,16 @@ class UnusedVariableAnalyzer:
             1 for item in declared_items if group_used.get(id(item))
         )
 
+        def named_group(item: CobolDataItem) -> str | None:
+            """The nearest ancestor of *item* referenced by its own name."""
+            node = getattr(item, "parent", None)
+            while isinstance(node, CobolDataItem):
+                refs = global_refs if id(node) in global_ids else own_refs
+                if refs.names(node):
+                    return str(node.name)
+                node = getattr(node, "parent", None)
+            return None
+
         for item in declared_items:
             if group_used.get(id(item)):
                 continue
@@ -875,6 +892,7 @@ class UnusedVariableAnalyzer:
                     location=item.location,
                     from_copybook=from_copybook,
                     qualified_name=qualified_data_name(item, by_name),
+                    used_group=named_group(item),
                 )
             )
 

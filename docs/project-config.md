@@ -162,6 +162,21 @@ the same name on `gen-data`, `decode` and `compare`; `rows` fills `--rows` on
 | `rules` | list of rule ids (`dead-code`, `unused-variables`, `move-type-check`, `io-sequence`, `linkage-check`, `recursion-check`, `complexity`, `dclgen-check`, `sql-cics-check`, `line-length`) |
 | `min_severity` | `error` \| `warning` \| `info` |
 | `fail_on` | `error` \| `warning` \| `info` \| `never` |
+| `disable` | list of rule ids never to run |
+| `severity` | mapping of a rule id, or `rule/KIND`, to `error` \| `warning` \| `info` |
+| `exclude` | list of globs of files `lint` leaves out (relative to this file; `*` also crosses folders) |
+| `baseline` | path of a `lint --write-baseline` file (relative to this file) |
+
+```yaml
+lint:
+  fail_on: warning
+  disable: [complexity]
+  severity:
+    recursion-check: warning              # a whole rule
+    io-sequence/FILE_LEFT_OPEN: error     # one kind of finding
+  exclude: ["legacy/*"]
+  baseline: lint-baseline.json
+```
 
 Like every key, these fill a flag by name wherever a subcommand has it.
 `call-check` and `widen-check` have `--min-severity` and `--fail-on` too, so

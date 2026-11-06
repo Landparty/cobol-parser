@@ -72,7 +72,15 @@ def test_every_table_command_and_flag_exists(command, flags):
 
 def test_lint_rule_list_matches_the_analyzer():
     text = " ".join(_skill_text().split())
-    words = {9: "nine", 10: "ten", 11: "eleven", 12: "twelve"}
+    words = {
+        9: "nine",
+        10: "ten",
+        11: "eleven",
+        12: "twelve",
+        16: "sixteen",
+        17: "seventeen",
+        18: "eighteen",
+    }
     assert f"`lint` runs {words[len(RULES)]} rules" in text
     for rule in RULES:
         assert f"`{rule}`" in text

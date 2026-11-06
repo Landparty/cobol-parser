@@ -233,6 +233,13 @@ class IfStatement(CobolStatement):
         self.condition: CobolExpression | None = None
         self.then_statements: list[CobolStatement] = []
         self.else_statements: list[CobolStatement] = []
+        # How the IF ended: True when an END-IF closed it (else a period, or
+        # the end of an enclosing scope), and whether that END-IF was
+        # directly followed by the sentence's period. Not serialized: they
+        # back the next-sentence lint rule, which needs to know whether a
+        # NEXT SENTENCE inside the IF skips statements after its END-IF.
+        self.ended_by_end_if: bool = False
+        self.period_after_end_if: bool = False
 
     def set_condition(self, condition: "CobolExpression") -> None:
         """Set the IF condition."""

@@ -50,6 +50,54 @@ cobol-parser lint --changed-since origin/main --format github
 | 2 | bad arguments |
 | 3 | a finding at or above `--fail-on` |
 
+## Adopting the gate on an existing codebase
+
+A legacy codebase starts with thousands of findings, so a gate that fails on
+any of them never goes green. Three tools get it there:
+
+* **A baseline.** Record today's findings once and commit the file; a run
+  with `--baseline` (or `lint.baseline` in `cobol.yml`) reports only findings
+  that are not in it. Findings are matched on rule, kind, file and the name
+  they are about, never the line, so editing a program does not turn its
+  known findings into new ones.
+
+  ```bash
+  cobol-parser lint --glob 'src/**/*.cbl' --write-baseline lint-baseline.json
+  cobol-parser lint --glob 'src/**/*.cbl' --baseline lint-baseline.json --fail-on warning
+  ```
+
+* **Inline suppression**, for a finding you have looked at and accept:
+
+  ```cobol
+        * cobol-lint: disable-next-line=dead-code
+         9000-OLD-RECALC.
+             MOVE A TO B    *> cobol-lint: disable=move-type-check
+        * cobol-lint: disable=unused-variables/WORKING-STORAGE
+         ...
+        * cobol-lint: enable=unused-variables
+        * cobol-lint: disable-file=complexity
+  ```
+
+  A rule id, `rule/KIND`, a comma-separated list, or nothing (every rule).
+  A directive inside a copybook silences that copybook's findings in every
+  program that COPYs it. The summary counts what was suppressed.
+
+* **Per-rule settings** in `cobol.yml`: `disable: [...]`, `severity:
+  {rule: level}` (or `rule/KIND`), and `exclude: [globs]` for folders lint
+  should never read.
+
+By default `--format text` and `github` show warnings and errors only;
+`json` and `sarif` carry every finding, info included. Several files are
+linted in parallel (`--workers`, default the CPU count).
+
+## Missing copybooks
+
+IBM's CICS copybooks `DFHAID` and `DFHBMSCA` are built in (searched after
+your `copybook_path`, so a real copy wins). Any other COPY lint cannot find
+is left out, the file is still linted, and the report's caveats name the
+member, since rules that needed its fields could not check them. Pass
+`--strict-copybooks` to fail such a file instead (exit 1).
+
 ## The `line-length` rule
 
 Fixed-format source is 80 columns, and the compiler reads only columns 8-72.
@@ -64,6 +112,21 @@ in every copybook they read:
 
 Free-format source has no column limit and is skipped. Select only this rule
 with `--rule line-length`.
+
+## Bug-pattern rules and CALL interfaces
+
+Seven rules look for common coding bugs: `truncation`, `subscript-range`,
+`next-sentence`, `perform-range`, `file-status`, `uninitialized` and
+`obsolete-verb`. They run by default; select one with `--rule truncation`.
+
+`call-check` compares each static CALL with the program it calls (argument
+count and byte lengths). It runs only when lint can find the callees: pass
+`--callee-path DIR` (repeatable) or set `project.callee_path` in `cobol.yml`.
+A callee it cannot find or parse becomes a caveat, never a finding.
+
+```bash
+cobol-parser lint src/PAYMAIN.cbl --callee-path src/ --fail-on error
+```
 
 ## GitHub Actions
 

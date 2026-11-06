@@ -1,14 +1,14 @@
 ---
 type: Module
 title: Static Analysis
-description: Routing page for cobolparser/analysis/ (33 public modules + the program_flow/ package + 6 private helpers) and dialects/le_signatures.py -- calling conventions shared by every analyzer, which .okf/analysis/*.md file covers which analyzer, the module map and the public imports.
+description: Routing page for cobolparser/analysis/ (34 public modules + the program_flow/ package + 6 private helpers) and dialects/le_signatures.py -- calling conventions shared by every analyzer, which .okf/analysis/*.md file covers which analyzer, the module map and the public imports.
 tags: [analysis, routing, dead-code, program-flow, lint, xref, field-lineage, business-rules, fixtures, codebase-graph, sql-cics-lint, le-signatures]
 timestamp: 2026-10-15T00:00:00Z
 ---
 
 # Static Analysis
 
-`cobolparser/analysis/` holds every static analyzer: 33 public modules, the
+`cobolparser/analysis/` holds every static analyzer: 34 public modules, the
 `program_flow/` package (the control-flow graph, 8 modules) and 6 private
 helpers (`_procedures.py`, `_names.py`, `_files.py`, `_cics.py`,
 `_sql_whenever.py`, `_sql_flow.py`) the analyzers share so they cannot
@@ -50,7 +50,7 @@ Report origins after copybook expansion: [analysis/lint.md](analysis/lint.md).
 | Control flow, reachability, dead paragraphs, loops, complexity, clones, debt score | `ProgramFlowAnalyzer`, `DeadCodeAnalyzer`, `RecursionRiskAnalyzer`, `ComplexityAnalyzer`, `RedundancyAnalyzer`, `TechnicalDebtAnalyzer` | [analysis/flow.md](analysis/flow.md) |
 | Data items, symbols, MOVEs, CALL/LINKAGE, file I/O order, CRUD, dynamic CALL values | `UnusedVariableAnalyzer`, `XrefAnalyzer`, `MoveTypeChecker`, `LinkageChecker`, `IOLogger`, `IOSequenceAnalyzer`, `CRUDMatrixGenerator`, `DynamicCallAnalyzer`, `IOCoverageReporter` | [analysis/data-use.md](analysis/data-use.md) |
 | Embedded SQL, DCLGEN, CICS, IMS DL/I, LE services and intrinsics | `HostVariableResolver`, `DclgenChecker`, `SqlCicsAnalyzer`, `IMSSegmentAnalyzer`, `LanguageEnvironmentAnalyzer`, `le_service_signature` | [analysis/sql-cics-ims.md](analysis/sql-cics-ims.md) |
-| One severity-graded finding list; source-map origins | `LintAnalyzer`, `apply_source_map`, `stamp_report_origins` | [analysis/lint.md](analysis/lint.md) |
+| One severity-graded finding list; bug-pattern rules; source-map origins | `LintAnalyzer`, `BugPatternAnalyzer`, `apply_source_map`, `stamp_report_origins` | [analysis/lint.md](analysis/lint.md) |
 | Field-level impact across programs, datasets, tables | `FieldFlowAnalyzer`, `LineageGraph`, `bindings_from_jobs` | [analysis/lineage.md](analysis/lineage.md) |
 | Business rules as decision tables | `BusinessRuleExtractor` | [analysis/business-rules.md](analysis/business-rules.md) |
 | Call/copy graph, copybook impact, callee interfaces, behaviour diff | `CodebaseGraphBuilder`, `CopybookImpactAnalyzer`, `ProgramSignatureExtractor`, `ProgramDiffer` | [analysis/codebase.md](analysis/codebase.md) |
@@ -88,7 +88,8 @@ Report origins after copybook expansion: [analysis/lint.md](analysis/lint.md).
 | `ims_segment_analyzer.py` | `IMSSegmentAnalyzer`, `IMSDLICall`, `IMSEntryPoint` | [sql-cics-ims](analysis/sql-cics-ims.md) |
 | `language_env_analyzer.py` | `LanguageEnvironmentAnalyzer` | [sql-cics-ims](analysis/sql-cics-ims.md) |
 | `dialects/le_signatures.py` | `le_service_signature`, `intrinsic_signature`, `catalog_to_dict` | [sql-cics-ims](analysis/sql-cics-ims.md) |
-| `lint.py` | `LintAnalyzer`, `RULES`, `ALL_RULES`, `add_line_length_findings`, `line_length_findings`, `filter_by_severity`, `add_parse_errors`, `apply_source_map`, `stamp_report_origins`, `fixed_format_column_offset` | [lint](analysis/lint.md) |
+| `bug_patterns.py` | `BugPatternAnalyzer`, `BUG_PATTERN_RULES`, `BUG_PATTERN_DESCRIPTIONS`, `walk_statements` (the seven bug-pattern lint rules) | [lint](analysis/lint.md#bug-pattern-rules) |
+| `lint.py` | `LintAnalyzer`, `RULES`, `ALL_RULES`, `add_call_check_findings`, `add_line_length_findings`, `line_length_findings`, `filter_by_severity`, `add_parse_errors`, `apply_source_map`, `stamp_report_origins`, `fixed_format_column_offset` | [lint](analysis/lint.md) |
 | `sarif.py` | `sarif_log`, `SarifResult`, `SarifNotification`, `lint_results`, `call_check_results` | [lint](analysis/lint.md#sarif-output) |
 | `field_lineage.py` | `FieldFlowAnalyzer` | [lineage](analysis/lineage.md) |
 | `lineage_graph.py` | `LineageGraph` | [lineage](analysis/lineage.md) |
@@ -98,7 +99,7 @@ Report origins after copybook expansion: [analysis/lint.md](analysis/lint.md).
 | `business_rules.py` | `BusinessRuleExtractor` | [business-rules](analysis/business-rules.md) |
 | `codebase.py` | `CodebaseGraphBuilder`, `CopybookImpactAnalyzer` | [codebase](analysis/codebase.md) |
 | `program_signature.py` | `ProgramSignatureExtractor`, `extract_signatures` | [codebase](analysis/codebase.md) |
-| `call_interface.py` | `CallInterfaceChecker` | [codebase](analysis/codebase.md) |
+| `call_interface.py` | `CallInterfaceChecker`, `CalleeResolver`, `find_callee_file` | [codebase](analysis/codebase.md) |
 | `ast_diff.py` | `ProgramDiffer` | [codebase](analysis/codebase.md) |
 | `boundary_inventory.py` | `BoundaryInventoryAnalyzer` | [fixtures-support](analysis/fixtures-support.md) |
 | `constraints.py` | `ConstraintExtractor` | [fixtures-support](analysis/fixtures-support.md) |

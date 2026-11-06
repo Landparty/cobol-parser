@@ -1,7 +1,7 @@
 ---
 type: Module
 title: Lint Analyzer
-description: LintAnalyzer (analysis/lint.py) -- runs nine analyzers over one parse plus the line-length source rule and flattens them into one severity-graded LintFinding stream; per-unit linting, caveats and failed rules, and the source-map origin stamping (apply_source_map, stamp_report_origins, fixed_format_column_offset) shared by every analyzer CLI.
+description: LintAnalyzer (analysis/lint.py) -- runs nine analyzers and seven bug-pattern rules (bug_patterns.py) over one parse plus the line-length source rule and the call-check cross-program rule and flattens them into one severity-graded LintFinding stream; per-unit linting, caveats and failed rules, and the source-map origin stamping (apply_source_map, stamp_report_origins, fixed_format_column_offset) shared by every analyzer CLI.
 tags: [analysis, lint, findings, severity, source-map, origin]
 timestamp: 2026-10-15T00:00:00Z
 ---
@@ -39,7 +39,9 @@ lint output with no change here.
 **Rule ids are the analyzer subcommand names** (`dead-code`,
 `unused-variables`, `move-type-check`, `io-sequence`, `linkage-check`,
 `recursion-check`, `complexity`, `dclgen-check`, `sql-cics-check`; the `RULES`
-tuple, in that order) rather than a second private
+tuple, in that order, followed by the seven bug-pattern rules of
+[Bug-pattern rules](#bug-pattern-rules), which have no subcommand) rather
+than a second private
 vocabulary, so
 `lint --rule dead-code` and `cobol-parser dead-code` are visibly the same
 analyzer. One more id appears in output but not in `RULES`: `parse`, the
@@ -51,17 +53,24 @@ flag ordering cannot change the report.
 
 **Severity is per finding, not per rule.** An analyzer that grades itself
 keeps its grading: MOVE's ERROR/WARNING kinds map to error/warning,
-recursion's HIGH/MEDIUM (HIGH = a cycle with no escape route, i.e. an infinite
-loop) to error/warning, complexity's rating to warning (HIGH) / info
-(MODERATE), with LOW producing no finding at all. The rest carry a fixed
-severity: dead code, I/O `FILE_LEFT_OPEN` and `REWRITE_WITHOUT_READ` (#736)
-warn; every other I/O kind
+recursion's HIGH (a cycle with no escape route, i.e. an infinite loop) to
+error and MEDIUM (a loop with a way out: how COBOL without PERFORM UNTIL
+writes every loop; 3,600 NIST warnings before 2026-11-06) to info,
+complexity's rating to warning (HIGH) / info (MODERATE), with LOW producing no
+finding at all. The rest carry a fixed severity: dead code, I/O
+`FILE_LEFT_OPEN` and `REWRITE_WITHOUT_READ` (#736) warn; every other I/O kind
 (including the OPEN-mode kinds `*_WRONG_MODE` and `OPEN_AFTER_LOCK`, #548) and
-every LINKAGE kind but `UNREFERENCED_LINKAGE` are errors. An unused item is a
-warning when the program declares it and only info when it came from a
-copybook (`copybook_item_names`) â€” a copybook describes a whole record and no
-one program uses every field of it. The `_SEVERITY_*` tables in the module are
-the whole of that policy.
+every LINKAGE kind but `UNREFERENCED_LINKAGE` are errors. A dead paragraph
+holding only `EXIT` (`_is_exit_only`: CardDemo's `0000-MAIN-EXIT` after a
+CICS RETURN) is info. An unused item is a warning when the program declares
+it, and info when it came from a copybook (`copybook_item_names`; a copybook
+describes a whole record and no one program uses every field of it), when it
+is a FILE record field (likewise a record layout, often read INTO working
+storage), or when a group above it is named in the PROCEDURE DIVISION
+(`UnusedVariableItem.used_group`: `ACCTFILE-STAT1` under the FILE STATUS
+group `ACCTFILE-STATUS` -- its bytes are used, only its name is not; 58% of
+CardDemo's unused warnings). The `_SEVERITY_*` tables and `_unused_variables`
+/ `_dead_code` in the module are the whole of that policy.
 
 **`LintFinding.symbol`** is the *name* the finding is about (paragraph, data
 item, file, called program), not a source excerpt. It is what lets a consumer
@@ -81,6 +90,11 @@ stored-procedure CALL argument), and `failed_rules` records a rule that raised â
 only its own findings, never the other rules'. A consumer gating on `findings`
 alone must still surface both lists.
 
+**Every recursion finding has a line**: a cycle is anchored on its first
+procedure's header (`_procedure_nodes`, a `ProcedureIndex` by key), so a
+GitHub annotation, a SARIF result and an inline suppression can point at it;
+only a CALL cycle stays without one.
+
 Two rules (`recursion-check`, `complexity`) need the CFG; `LintAnalyzer`
 builds it at most once per `analyze()` call and accepts a precomputed
 `flow_report`. Findings identical in every visible field collapse to one
@@ -93,6 +107,90 @@ Recursion's `LOW` (a self-CALL into an `IS RECURSIVE` program) maps to `info`
 
 CLI: `cobol-parser lint <file.cbl>` (see cli.md), including `--format text`,
 `--min-severity`, and `--fail-on` (exit 3).
+
+## Bug-pattern rules
+
+`bug_patterns.py` (`BugPatternAnalyzer(rules=None).analyze(ast, flow_report=None)`
+-> `BugPatternReport.findings: list[BugFinding]`) holds seven single-program
+rules for classic bugs no per-concern analyzer looks for. They are in
+`RULES` (after `sql-cics-check`) and run by default. `_analyze_unit` builds
+one `bug_patterns._Context` per unit for all seven, so they share one
+`_DataIndex` (name -> declared items, via `collect_declared_items`), one
+`XrefAnalyzer` report and lint's cached CFG. Each rule skips what it cannot
+resolve (a name declared twice, a variable subscript, a reference
+modification, a group, a REDEFINES-overlaid sender) rather than guess.
+
+| Rule | `kind` | Severity | What and what not |
+|---|---|---|---|
+| `truncation` | `MOVE_LOSES_DIGITS` | warning | sender has more integer digits than the numeric receiver (`field_widening.Capacity.losses`); not for a sender that shares storage through REDEFINES (byte-filled, digit count meaningless) |
+| | `MOVE_LOSES_CHARACTERS` | warning for a constant, info for a variable | longer sender than alphanumeric receiver. A constant (literal, or a VALUE item nothing sets) is judged by its value (`PIC X(8) VALUE 'COACTUP'` fits 7 bytes); a variable's content may fit, so info. Alphanumeric to numeric is left to `move-type-check` |
+| | `ARITHMETIC_LOSES_DIGITS` | warning | ADD / SUBTRACT (TO, FROM, GIVING) or a COMPUTE of only `+`/`-`, an item operand with more integer digits than the receiver, no ON SIZE ERROR / NOT ON SIZE ERROR. Literal operands are left out (`COMPUTE X = Y - 100` fits) |
+| `subscript-range` | `SUBSCRIPT_OUT_OF_RANGE` | error | all-literal subscript list, as many subscripts as OCCURS dimensions (ancestors' first), a value < 1 or > `max_times`. Scanned in every operand string a statement carries (`_statement_strings`, quoted literals blanked) |
+| `next-sentence` | `NEXT_SENTENCE_IN_END_IF` | warning | the IF chain around NEXT SENTENCE is END-IF-closed (`IfStatement.ended_by_end_if`) and something follows before the period (`period_after_end_if` False and a statement after the IF in its block). A period-terminated IF is the idiom; EVALUATE / SEARCH / inline PERFORM containers are not judged |
+| `perform-range` | `PERFORM_THRU_BACKWARDS` | error | THRU end before its start in `ProcedureIndex` order |
+| | `GO_TO_OUT_OF_PERFORM` | warning | a GOTO / GOTO_DEPENDING CFG edge whose source is in a PERFORM / SORT / MERGE / XML range (`FlowEdge.thru_target`, a section = its paragraphs) and whose target is in none of the ranges holding the source; not when the target ends the run (STOP RUN, GOBACK, EXIT PROGRAM, CICS RETURN/XCTL/ABEND, abend CALL, directly or two PERFORM/GO TO levels down), not from DECLARATIVES |
+| | `FALLS_INTO_PERFORMED` | warning | walking the main line from the first paragraph (or the unnamed statements before it): a paragraph whose last statement is not an unconditional transfer (or a PERFORM of a range that ends the run) falls into a PERFORM range start. Not when the last statement PERFORMs that very paragraph (NIST's `PERFORM X 9 TIMES` then into X); stops at the first performed paragraph |
+| `file-status` | `FILE_STATUS_NOT_CHECKED` | warning | SELECT with FILE STATUS, file has a file-operation reference, and no xref reference other than `write` (or the SELECT itself) to the item, its groups, subfields, level-88s or REDEFINES. Not with DECLARATIVES, not for a LINKAGE / EXTERNAL / GLOBAL status item |
+| `uninitialized` | `NUMERIC_NEVER_SET` | warning | elementary numeric WORKING-STORAGE / LOCAL-STORAGE item, no VALUE on it or a group, not EXTERNAL, read (xref `read`/`condition`/`subscript`) and nothing else: no other role on it, its groups or REDEFINES, no ADDRESS OF, not named in SPECIAL-NAMES (CRT STATUS, CURSOR), not an SQLCA field. At the first read |
+| `obsolete-verb` | `ALTER` | warning | every ALTER statement |
+
+`IfStatement.ended_by_end_if` / `period_after_end_if` are set by
+`if_parser.py` and not serialized.
+
+Measured 2026-11-06 (warnings only; info in brackets): CardDemo `app/cbl` 17
+[53] -- the 3 GO TO findings include `COACTUPC` 9700 -> 9600-EXIT and the same
+shape in `COCRDUPC`, `CBTRN03C`'s NEXT SENTENCE leaves its inline PERFORM
+UNTIL, and 11 balance fields `S9(10)V99` moved into `S9(9)V99` screen
+fields; NIST + shamrice (486 files) 786 [169], dominated by the suite's
+deliberate truncation and ALTER tests.
+
+## Cross-program rule (`call-check`)
+
+`CALL_CHECK_RULE` (`PROGRAM_SET_RULES`; in `ALL_RULES`, not `RULES`, so
+`LintAnalyzer` accepts but never runs it). `add_call_check_findings(report,
+path, ast, resolver)` runs `call_interface.CalleeResolver.check_program`:
+the program's CALL sites and its own contained programs' interfaces, plus
+each CALL target found as a file in the resolver's callee directories
+(`find_callee_file`: `NAME`, `NAME.cbl`, `name.cob`, ...; parsed once per
+resolver, reduced to interfaces; one with no PROCEDURE DIVISION counts as
+unparsed). Findings: rule `call-check`, `kind` the call-check kind
+upper-cased (`LENGTH`, `ARGUMENT_COUNT`, ...), line of the CALL, no column
+(`column_known` False), `symbol` the callee. A target with no file and a
+callee that did not parse are caveats. Run it before `apply_source_map`.
+The `lint` CLI runs it only with `--callee-path` (see [../cli.md](../cli.md#lint)).
+
+## Policy: overrides, suppressions, baseline
+
+Three library functions the `lint` CLI applies, in this order, after the
+source map (see [../cli.md](../cli.md) for the flags and config keys):
+
+* `apply_severity_overrides(report, {selector: level})` re-grades: a
+  `rule/KIND` selector wins over a bare `rule` (KIND compared case-blind).
+* `apply_suppressions(report, source_file, read_text=None)` drops findings
+  an inline comment silences, judged in the file the finding is *in* (its
+  `origin`, so a directive in a copybook silences that copybook's findings
+  in every program; else *source_file*) and on that file's line.
+  `parse_suppressions(text)` reads a file's directives: `cobol-lint:
+  disable=SEL[,SEL]` after code covers that line; on a comment line of its
+  own it opens a block closed by `enable=SEL` (a bare rule closes its
+  `rule/KIND` blocks too; `_enable_closes`) or the end of the file;
+  `disable-next-line` covers the next line that is not blank or a comment;
+  `disable-file` the whole file and locationless findings. No selector =
+  every rule. A directive counts only in a comment (column-7 `*`/`/`, a
+  `*>` line, or after an inline `*>` outside a literal --
+  `_directive_in_comment`). Files without the text `cobol-lint:` are not
+  parsed. `report.suppressed` counts the drops.
+* `baseline_document(reports, base)` / `load_baseline(doc)` /
+  `apply_baseline(report, source_file, baseline, base)`: JSON `{version: 1,
+  tool, findings: [{rule, kind, file, anchor, count}]}`. A fingerprint
+  (`baseline_fingerprint`) is rule, kind, the finding's file relative to the
+  baseline's folder (posix), and its symbol -- or, with no symbol, its
+  message with digits blanked; never the line. A count is the most any one
+  program reported (a copybook finding repeats per program, and each program
+  is matched on its own), and a finding beyond the count is new.
+  `report.baselined` counts the drops.
+
+Both counters are in `to_dict()["summary"]` (`suppressed`, `baselined`).
 
 ## Line length (`line-length`)
 

@@ -135,7 +135,8 @@ not returned.
 
 ```python
 report: UnusedVariableReport = UnusedVariableAnalyzer().analyze(ast)
-# report.unused_items: list[UnusedVariableItem]  (name/level/section/location/from_copybook)
+# report.unused_items: list[UnusedVariableItem]  (name/level/section/location/from_copybook,
+#   used_group: the nearest enclosing group named by its own name in the code, else None)
 ```
 
 Detects DATA DIVISION items (FILE/WORKING-STORAGE/LOCAL-STORAGE/LINKAGE,
@@ -558,6 +559,11 @@ to be NUMERIC_EDITED whenever a `9` was present, a false "Illegal MOVE" on
 `MOVE alpha TO XXB99` and a missed error on a decimal moved into one).
 Repeat counts are stripped first, so the `9` in `X(9)BX(9)` is no digit.
 
+**An all-digit literal is no warning** (`_is_digit_string_literal`): `MOVE
+'05' TO WS-CD` with a NUMERIC or NUMERIC_EDITED target is read as the
+unsigned integer 05, exactly as the numeric literal would be, so the
+ALPHANUMERIC -> NUMERIC warning is skipped for it (CardDemo CBACT04C).
+
 **One unit's catalog and MOVEs** (#504). `_build_catalog` and `_check_moves`
 stop at a contained `CobolProgram`: walking into one let an inner namesake
 (`01 WS-X PIC X(3)`) make the outer `WS-X PIC 9(3)` ambiguous, so the outer
@@ -860,6 +866,9 @@ may have reopened the file in another mode (NIST IX103A's DELETE, #548). If it s
 FILE_LEFT_OPEN is claimed (`_ended_in_cycle`): the walk never reached program
 end. A missing or duplicate CLOSE in the exit paragraph is still reported.
 Pinned by `tests/unit/analysis/test_io_sequence.py::TestGoToReadLoop`.
+A file still open when the walk falls off the end of the text (no STOP RUN /
+GOBACK reached) is reported on its `SELECT`, so every FILE_LEFT_OPEN has a
+line (2026-11-06; it used to have none).
 
 ## CRUDMatrixGenerator
 

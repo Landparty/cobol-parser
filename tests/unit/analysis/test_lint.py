@@ -243,16 +243,18 @@ class TestFindings:
 
 
 class TestFlowDependentRules:
-    def test_a_self_performing_paragraph_is_an_error_with_no_location(self) -> None:
+    def test_a_self_performing_paragraph_is_an_error_on_its_header(self) -> None:
         report = LintAnalyzer(["recursion-check"]).analyze(_ast(RECURSIVE_PROGRAM))
         assert len(report.findings) == 1
         finding = report.findings[0]
         assert finding.severity == "error"
         assert finding.kind == "PERFORM"
         assert finding.symbol == "LOOP-PARA"
-        # A cycle spans procedures; there is no one line to point at, and
-        # faking line 0 would put it above every real finding.
-        assert finding.location is None
+        # A cycle spans procedures; it is anchored on its first procedure's
+        # header, so an annotation or an inline suppression has a line.
+        assert finding.location is not None
+        lines = RECURSIVE_PROGRAM.splitlines()
+        assert lines[finding.location.line - 1].strip().startswith("LOOP-PARA.")
 
     def test_a_moderately_complex_paragraph_is_informational(self) -> None:
         report = LintAnalyzer(["complexity"]).analyze(_ast(COMPLEX_PROGRAM))

@@ -28,6 +28,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from .bug_patterns import BUG_PATTERN_DESCRIPTIONS
+
 SARIF_VERSION = "2.1.0"
 SARIF_SCHEMA = "https://json.schemastore.org/sarif-2.1.0.json"
 INFORMATION_URI = "https://github.com/Landparty/cobol-parser"
@@ -55,6 +57,11 @@ RULE_DESCRIPTIONS: dict[str, str] = {
     "call-check/usage": "CALL argument of a different storage class than the "
     "callee's parameter",
     "call-check/returning": "CALL RETURNING disagrees with the callee",
+    # lint's call-check rule (one id for every kind, unlike call-check's own
+    # SARIF output above).
+    "call-check": "CALL interface disagrees with the CALLed program",
+    # The bug-pattern rules describe themselves.
+    **BUG_PATTERN_DESCRIPTIONS,
 }
 
 

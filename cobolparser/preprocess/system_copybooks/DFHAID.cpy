@@ -1,0 +1,42 @@
+      * DFHAID: stand-in for the IBM-supplied CICS copybook of the same
+      * name, shipped with cobol-parser so a program that COPYs it can be
+      * parsed and linted without the CICS libraries. Field names and
+      * PICTUREs follow IBM's member; VALUEs are the EBCDIC codes as hex
+      * literals. A copy of the real member on --copybook-path wins.
+       01  DFHAID.
+           02  DFHNULL    PIC X VALUE X'00'.
+           02  DFHENTER   PIC X VALUE X'7D'.
+           02  DFHCLEAR   PIC X VALUE X'6D'.
+           02  DFHCLRP    PIC X VALUE X'6A'.
+           02  DFHPEN     PIC X VALUE X'7E'.
+           02  DFHOPID    PIC X VALUE X'E6'.
+           02  DFHMSRE    PIC X VALUE X'E7'.
+           02  DFHSTRF    PIC X VALUE X'88'.
+           02  DFHTRIG    PIC X VALUE X'7F'.
+           02  DFHPA1     PIC X VALUE X'6C'.
+           02  DFHPA2     PIC X VALUE X'6E'.
+           02  DFHPA3     PIC X VALUE X'6B'.
+           02  DFHPF1     PIC X VALUE X'F1'.
+           02  DFHPF2     PIC X VALUE X'F2'.
+           02  DFHPF3     PIC X VALUE X'F3'.
+           02  DFHPF4     PIC X VALUE X'F4'.
+           02  DFHPF5     PIC X VALUE X'F5'.
+           02  DFHPF6     PIC X VALUE X'F6'.
+           02  DFHPF7     PIC X VALUE X'F7'.
+           02  DFHPF8     PIC X VALUE X'F8'.
+           02  DFHPF9     PIC X VALUE X'F9'.
+           02  DFHPF10    PIC X VALUE X'7A'.
+           02  DFHPF11    PIC X VALUE X'7B'.
+           02  DFHPF12    PIC X VALUE X'7C'.
+           02  DFHPF13    PIC X VALUE X'C1'.
+           02  DFHPF14    PIC X VALUE X'C2'.
+           02  DFHPF15    PIC X VALUE X'C3'.
+           02  DFHPF16    PIC X VALUE X'C4'.
+           02  DFHPF17    PIC X VALUE X'C5'.
+           02  DFHPF18    PIC X VALUE X'C6'.
+           02  DFHPF19    PIC X VALUE X'C7'.
+           02  DFHPF20    PIC X VALUE X'C8'.
+           02  DFHPF21    PIC X VALUE X'C9'.
+           02  DFHPF22    PIC X VALUE X'4A'.
+           02  DFHPF23    PIC X VALUE X'4B'.
+           02  DFHPF24    PIC X VALUE X'4C'.

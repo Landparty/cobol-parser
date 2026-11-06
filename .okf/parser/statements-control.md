@@ -38,6 +38,10 @@ leg of an abbreviated relation expands (#562).
   verbs such as `PURGE`) and reads `THEN` / `ELSE` / `END-IF` through
   `keyword_upper()`, so `IF X = "ELSE"` keeps its THEN body and `IF X =
   "END-IF"` keeps its full condition.
+- An IF closed by its own `END-IF` gets `ended_by_end_if = True`, and
+  `period_after_end_if` says whether a sentence period follows it (comments
+  and blank lines skipped). Neither is serialized; lint's `next-sentence`
+  rule reads them to find where NEXT SENTENCE really jumps.
 - The THEN / ELSE statement lists skip statement separators (`... GO TO X;
   ELSE ...`) and stop when a nested parser has consumed the sentence period
   (`previous_meaningful_token`).
