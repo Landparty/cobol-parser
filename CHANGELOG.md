@@ -395,6 +395,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   section's `min_severity` and `fail_on` also reach `call-check` and
   `widen-check`). A tracked 1.4 MB `coverage.json` is removed and ignored.
 
+## [3.4.0](https://github.com/Landparty/cobol-parser/compare/v3.3.2...v3.4.0) (2026-11-06)
+
+
+### Features
+
+* **cli:** grouped --help, did-you-mean for commands, clearer first-run errors ([d896ef0](https://github.com/Landparty/cobol-parser/commit/d896ef002432b8244ddaa9f2135cc5444b48d71f))
+* **cli:** grouped --help, did-you-mean for commands, clearer first-run errors ([9cec804](https://github.com/Landparty/cobol-parser/commit/9cec8047bccaf224e0be722ccc29b2705969169f))
+* **lint:** CI-friendly lint: many files, --changed-since, github format, line-length rule ([671975a](https://github.com/Landparty/cobol-parser/commit/671975a005efa3d9d36d7f3bd937e153830888ec))
+* **parser:** parse screen DISPLAY phrases ([96c534e](https://github.com/Landparty/cobol-parser/commit/96c534ed812dea47c4e00c040f7f17dcafcbddae))
+
+
+### Bug Fixes
+
+* **constraints:** a CALL in another branch arm does not set the compared RETURN-CODE ([dcef3ca](https://github.com/Landparty/cobol-parser/commit/dcef3cabb8f1d6e3264998e5352385ad3efcc1fc))
+* hunt issues [#826](https://github.com/Landparty/cobol-parser/issues/826)-[#834](https://github.com/Landparty/cobol-parser/issues/834) ([af4b6ee](https://github.com/Landparty/cobol-parser/commit/af4b6ee2c8682fe2cf8b63beb15ce6861d5e31a6))
+* hunt issues [#826](https://github.com/Landparty/cobol-parser/issues/826)-[#834](https://github.com/Landparty/cobol-parser/issues/834) (screen POSITION, invocation counts, lint stems, SQL DECLARE, RETURN-CODE, ODO, OR disjuncts) ([f6d6ef7](https://github.com/Landparty/cobol-parser/commit/f6d6ef7387dd769d6e02a3f451ecc071b0434cf4))
+* PERFORM-only paragraphs don't fall through; CALL fixture direction; short record images warn ([ff03e53](https://github.com/Landparty/cobol-parser/commit/ff03e5314a88c92cfa79f6260dbd7a6406d38fec))
+* PERFORM-only paragraphs don't fall through; CALL fixture direction; short record images warn ([fd4d355](https://github.com/Landparty/cobol-parser/commit/fd4d355277c7351dced82c64af127e167cf9f6cf))
+* **scenarios:** generated cases reach the branch they are named for ([c1d2be7](https://github.com/Landparty/cobol-parser/commit/c1d2be7546cdb5dd702e85c552f1510459d9071d))
+* **scenarios:** generated cases reach the branch they are named for ([851394d](https://github.com/Landparty/cobol-parser/commit/851394dc309ed8e52ddecd4339f4778462322d34))
+* **scenarios:** generated cases reach their branch (bug hunt round 2) ([24159ae](https://github.com/Landparty/cobol-parser/commit/24159ae842052a7feb37e623a75efbda8285d8cb))
+* **scenarios:** generated cases reach their branch (bug hunt round 2) ([362348c](https://github.com/Landparty/cobol-parser/commit/362348c1cabbf71c09607e31c7b82c934b5e324c))
+* screen phrase words declared as data, widen-check sign/decimal into alphanumeric, Type-2 keyword clones ([6f25eb6](https://github.com/Landparty/cobol-parser/commit/6f25eb6c4a3fb72a7a1fde0ead2e17a277674b82))
+* screen phrase words declared as data, widen-check sign/decimal into alphanumeric, Type-2 keyword clones ([efecf17](https://github.com/Landparty/cobol-parser/commit/efecf17ae8d6ea0d588aedbc4eae81b8211427db))
+* **widen-check:** skip CALL arguments beside the widened field ([3a1dc7e](https://github.com/Landparty/cobol-parser/commit/3a1dc7ea46b514cb4e5e8e54b66fb739e0a94eef))
+
+
+### Documentation
+
+* **okf:** regression file count is 262 ([8af0671](https://github.com/Landparty/cobol-parser/commit/8af0671ec300afd671b433bb07253462c44dfbc5))
+* **readme:** list every command and API entry point with an example ([7af7e38](https://github.com/Landparty/cobol-parser/commit/7af7e381184b898587ed3f4fb6f97e833c6b52a3))
+* **readme:** list every command and API entry point with an example ([5b23f46](https://github.com/Landparty/cobol-parser/commit/5b23f46b85958ad30f70528071c6b162a8f61b10))
+
 ## [3.3.2](https://github.com/Landparty/cobol-parser/compare/v3.3.1...v3.3.2) (2026-11-03)
 
 
