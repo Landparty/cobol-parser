@@ -128,9 +128,7 @@ Verified against `python -m cobolparser <cmd> --help` on 2026-10-15. Order is
 | `dclgen-check` | `file` | — | A; +prof | `DclgenChecker` |
 | `redundancy` | `file` | `--min-clone-statements N` (3) | A; +prof | `RedundancyAnalyzer` |
 | `scan` | `[files ...]` | `--glob`..., `--files-from FILE`, `--analyzer NAME`... (`health,redundancy`), `--clones`, `--min-clone-members N` (2), `--min-clone-statements N` (3), `--workers N` (CPU count), `--encoding` (detected), `--cache-dir DIR` (off), `--format {json,sarif}` (json; sarif runs `lint`) | A without `--program` | `scan_version` report, or a SARIF log of every file's lint findings |
-| `lint` | `[FILE ...]` | `--glob PATTERN`..., `--files-from FILE`, `--changed-since REF`, `--extension EXT`... (`.cbl .cob .cobol`), `--rule RULE`... (all, incl. `line-length`; `call-check` only with `--callee-path`), `--callee-path DIR`... (off; config `callee_path`), `--min-severity {error,warning,info}` (info), `--fail-on {error,warning,info,never}` (never), `--format {json,text,sarif,github}` (json) | A (`--program` default: every unit); +prof (one file only) | findings (or a SARIF 2.1.0 log, or GitHub workflow commands); several files: `{files, failures, summary}`; exit 3 on `--fail-on`, 1 when a file could not be linted |
-
-| `lint` | `[FILE ...]` | `--glob PATTERN`..., `--files-from FILE`, `--changed-since REF`, `--extension EXT`... (`.cbl .cob .cobol`), `--rule RULE`... (all, incl. `line-length`; `call-check` only with `--callee-path`), `--callee-path DIR`... (off; config `callee_path`), `--disable RULE`..., `--severity RULE[/KIND]=LEVEL`..., `--min-severity {error,warning,info}` (warning for text/github, info for json/sarif), `--fail-on {error,warning,info,never}` (never), `--format {json,text,sarif,github}` (json), `--exclude PATTERN`..., `--baseline FILE`, `--write-baseline FILE`, `--strict-copybooks`, `--workers N` (CPU count) | A (`--program` default: every unit); +prof (one file only) | findings (or a SARIF 2.1.0 log, or GitHub workflow commands); several files: `{files, failures, summary}`; exit 3 on `--fail-on`, 1 when a file could not be linted |
+| `lint` | `[FILE ...]` | `--glob PATTERN`..., `--files-from FILE`, `--changed-since REF`, `--extension EXT`... (`.cbl .cob .cobol`), `--rule RULE`... (all, incl. `line-length`; `call-check` only with `--callee-path`), `--callee-path DIR`... (off; config `callee_path`), `--disable RULE`..., `--severity RULE[/KIND]=LEVEL`..., `--min-severity {error,warning,info}` (warning for text/github, info for json/sarif), `--fail-on {error,warning,info,never}` (never), `--format {json,text,sarif,github}` (json), `--exclude PATTERN`..., `--baseline FILE`, `--write-baseline FILE`, `--strict-copybooks`, `--workers N` (CPU count), `--new-code-since REF`, `--scope [RULE=]new\|all`... (new; config `lint.scope`), `--summary-file FILE` | A (`--program` default: every unit); +prof (one file only) | findings (or a SARIF 2.1.0 log, or GitHub workflow commands); several files: `{files, failures, summary}`; exit 3 on `--fail-on`, 1 when a file could not be linted |
 | `data-items` | `file` | — | A; +prof | `compute_program_data_items()` |
 | `program-signature` | `file` | — | A (`--program` default: every unit); +prof | `{"signatures": [...]}` |
 | `xref` | `file` | — | A; +prof | `XrefReport` |
@@ -220,7 +218,7 @@ stated" stays distinct from "equals the default"):
 | top level | `version`, `project`, `data`, `lint`, `mockymock`, `analyzer` (anything else is an error) |
 | `project:` | `copybook_path`, `callee_path`, `proc_path` (lists, resolved against the file's directory), `source_format` (`auto\|fixed\|free`), `debug_lines` (bool), `dialect` (`ibm-enterprise`), `error_recovery` (`collect-all\|fail-fast`), `seed`, `extensions`, `define` (normalized to `SYMBOL=VALUE`) |
 | `data:` → `DataDefaults` | `charset`, `endian`, `record_format`, `record_separator`, `rows` |
-| `lint:` → `LintDefaults` | `rules`, `min_severity`, `fail_on`, `disable`, `severity` (`rule` or `rule/KIND` → level), `exclude` (globs, resolved against the file's folder), `baseline` (path, likewise) |
+| `lint:` → `LintDefaults` | `rules`, `min_severity`, `fail_on`, `disable`, `severity` (`rule` or `rule/KIND` → level), `exclude` (globs, resolved against the file's folder), `baseline` (path, likewise), `scope` (`new`/`all` or `{default, rule: new\|all}`, stored as `--scope` values) |
 | `mockymock:` / `analyzer:` | validated only as mappings, carried verbatim on `ProjectConfig.tools`; `tool_section(name)` returns the mapping or `{}` |
 
 * **Discovery** — `cobol.yml` then `cobol.yaml` in the cwd and each parent,
@@ -757,7 +755,7 @@ parse, one severity-graded finding list.
   the directories is a caveat, not a finding. Without `--callee-path` the
   rule does not run and is not in `rules_run`.
 * **Several files** (`_lint_many`): more than one FILE, or any of `--glob`,
-  `--files-from`, `--changed-since`. `--exclude` / `lint.exclude` globs
+  `--files-from`, `--changed-since`, `--new-code-since`. `--exclude` / `lint.exclude` globs
   (`_lint_excluded`, fnmatch, `*` crosses folders) drop files first, with a
   `note:`. Each file runs through `_lint_one` isolated (`_lint_one_isolated`:
   `_fail`'s `SystemExit` and any exception become a `failures` entry, its
@@ -786,6 +784,33 @@ parse, one severity-graded finding list.
   program extension or sits in a copybook directory. Nothing changed: a
   clean run, exit 0 (empty json/sarif still written). git missing, not a
   work tree or an unknown REF: exit 1, with a hint about `fetch-depth: 0`.
+* **`--new-code-since REF`** (`cli/_new_code.py`, Sonar-style new-code
+  gate): `new_code_since()` reads `git diff -U0 -M <merge-base>` (plus
+  untracked files, which are new as a whole) into a `NewCode` of added or
+  edited line numbers per absolute path. In `_lint_one`, after the baseline
+  and before `--min-severity`, `apply_new_code` drops each finding of a
+  `new`-scoped rule whose origin file and line (else the program and its
+  line) is not new code; a finding with no line survives only in a wholly
+  new file. The count is `LintReport.outside_new_code` (`None`, and absent
+  from `summary`, without the flag); text adds `; N outside new code`, json
+  adds `new_code: {ref, default_scope, rule_scopes, changed_files}`.
+  **`--scope`** (`parse_scopes`, validated in `_lint_prepare_scopes`, exit 2
+  on a bad value): bare `new`/`all` is the default for every rule (default
+  `new`), `RULE=…`/`RULE/KIND=…` one rule (`scope_of`: KIND beats rule beats
+  default); `lint.scope` in cobol.yml is `new`/`all` or a `{default: …,
+  rule: …}` mapping. File selection (`_lint_selection`): every rule `new`
+  (`every_rule_new`) lints only the `--changed-since`-style selection;
+  otherwise every candidate (FILE/`--glob` or all tracked programs).
+  Without `--new-code-since`, `--scope` changes nothing. The GitHub Action
+  (`action.yml` + `scripts/github-action/lint.sh`, guide
+  `docs/github-action.md`, self-test `.github/workflows/lint-action.yml`)
+  maps its inputs onto these flags; with no base and no paths it passes
+  `--new-code-since HEAD --scope all` to lint every tracked program.
+* **`--summary-file FILE`** (`_write_lint_summary`): appends Markdown
+  (scope line, totals, per-rule table, what was hidden, failures, up to
+  `_SUMMARY_FINDING_LIMIT` = 200 findings sorted by severity) to FILE, e.g.
+  `$GITHUB_STEP_SUMMARY`. Single- and multi-file runs; an unwritable file is
+  a warning, not a failure.
 * **pre-commit**: `.pre-commit-hooks.yaml` ships `cobol-lint` (the staged
   programs) and `cobol-lint-changed` (`--changed-since HEAD`,
   `pass_filenames: false`, so programs using a staged copybook are linted

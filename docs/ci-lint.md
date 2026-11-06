@@ -39,6 +39,12 @@ cobol-parser lint --changed-since origin/main --format github
   another copybook. Without FILE or `--glob` it picks from every program git
   knows (`.cbl`, `.cob`, `.cobol`, or `--extension`), leaving out the
   copybook directories. Nothing changed is a clean run.
+* **`--new-code-since REF`** goes one step further, to lines: it keeps only
+  the findings on lines added or edited since REF (like a Sonar new-code
+  quality gate), so a pull request is judged on what it wrote, not on what
+  the program already had. `--scope RULE=all` judges one rule on the whole
+  codebase instead (`lint.scope` in `cobol.yml`). `--summary-file
+  "$GITHUB_STEP_SUMMARY"` adds a Markdown list of every finding to the run.
 * **`--format github`** prints one `::error` / `::warning` / `::notice` per
   finding, which GitHub shows on the pull request diff. `text` is
   `file:line:column: severity [rule] message`; `sarif` is for code scanning.
@@ -138,6 +144,23 @@ cobol-parser lint src/PAYMAIN.cbl --callee-path src/ --fail-on error
 ```
 
 ## GitHub Actions
+
+This repository is itself a GitHub Action that does all of this in a few
+lines, and lets each rule judge either new code only (the lines a pull
+request adds or edits) or the whole codebase:
+
+```yaml
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: landparty/cobol-parser@main
+        with:
+          fail-on: error
+          all-code-rules: call-check
+```
+
+Every input, scopes and the job summary: [github-action.md](github-action.md).
+The same gate by hand:
 
 ```yaml
 name: COBOL lint
