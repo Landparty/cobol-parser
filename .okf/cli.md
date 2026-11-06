@@ -128,7 +128,7 @@ Verified against `python -m cobolparser <cmd> --help` on 2026-10-15. Order is
 | `dclgen-check` | `file` | — | A; +prof | `DclgenChecker` |
 | `redundancy` | `file` | `--min-clone-statements N` (3) | A; +prof | `RedundancyAnalyzer` |
 | `scan` | `[files ...]` | `--glob`..., `--files-from FILE`, `--analyzer NAME`... (`health,redundancy`), `--clones`, `--min-clone-members N` (2), `--min-clone-statements N` (3), `--workers N` (CPU count), `--encoding` (detected), `--cache-dir DIR` (off), `--format {json,sarif}` (json; sarif runs `lint`) | A without `--program` | `scan_version` report, or a SARIF log of every file's lint findings |
-| `lint` | `[FILE ...]` | `--glob PATTERN`..., `--files-from FILE`, `--changed-since REF`, `--extension EXT`... (`.cbl .cob .cobol`), `--rule RULE`... (all, incl. `line-length`), `--min-severity {error,warning,info}` (info), `--fail-on {error,warning,info,never}` (never), `--format {json,text,sarif,github}` (json) | A (`--program` default: every unit); +prof (one file only) | findings (or a SARIF 2.1.0 log, or GitHub workflow commands); several files: `{files, failures, summary}`; exit 3 on `--fail-on`, 1 when a file could not be linted |
+| `lint` | `[FILE ...]` | `--glob PATTERN`..., `--files-from FILE`, `--changed-since REF`, `--extension EXT`... (`.cbl .cob .cobol`), `--rule RULE`... (all, incl. `line-length`; `call-check` only with `--callee-path`), `--callee-path DIR`... (off; config `callee_path`), `--min-severity {error,warning,info}` (info), `--fail-on {error,warning,info,never}` (never), `--format {json,text,sarif,github}` (json) | A (`--program` default: every unit); +prof (one file only) | findings (or a SARIF 2.1.0 log, or GitHub workflow commands); several files: `{files, failures, summary}`; exit 3 on `--fail-on`, 1 when a file could not be linted |
 | `data-items` | `file` | — | A; +prof | `compute_program_data_items()` |
 | `program-signature` | `file` | — | A (`--program` default: every unit); +prof | `{"signatures": [...]}` |
 | `xref` | `file` | — | A; +prof | `XrefReport` |
@@ -697,7 +697,10 @@ parse, one severity-graded finding list.
 
 * `--rule` ids are the analyzer subcommand names (`dead-code`,
   `unused-variables`, `move-type-check`, `io-sequence`, `linkage-check`,
-  `recursion-check`, `complexity`, `dclgen-check`, `sql-cics-check`).
+  `recursion-check`, `complexity`, `dclgen-check`, `sql-cics-check`), the
+  bug-pattern rules (`truncation`, `subscript-range`, `next-sentence`,
+  `perform-range`, `file-status`, `uninitialized`, `obsolete-verb`; see
+  [analysis/lint.md](analysis/lint.md)), `line-length` and `call-check`.
   Argparse `choices` rejects an unknown id (exit 2) so a typo never reads as
   "found nothing" (`test_lint_subcommand.py::test_unknown_rule_is_rejected_by_argparse`).
   Selection is normalized to canonical order. `--min-severity` filters
@@ -717,6 +720,13 @@ parse, one severity-graded finding list.
   (else the cwd) when inside it (`_github_path`); values are escaped
   (`_github_escape`: `%`, CR, LF; `:` and `,` in properties). Caveats and
   failed rules print as plain `note:` lines. No problem matcher needed.
+* **`--callee-path DIR`** (repeatable; `project.callee_path` in cobol.yml)
+  turns on `call-check`: `_lint_one` runs `add_call_check_findings` before
+  `apply_source_map`, through one process-wide `CalleeResolver` per
+  (callee dirs, copybook dirs) (`_LINT_CALLEE_RESOLVERS`), so a multi-file
+  run parses each CALLed program once. A CALL target with no source under
+  the directories is a caveat, not a finding. Without `--callee-path` the
+  rule does not run and is not in `rules_run`.
 * **Several files** (`_lint_many`): more than one FILE, or any of `--glob`,
   `--files-from`, `--changed-since`. Each file runs through `_lint_one`
   isolated (`_lint_one_isolated`: `_fail`'s `SystemExit` and any exception

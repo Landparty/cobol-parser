@@ -65,6 +65,21 @@ in every copybook they read:
 Free-format source has no column limit and is skipped. Select only this rule
 with `--rule line-length`.
 
+## Bug-pattern rules and CALL interfaces
+
+Seven rules look for common coding bugs: `truncation`, `subscript-range`,
+`next-sentence`, `perform-range`, `file-status`, `uninitialized` and
+`obsolete-verb`. They run by default; select one with `--rule truncation`.
+
+`call-check` compares each static CALL with the program it calls (argument
+count and byte lengths). It runs only when lint can find the callees: pass
+`--callee-path DIR` (repeatable) or set `project.callee_path` in `cobol.yml`.
+A callee it cannot find or parse becomes a caveat, never a finding.
+
+```bash
+cobol-parser lint src/PAYMAIN.cbl --callee-path src/ --fail-on error
+```
+
 ## GitHub Actions
 
 ```yaml

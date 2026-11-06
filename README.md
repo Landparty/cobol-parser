@@ -161,6 +161,8 @@ cobol-parser tokenize src/ORDPOST.cbl
 cobol-parser lint src/ORDPOST.cbl --format text
 cobol-parser lint src/*.cbl --format text --min-severity warning --fail-on error
 cobol-parser lint --glob 'src/**/*.cbl' --rule dead-code --rule move-type-check
+cobol-parser lint src/ORDRPT.cbl src/ORDEDIT.cbl --rule truncation --rule file-status --format text
+cobol-parser lint src/ORDPOST.cbl --callee-path src --format text   # also checks each CALL against its callee
 cobol-parser lint --changed-since origin/main --format github --fail-on error
 cobol-parser lint src/*.cbl --format sarif -o lint.sarif
 cobol-parser scan --glob 'src/*.cbl' --analyzer health --clones --cache-dir .cache
@@ -172,13 +174,39 @@ cobol-parser config
 $ cobol-parser lint src/ORDPOST.cbl --format text
 src/ORDPOST.cbl:54:8: warning [dead-code] paragraph 9000-OLD-RECALC can never be reached
 src/ORDPOST.cbl:56:8: warning [dead-code] paragraph 9100-OLD-AUDIT can never be reached
-2 finding(s): 0 error, 2 warning, 0 info (10 rule(s) ran)
+2 finding(s): 0 error, 2 warning, 0 info (17 rule(s) ran)
+```
+
+```text
+$ cobol-parser lint src/ORDRPT.cbl src/ORDEDIT.cbl --rule truncation --rule file-status --format text
+src/ORDRPT.cbl:35:12: warning [truncation] MOVE WS-TOTAL (signed 11 integer + 2 decimal digits) TO RPT-TOTAL (signed 10 integer + 2 decimal digits) loses high-order digits
+src/ORDRPT.cbl:36:12: warning [truncation] MOVE WS-FEES (signed 7 integer + 2 decimal digits) TO RPT-FEES (signed 6 integer + 2 decimal digits) loses high-order digits
+src/ORDEDIT.cbl:7:12: warning [file-status] file ORDER-IN declares FILE STATUS WS-IN-STAT, but the program never tests it: a failed OPEN, READ or WRITE goes unnoticed
+...
+5 finding(s) in 2 file(s): 0 error, 5 warning, 0 info
 ```
 
 `lint` runs nine analyzers over one parse: dead code, unused variables, MOVE
 type checks, I/O sequencing, LINKAGE checks, recursion risk, complexity,
 DCLGEN and SQL/CICS checks, plus `line-length` (fixed-format text past
 column 80, or a word cut at column 72, in the program and its copybooks).
+Seven bug-pattern rules look for classic production bugs that compile
+cleanly:
+
+| Rule | Finds |
+|---|---|
+| `truncation` | A MOVE, ADD, SUBTRACT or COMPUTE that cuts digits or characters (`9(9)` into `9(3)`; a literal longer than its receiver) |
+| `subscript-range` | A literal subscript outside the OCCURS bounds (`WS-ENT(11)` on `OCCURS 10`) |
+| `next-sentence` | NEXT SENTENCE inside an IF closed by END-IF, which skips the statements after the END-IF |
+| `perform-range` | `PERFORM B THRU A` backwards, a GO TO out of a PERFORM range, a main line that falls into a PERFORMed paragraph |
+| `file-status` | A FILE STATUS the program never tests |
+| `uninitialized` | A numeric item read but never set, with no VALUE |
+| `obsolete-verb` | ALTER |
+
+With `--callee-path DIR` (or `callee_path` in `cobol.yml`), the `call-check`
+rule also compares every CALL with the program it calls (argument count,
+passing mode, byte length, usage), so a caller passing 8 bytes to a 10-byte
+LINKAGE item fails the lint gate.
 `--rule` narrows the run, `--min-severity` the output, and `--fail-on error`
 exits 3 when a finding at that severity was reported, so it can gate a build.
 It takes many files at once (`FILE...`, `--glob`, `--files-from`),

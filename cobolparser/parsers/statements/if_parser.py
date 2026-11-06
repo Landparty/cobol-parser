@@ -172,6 +172,8 @@ class IfStatementParser(IStatementParser):
             # End of IF statement at END-IF
             if token_upper == "END-IF":
                 token_stream.consume()
+                stmt.ended_by_end_if = True
+                stmt.period_after_end_if = self._next_is_period(token_stream)
                 self._try_consume_period(token_stream)
                 return stmt
 
@@ -218,6 +220,8 @@ class IfStatementParser(IStatementParser):
             # End of IF statement at END-IF
             if token_upper == "END-IF":
                 token_stream.consume()
+                stmt.ended_by_end_if = True
+                stmt.period_after_end_if = self._next_is_period(token_stream)
                 self._try_consume_period(token_stream)
                 return stmt
 
@@ -288,6 +292,23 @@ class IfStatementParser(IStatementParser):
             token = stream.peek()
             if token and token.type == TokenType.PERIOD:
                 stream.consume()
+
+    @staticmethod
+    def _next_is_period(stream: ITokenStream) -> bool:
+        """Whether the next non-whitespace token is the sentence's period."""
+        offset = 0
+        while True:
+            token = stream.peek(offset)
+            if token is None:
+                return False
+            if token.type.name not in (
+                "WHITESPACE",
+                "COMMENT",
+                "NEWLINE",
+                "CONTINUATION",
+            ):
+                return bool(token.type == TokenType.PERIOD)
+            offset += 1
 
     @staticmethod
     def _previous_meaningful_token(stream: ITokenStream) -> Any | None:

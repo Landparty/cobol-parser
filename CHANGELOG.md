@@ -9,6 +9,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+* **Lint finds the classic bugs it used to miss.** Seven new rules, on by
+  default: `truncation` (a MOVE, ADD, SUBTRACT or COMPUTE that cuts digits
+  or characters), `subscript-range` (a literal subscript past its OCCURS),
+  `next-sentence` (NEXT SENTENCE inside END-IF, which skips what follows the
+  END-IF), `perform-range` (PERFORM THRU backwards, a GO TO out of a PERFORM
+  range, a main line that falls into a PERFORMed paragraph), `file-status`
+  (a FILE STATUS nobody tests), `uninitialized` (a numeric item read but
+  never set) and `obsolete-verb` (ALTER). On AWS CardDemo they report 17
+  warnings, among them a GO TO that leaves `COACTUPC`'s 9700 PERFORM range
+  and a NEXT SENTENCE that ends `CBTRN03C`'s report loop early.
+* **`lint --callee-path DIR` checks CALL interfaces.** The `call-check`
+  rule compares each CALL with the PROCEDURE DIVISION USING of the program
+  it calls, found by name under the directories (or `callee_path` in
+  `cobol.yml`): argument count, passing mode, byte length and usage, as
+  `cobol-parser call-check` does, but inside the lint gate.
 * **A friendlier first run of the CLI.** `cobol-parser --help` groups the
   41 commands by task (parse, lint and CI, one program, a codebase, test
   data, reference) and ends with a quick start, the exit codes and where
