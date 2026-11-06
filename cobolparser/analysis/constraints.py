@@ -571,6 +571,11 @@ class ConstraintExtractor:
         report.statement_sites = _statement_sites(procedure, boundary_report, index)
         eof_flags = _collect_eof_flags(ast)
         carriers = _Carriers(ast, procedure, index, fed_names)
+        carriers.sql_lines = {
+            b.ref.line
+            for b in boundary_report.boundaries
+            if b.ref.category == "SQL" and b.ref.line
+        }
 
         for paragraph_name, statement, enclosing in _walk_statements(
             procedure, guards=True
@@ -588,7 +593,13 @@ class ConstraintExtractor:
                 )
             elif isinstance(statement, EvaluateStatement):
                 self._extract_evaluate(
-                    statement, paragraph_name, index, fed_names, report, enclosing
+                    statement,
+                    paragraph_name,
+                    index,
+                    fed_names,
+                    report,
+                    enclosing,
+                    carriers,
                 )
             elif isinstance(statement, SearchStatement):
                 self._extract_search(
@@ -690,12 +701,21 @@ class ConstraintExtractor:
         fed_names: set[str],
         report: ConstraintReport,
         enclosing: tuple[tuple[str, str], ...] = (),
+        carriers: _Carriers | None = None,
     ) -> None:
         branch_id = _branch_id(paragraph_name, statement.location)
         line = statement.location.line if statement.location else None
         column = statement.location.column if statement.location else None
         arms: dict[str, list[FieldConstraint]] = {}
         unsupported: list[str] = []
+        # Where the EVALUATE sits, so a subject or WHEN comparison on a
+        # CALL's RETURN-CODE (or a field MOVEd from it) is fed by the CALL
+        # mock, as for IF (#839).
+        site = (
+            _CarrierSite(carriers, paragraph_name, line or 0, enclosing)
+            if carriers is not None
+            else None
+        )
 
         if len(statement.subjects) != 1:
             unsupported.append("multi-subject EVALUATE (ALSO) not supported in v1")
@@ -731,7 +751,7 @@ class ConstraintExtractor:
             for member in group:
                 compound = (
                     _evaluate_compound_variants(
-                        member, index, fed_names, origin, unsupported
+                        member, index, fed_names, origin, unsupported, site
                     )
                     if is_true_form
                     else None
@@ -750,6 +770,7 @@ class ConstraintExtractor:
                     fed_names,
                     origin,
                     unsupported,
+                    site,
                 )
                 if constraints is None:
                     completed = False
@@ -1592,6 +1613,12 @@ def _build_relational_constraint(
             (right_text, left_text, True),
         ):
             returned = site.carriers.call_return_code(site, text)
+            register = "RETURN-CODE"
+            if returned is None:
+                # SQLCODE (or a field MOVEd from it) right after an EXEC SQL:
+                # the statement's mock reports it (#840).
+                returned = site.carriers.sql_code(site, text)
+                register = "SQLCODE"
             if returned is None:
                 continue
             if isinstance(returned, str):
@@ -1599,7 +1626,7 @@ def _build_relational_constraint(
                 return None
             if not other or not _is_literal_operand(other, quoted=quoted_operands):
                 unsupported.append(
-                    f"{origin}: RETURN-CODE compared with a non-literal operand: "
+                    f"{origin}: {register} compared with a non-literal operand: "
                     f"{other!r}"
                 )
                 return None
@@ -1645,8 +1672,8 @@ def _build_relational_constraint(
             (right_text or "").strip().upper(),
         ):
             unsupported.append(
-                f"{origin}: RETURN-CODE is modeled only in an IF after a CALL in "
-                "the same paragraph"
+                f"{origin}: RETURN-CODE is modeled only in an IF or EVALUATE "
+                "after a CALL in the same paragraph"
             )
             return None
         unsupported.append(
@@ -1704,6 +1731,7 @@ def _evaluate_compound_variants(
     fed_names: set[str],
     origin: str,
     unsupported: list[str],
+    site: _CarrierSite | None = None,
 ) -> list[list[FieldConstraint]] | None:
     """An EVALUATE TRUE ``WHEN`` holding a compound condition (``WHEN
     TYPE-RETAIL AND IN-AGE < 18``), as AND-conjunct variants built through
@@ -1721,7 +1749,7 @@ def _evaluate_compound_variants(
     if tree is None:
         return None
     local: list[str] = []
-    variants = _extract_expr(tree, False, index, fed_names, origin, local)
+    variants = _extract_expr(tree, False, index, fed_names, origin, local, site)
     unsupported.extend(local)
     if local:
         # A conjunction is only as modeled as every one of its conjuncts,
@@ -1739,6 +1767,7 @@ def _extract_evaluate_selector(
     fed_names: set[str],
     origin: str,
     unsupported: list[str],
+    site: _CarrierSite | None = None,
 ) -> list[FieldConstraint] | None:
     if not selectors:
         unsupported.append(f"{origin}: WHEN clause has no selectors")
@@ -1768,7 +1797,12 @@ def _extract_evaluate_selector(
             # the same minimal text parser SEARCH WHEN conditions need,
             # since this selector is raw text here too.
             constraint = _parse_relational_text(
-                str(sel.get("text", "")), index, fed_names, origin, unsupported
+                str(sel.get("text", "")),
+                index,
+                fed_names,
+                origin,
+                unsupported,
+                site,
             )
             return [constraint] if constraint is not None else None
         unsupported.append(
@@ -1788,11 +1822,19 @@ def _extract_evaluate_selector(
         )
         return None
 
-    resolved = index.resolve(subject.strip())
+    returned = (
+        site.carriers.call_return_code(site, subject) if site is not None else None
+    )
+    if returned is None and site is not None:
+        returned = site.carriers.sql_code(site, subject)
+    if isinstance(returned, str):
+        unsupported.append(f"{origin}: {returned}")
+        return None
+    resolved = returned if returned is not None else index.resolve(subject.strip())
     if resolved is None:
         unsupported.append(f"{origin}: unresolvable EVALUATE subject: {subject}")
         return None
-    if not _is_boundary_fed(resolved, fed_names):
+    if returned is None and not _is_boundary_fed(resolved, fed_names):
         unsupported.append(
             f"{origin}: field not boundary-fed: {resolved.spec.qualified_name}"
         )
@@ -1898,6 +1940,7 @@ def _parse_relational_text(
     fed_names: set[str],
     origin: str,
     unsupported: list[str],
+    site: _CarrierSite | None = None,
 ) -> FieldConstraint | None:
     text = (text or "").strip()
     if not text:
@@ -1933,6 +1976,7 @@ def _parse_relational_text(
                 # SEARCH WHEN / EVALUATE TRUE selector text arrives already
                 # unquoted from the lexer -- see _is_literal_operand.
                 quoted_operands=False,
+                site=site,
             )
 
     class_match = _CLASS_TEXT_RE.match(text)
@@ -2029,6 +2073,8 @@ class _Carriers:
         self._moves: dict[str, list[tuple[str, MoveStatement, bool]]] | None = None
         self._xref: Any = None
         self._by_paragraph: dict[str, list[tuple[Any, Any]]] | None = None
+        #: Lines of the executable EXEC SQL boundaries (:meth:`sql_code`).
+        self.sql_lines: set[int] = set()
 
     def _collect(self) -> dict[str, list[tuple[str, MoveStatement, bool]]]:
         if self._moves is None:
@@ -2126,6 +2172,83 @@ class _Carriers:
         return (
             "RETURN-CODE is read with no CALL before it in the same paragraph, "
             "so which call sets it is not modeled"
+        )
+
+    def sql_code(self, site: _CarrierSite, text: str | None) -> Any:
+        """The SQLCODE an EXEC SQL leaves for the comparison at *site* (#840).
+
+        *text* is ``SQLCODE`` itself, or a working field whose last write
+        before the comparison is ``MOVE SQLCODE TO it``. Its value is the
+        SQLCODE of the nearest executable SQL statement (a boundary) before
+        that, in the same paragraph and on every path to the comparison,
+        with nothing else writing SQLCODE (or the field) in between -- the
+        statement's mock reports it.
+
+        Returns the statement's synthetic SQLCODE field
+        (:meth:`ProgramLayoutIndex.sql_code`), a reason string when SQLCODE
+        is read but no such statement is found, or None when *text* has
+        nothing to do with SQLCODE.
+        """
+        if not text or not self.sql_lines:
+            return None
+        name = text.strip().upper()
+        statements = [
+            (s, enclosing)
+            for s, enclosing in self._paragraph_statements(site.paragraph)
+            if s.location is not None and s.location.line < site.line
+        ]
+        here = tuple(site.enclosing)
+
+        def always_runs(enclosing: Any) -> bool:
+            return tuple(enclosing) == here[: len(enclosing)]
+
+        def is_sqlcode(value: Any) -> bool:
+            return _leaf_name(str(value or "")) == "SQLCODE"
+
+        read_at = site.line
+        if _leaf_name(name) != "SQLCODE":
+            resolved = self._index.resolve(name)
+            if resolved is None or _is_boundary_fed(resolved, self._fed):
+                return None
+            qualified = resolved.spec.qualified_name.upper()
+            move = None
+            for statement, enclosing in reversed(statements):
+                written = {
+                    (r.spec.qualified_name.upper() if r is not None else None)
+                    for r in (
+                        self._index.resolve(str(t)) for t in _write_targets(statement)
+                    )
+                }
+                if qualified not in written:
+                    continue
+                if (
+                    isinstance(statement, MoveStatement)
+                    and is_sqlcode(statement.source)
+                    and always_runs(enclosing)
+                ):
+                    move = statement
+                break
+            if move is None:
+                return None
+            read_at = move.location.line
+        for statement, enclosing in reversed(statements):
+            line = statement.location.line
+            if line >= read_at:
+                continue
+            if line in self.sql_lines and _is_exec_sql(statement):
+                if not always_runs(enclosing):
+                    break
+                verb = str(getattr(statement, "sql_type", "") or "").upper()
+                return self._index.sql_code(line, fetch=verb.startswith("FETCH"))
+            if isinstance(statement, CallStatement) or any(
+                is_sqlcode(t) for t in _write_targets(statement)
+            ):
+                # A CALL may run SQL of its own; a MOVE to SQLCODE overrides.
+                break
+        return (
+            "SQLCODE is read with no SQL statement before it in the same "
+            "paragraph (or another statement may change it first), so which "
+            "statement sets it is not modeled"
         )
 
     def _references(self) -> Any:
@@ -3182,3 +3305,16 @@ __all__ = [
     "StatementSite",
     "ConstraintExtractor",
 ]
+
+
+def _leaf_name(text: str) -> str:
+    """``SQLCODE OF SQLCA`` / ``SQLCA.SQLCODE`` -> ``SQLCODE``."""
+    name = text.strip().upper().split(" OF ")[0].split(" IN ")[0]
+    return name.rsplit(".", 1)[-1].strip()
+
+
+def _is_exec_sql(statement: Any) -> bool:
+    """Whether *statement* is an EXEC SQL statement (``ExecSQLStatement``,
+    or a specific SQL model such as ``FetchStatement``: all carry
+    ``sql_type``)."""
+    return getattr(statement, "sql_type", None) is not None

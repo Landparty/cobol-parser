@@ -519,7 +519,7 @@ carries the exact same expectations.
 | `READ` (IN) | `options.rows` rows; when `"AT_END"` is in the boundary's `handlers`, `terminal` is set to `{resolved_field: "10"}` if `_resolve_status_field` finds a real field name (`boundary.status_field`, else `index.file_facts(key).file_status_field`), or stays `None` if neither resolves — never a placeholder key such as `"FILE-STATUS"`, which is not a real data-name in the target program |
 | `WRITE`/`REWRITE` (OUT) | No fixture (nothing to mock) — one `Expectation(kind="stub")` noting the program produces this value |
 | `OPEN`/`CLOSE`/`DELETE`/`START`/`UNLOCK` (`STATUS_ONLY`) | A fixture with `status` only (e.g. `{"WS-FS": "00"}`), no `layout`/`sequence` |
-| `SQL`, `sql_type` SELECT/FETCH (IN) | One generated row; `status={"SQLCODE": "0"}` |
+| `SQL`, `sql_type` SELECT/FETCH (IN) | One generated row; `status={"SQLCODE": "0"}`, or the scenario's SQLCODE witness when a branch tests the SQLCODE this statement leaves (synthetic field `SQL@<line>.SQLCODE` / `FETCH@<line>.SQLCODE`, #840) |
 | `SQL`, INSERT/UPDATE/DELETE (OUT) | Expectation stub, like WRITE |
 | `CICS`/`DLI` (`BIDIRECTIONAL`, best-effort) | Whatever fields resolved get generated values *and* an expectation stub — Phase 2's own layout resolution here is already best-effort (no fixed INTO/FROM attributes), so this phase does not pretend otherwise |
 | `ACCEPT` (IN) | One generated value |
