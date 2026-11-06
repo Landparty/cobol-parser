@@ -301,7 +301,12 @@ report is a caveat and no start. Finding kinds:
   #760), and each `overlays` entry touching it (`warning`); file ports a record field meets -> LRECL (`warning`) plus
   every *other* program bound to the same dataset (`error`); CALL ports ->
   the callee's LINKAGE record (`warning`); LINKAGE ports -> every caller's
-  argument record (`error`: the callee addresses past it). Both match the
+  argument record (`error`: the callee addresses past it). A CALL or LINKAGE
+  port counts only when an item meeting it holds the changed bytes
+  (`_holds`: the field, a group around it, or an overlapping offset): an
+  argument beside the field in the same record keeps its layout. The CALL
+  message names the argument, the common group of the items meeting the
+  port (`_common_group`). Both match the
   port key `NAME#n` exactly, so a CALL of an ENTRY name meets the record the
   ENTRY's USING names, and an ENTRY's LINKAGE record meets the callers of
   that ENTRY, not of the PROGRAM-ID (#761).

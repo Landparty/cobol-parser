@@ -168,6 +168,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+* **`widen-check` no longer flags a CALL argument beside the widened
+  field.** `CALL 'CUSTLKUP' USING ORD-CUST-ID` was reported as passing the
+  whole record when `ORD-AMOUNT`, later in the same record, widened; a
+  CALL or LINKAGE argument now counts only when its bytes hold the changed
+  field, and the warning names the argument actually passed.
+
 * **Hunt issues #826-#834.** `DISPLAY ... POSITION n` is a screen phrase,
   not an item (#826). Invocation counts survive an `EXIT PARAGRAPH`,
   `EXIT SECTION` or forward GO TO that stays inside a `PERFORM A THRU B`

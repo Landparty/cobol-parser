@@ -547,3 +547,35 @@ class TestRegressions:
         assert "to SUBE" in finding.message
         none = FieldWideningAnalyzer(graph).analyze("LREC2", "X(12)", "SUBP")
         _absent(none, "CALLR", "REC")
+
+    def test_call_argument_beside_the_widened_field(self) -> None:
+        """A CALL passes an argument by its own address and length: a field
+        of the same record before or after the widened one keeps its layout,
+        so only an argument holding the widened bytes needs the callee to
+        change (seen in the skill evals: ORD-CUST-ID flagged as ORD-REC)."""
+
+        def graph(argument: str) -> LineageGraph:
+            return _inline(
+                _program(
+                    "CALLR",
+                    """
+                    WORKING-STORAGE SECTION.
+                    01 REC.
+                       05 R-ID PIC X(6).
+                       05 R-AMT PIC 9(7)V99.
+                       05 R-TAIL PIC X(4).
+                    01 R-TYPE PIC X.
+                    """,
+                    f"CALL 'LKUP' USING {argument} R-TYPE. GOBACK.",
+                )
+            )
+
+        for beside in ("R-ID", "R-TAIL"):
+            report = FieldWideningAnalyzer(graph(beside)).analyze("R-AMT", "9(9)V99")
+            _absent(report, "CALLR", "call:LKUP#1")
+        whole = FieldWideningAnalyzer(graph("REC")).analyze("R-AMT", "9(9)V99")
+        assert "REC is passed" in _find(whole, "layout", "CALLR", "call:LKUP#1").message
+        itself = FieldWideningAnalyzer(graph("R-AMT")).analyze("R-AMT", "9(9)V99")
+        message = _find(itself, "layout", "CALLR", "call:LKUP#1").message
+        assert "REC.R-AMT is passed as argument 1" in message
+        assert "grows by +2 bytes" in message
