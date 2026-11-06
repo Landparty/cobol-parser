@@ -207,6 +207,23 @@ CICS_NO_RESP_EXEMPT: dict[str, str] = {
     "SUSPEND": "no exceptional condition is defined for it",
 }
 
+#: CICS commands still reported under :data:`KIND_CICS_NO_RESP`, but as
+#: info: the conditions they define are programming or set-up faults a
+#: program does not branch on in practice, so a missing RESP there is worth
+#: seeing, not worth a warning in every CICS program. Each with the reason.
+CICS_NO_RESP_LOW_RISK: dict[str, str] = {
+    "ASSIGN": "its only condition, INVREQ, means an option is invalid for the task",
+    "FORMATTIME": "its only condition, INVREQ, means the ABSTIME value is invalid",
+    "ENDBR": (
+        "ending a browse fails only when no browse is active or the file is "
+        "gone, which the STARTBR before it would already have reported"
+    ),
+    "SYNCPOINT": (
+        "its one condition, ROLLEDBACK, is raised only when a distributed "
+        "partner backs out"
+    ),
+}
+
 #: Credential-bearing keywords in ``EXEC SQL CONNECT``: what a literal
 #: there is, and the host variable that should hold it instead.
 _CONNECT_CREDENTIAL_KEYWORDS: dict[str, tuple[str, str]] = {
@@ -645,7 +662,11 @@ class SqlCicsAnalyzer:
         report.violations.append(
             SqlCicsViolation(
                 kind=KIND_CICS_NO_RESP,
-                severity=SEVERITY_BY_KIND[KIND_CICS_NO_RESP],
+                severity=(
+                    SEVERITY_INFO
+                    if command in CICS_NO_RESP_LOW_RISK
+                    else SEVERITY_BY_KIND[KIND_CICS_NO_RESP]
+                ),
                 message=(
                     f"EXEC CICS {command} has no RESP or RESP2 option, no "
                     "NOHANDLE, and no HANDLE CONDITION in effect: a condition "

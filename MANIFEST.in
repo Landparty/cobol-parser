@@ -1,2 +1,3 @@
 include cobolparser/*.pyx
 include cobolparser/*.c
+recursive-include cobolparser/preprocess/system_copybooks *.cpy

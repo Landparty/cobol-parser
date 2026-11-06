@@ -134,6 +134,15 @@ class LintDefaults:
     rules: tuple[str, ...] = ()
     min_severity: str | None = None
     fail_on: str | None = None
+    #: Rules never to run (``lint.disable``), applied after ``rules``.
+    disable: tuple[str, ...] = ()
+    #: ``rule`` or ``rule/KIND`` -> severity (``lint.severity``).
+    severity: tuple[tuple[str, str], ...] = ()
+    #: Glob patterns of files never to lint, resolved against the config
+    #: file's directory (``lint.exclude``).
+    exclude: tuple[str, ...] = ()
+    #: The baseline file (``lint.baseline``), resolved likewise.
+    baseline: str | None = None
 
 
 @dataclass(frozen=True)
@@ -301,8 +310,8 @@ def _defines(value: Any, source: Path) -> tuple[str, ...]:
     return _string_list(value, "project.define", source)
 
 
-def _lint_rules(value: Any, source: Path) -> tuple[str, ...]:
-    rules = _string_list(value, "lint.rules", source)
+def _lint_rules(value: Any, source: Path, where: str = "lint.rules") -> tuple[str, ...]:
+    rules = _string_list(value, where, source)
     if not rules:
         return ()
     # Imported here rather than at module scope: `cobolparser.config` is
@@ -317,6 +326,30 @@ def _lint_rules(value: Any, source: Path) -> tuple[str, ...]:
             f"(recognized: {', '.join(ALL_RULES)})"
         )
     return rules
+
+
+def _lint_severity_overrides(value: Any, source: Path) -> tuple[tuple[str, str], ...]:
+    """``lint.severity``: a mapping of ``rule`` or ``rule/KIND`` to a
+    severity, e.g. ``{recursion-check: info, io-sequence/FILE_LEFT_OPEN:
+    error}``. Validated here so a typo fails loudly instead of matching
+    nothing."""
+    if value is None:
+        return ()
+    mapping = _require_mapping(value, "lint.severity", source)
+    from ..analysis.lint import ALL_RULES, PARSE_RULE
+
+    out = []
+    for key, level in mapping.items():
+        rule = str(key).split("/", 1)[0]
+        if rule not in (*ALL_RULES, PARSE_RULE):
+            raise ConfigError(
+                f"{source}: lint.severity: unknown rule {rule!r} "
+                f"(recognized: {', '.join(ALL_RULES)})"
+            )
+        severity = _severity(level, f"lint.severity.{key}", source)
+        assert severity is not None
+        out.append((str(key), severity))
+    return tuple(out)
 
 
 def _severity(
@@ -344,7 +377,15 @@ _PROJECT_KEYS = (
     "define",
 )
 _DATA_KEYS = ("charset", "endian", "record_format", "record_separator", "rows")
-_LINT_KEYS = ("rules", "min_severity", "fail_on")
+_LINT_KEYS = (
+    "rules",
+    "min_severity",
+    "fail_on",
+    "disable",
+    "severity",
+    "exclude",
+    "baseline",
+)
 _TOP_LEVEL_KEYS = ("version", "project", "data", "lint", *_TOOL_SECTIONS)
 
 
@@ -375,6 +416,14 @@ def _build_lint(raw: Any, source: Path) -> LintDefaults:
         min_severity=_severity(lint.get("min_severity"), "lint.min_severity", source),
         # `never` is --fail-on's own "findings never fail the build" value.
         fail_on=_severity(lint.get("fail_on"), "lint.fail_on", source, ("never",)),
+        disable=_lint_rules(lint.get("disable"), source, "lint.disable"),
+        severity=_lint_severity_overrides(lint.get("severity"), source),
+        exclude=_path_list(lint.get("exclude"), "lint.exclude", source),
+        baseline=(
+            _path_list([lint["baseline"]], "lint.baseline", source)[0]
+            if lint.get("baseline") is not None
+            else None
+        ),
     )
 
 

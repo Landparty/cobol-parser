@@ -505,6 +505,16 @@ def _do_parse(args: argparse.Namespace) -> tuple[Any, Any]:
     error_recovery = _get_error_recovery(args)
 
     copybook_paths = getattr(args, "copybook_path", [])
+    # lint finishes what it can rather than failing a file on one COPY: the
+    # IBM-supplied CICS members (DFHAID, DFHBMSCA) come from stand-ins when
+    # the search path lacks them, and any other missing member is left as
+    # written and named in the report's caveats (`--strict-copybooks` keeps
+    # the old exit-1 behaviour).
+    lenient_copybooks = bool(getattr(args, "_lenient_copybooks", False))
+    if lenient_copybooks:
+        from ..preprocess._system_copybooks import with_system_copybooks
+
+        copybook_paths = with_system_copybooks(list(copybook_paths))
     defines = _parse_defines(getattr(args, "define", []))
     enable_profiling = _profiling_requested(args)
     top_n = getattr(args, "profile_top_n", _DEFAULT_PROFILE_TOP_N)
@@ -556,6 +566,7 @@ def _do_parse(args: argparse.Namespace) -> tuple[Any, Any]:
                     copybook_paths=copybook_paths,
                     process_conditionals=True,
                     defined_symbols=defines,
+                    skip_missing_copybooks=lenient_copybooks,
                     **parse_kwargs,
                 )
             except PreprocessingError as exc:
@@ -3029,6 +3040,17 @@ def _build_lint_parser(subparsers: argparse._SubParsersAction) -> None:
             "  cobol-parser lint --glob 'src/**/*.cbl' --format sarif -o lint.sarif\n"
             "  cobol-parser lint --changed-since origin/main --format github "
             "--fail-on error\n"
+            "  cobol-parser lint --glob 'src/**/*.cbl' --write-baseline "
+            "lint-baseline.json\n"
+            "  cobol-parser lint --glob 'src/**/*.cbl' --baseline "
+            "lint-baseline.json --fail-on warning\n"
+            "\nSilence one finding in the source with a comment:\n"
+            "  *> cobol-lint: disable=RULE              (this line, after code)\n"
+            "  *> cobol-lint: disable-next-line=RULE    (the next code line)\n"
+            "  *> cobol-lint: disable=RULE ... enable=RULE   (a block)\n"
+            "  *> cobol-lint: disable-file=RULE         (the whole file)\n"
+            "RULE is a rule id, rule/KIND, a comma-separated list, or left out\n"
+            "for every rule. In fixed format the comment can be a '*' line.\n"
             "\nMore than one file, --glob, --files-from or --changed-since lints\n"
             "every file in one run: text and github print each file's findings,\n"
             "json is {files, failures, summary}, sarif is one log. A file that\n"
@@ -3108,13 +3130,76 @@ def _build_lint_parser(subparsers: argparse._SubParsersAction) -> None:
         ),
     )
     p.add_argument(
+        "--disable",
+        action="append",
+        choices=list(ALL_RULES),
+        metavar="RULE",
+        help="Do not run this rule (repeatable; applied after --rule)",
+    )
+    p.add_argument(
         "--min-severity",
         choices=list(SEVERITIES),
-        default="info",
+        default=None,
         help=(
             "Drop findings below this severity from the output (default: "
-            "info, i.e. keep everything). Filtering happens after the rules "
-            "run, so the summary counts describe what is shown."
+            "warning for --format text and github, info -- everything -- for "
+            "json and sarif). Filtering happens after the rules run, so the "
+            "summary counts describe what is shown."
+        ),
+    )
+    p.add_argument(
+        "--severity",
+        action="append",
+        dest="severity_overrides",
+        metavar="RULE=LEVEL",
+        help=(
+            "Report this rule (or rule/KIND, e.g. io-sequence/FILE_LEFT_OPEN) "
+            "at LEVEL: error, warning or info (repeatable; lint.severity in "
+            "cobol.yml)"
+        ),
+    )
+    p.add_argument(
+        "--exclude",
+        action="append",
+        metavar="PATTERN",
+        help=(
+            "Leave out files matching this glob when linting several files "
+            "(repeatable; '*' also crosses folders)"
+        ),
+    )
+    p.add_argument(
+        "--baseline",
+        metavar="FILE",
+        help=(
+            "Report only findings not recorded in this baseline file (see "
+            "--write-baseline); matched on rule, kind, file and symbol, not "
+            "line, so edits elsewhere in a file keep a known finding known"
+        ),
+    )
+    p.add_argument(
+        "--write-baseline",
+        metavar="FILE",
+        help=(
+            "Record every current finding in FILE (before --min-severity) and "
+            "exit 0, so a later --baseline run reports only new ones"
+        ),
+    )
+    p.add_argument(
+        "--strict-copybooks",
+        action="store_true",
+        help=(
+            "Fail a file whose COPY member cannot be found, instead of linting "
+            "it without that member and saying so in the caveats"
+        ),
+    )
+    p.add_argument(
+        "--workers",
+        type=int,
+        default=None,
+        metavar="N",
+        help=(
+            "Lint several files in N parallel processes (default: the CPU "
+            "count; 1 runs them one by one)"
         ),
     )
     p.add_argument(
@@ -3193,6 +3278,8 @@ def _lint_text_report(report: Any, source_file: str, summary: bool = True) -> st
             f"{len(report.findings)} finding(s): {report.error_count} error, "
             f"{report.warning_count} warning, {report.info_count} info "
             f"({len(report.rules_run)} rule(s) ran)"
+            + (f"; {report.suppressed} suppressed" if report.suppressed else "")
+            + (f"; {report.baselined} in baseline" if report.baselined else "")
         )
     return "\n".join(lines)
 
@@ -3287,56 +3374,52 @@ def _lint_github_report(report: Any, source_file: str, summary: bool = True) -> 
             f"{len(report.findings)} finding(s): {report.error_count} error, "
             f"{report.warning_count} warning, {report.info_count} info "
             f"({len(report.rules_run)} rule(s) ran)"
+            + (f"; {report.suppressed} suppressed" if report.suppressed else "")
+            + (f"; {report.baselined} in baseline" if report.baselined else "")
         )
     return "\n".join(lines)
 
 
-def _lint_copybook_item_names(args: argparse.Namespace, ast: Any) -> set[str] | None:
+def _lint_copybook_item_names(
+    args: argparse.Namespace, ast: Any, result: Any
+) -> set[str] | None:
     """Names that reached *ast* through an expanded COPY, or None if unknown.
 
-    Same set-difference provenance trick as ``_cmd_unused_variables`` (see
-    ``_parse_without_copybook_expansion``), and for the same reason: it is
-    what lets lint grade an unused copybook field as info rather than
-    warning. Without --copybook-path there is nothing to diff against, so
-    the answer is "unknown" -- which the analyzer reads as "none came from a
+    It is what lets lint grade an unused copybook field as info rather than
+    warning. Read off the expansion's own source map: an item whose
+    declaration line maps to another file than the program came from a
+    copybook. (This used to diff against a second, unexpanded parse of the
+    file -- a third of lint's time on a large codebase.) A name the program
+    also declares itself is left out, so the program's own copy keeps its
+    warning. Without --copybook-path there is nothing to tell apart, so the
+    answer is "unknown" -- which the analyzer reads as "none came from a
     copybook", the same as it does for the unused-variables subcommand.
 
-    Both sides of the diff cover EVERY program unit, because lint does:
-    ``collect_declared_items`` is program-scoped, so diffing the outermost
-    unit alone would leave a contained program's copybook fields out of the
-    set and grade them as the program's own -- warning instead of info --
-    for exactly the multi-program file this covers in the first place.
+    Every program unit counts, because lint covers every unit:
+    ``collect_declared_items`` is program-scoped, so reading the outermost
+    unit alone would grade a contained program's copybook fields as the
+    program's own.
     """
     from ..analysis.unused_variables import collect_declared_items
 
     if not getattr(args, "copybook_path", []):
         return None
-    unexpanded_result = _parse_without_copybook_expansion(args)
-    if unexpanded_result.ast is None:
-        print(
-            f"warning: {args.file} could not be parsed without copybook "
-            "expansion; copybook-origin detection disabled",
-            file=sys.stderr,
-        )
-        return None
-
-    def declared_across_units(program: Any) -> set[str]:
-        return {
-            item.name.upper()
-            for unit in program.program_units()
-            for item in collect_declared_items(unit)
-        }
-
-    # Both sides must cover the same scope. `ast` is already narrowed when
-    # --program named a unit, so narrow the unexpanded parse the same way --
-    # otherwise another unit's own declaration of the same name would
-    # subtract from this one's copybook set.
-    local_root = unexpanded_result.ast
-    wanted = getattr(args, "program", None)
-    if wanted:
-        local_root = local_root.find_program_unit(wanted) or local_root
-
-    return declared_across_units(ast) - declared_across_units(local_root)
+    source_map = getattr(result, "expansion_source_map", None) or {}
+    main = os.path.normcase(os.path.abspath(args.file))
+    from_copybook: set[str] = set()
+    local: set[str] = set()
+    for unit in ast.program_units():
+        for item in collect_declared_items(unit):
+            line = item.location.line if item.location is not None else None
+            origin = source_map.get(line) if line is not None else None
+            name = item.name.upper()
+            if origin is not None and (
+                os.path.normcase(os.path.abspath(origin[0])) != main
+            ):
+                from_copybook.add(name)
+            else:
+                local.add(name)
+    return from_copybook - local
 
 
 def _lint_column_offset(
@@ -3367,14 +3450,23 @@ def _lint_one(args: argparse.Namespace) -> tuple[Any, Any, Any]:
         LintAnalyzer,
         add_line_length_findings,
         add_parse_errors,
+        apply_baseline,
+        apply_severity_overrides,
         apply_source_map,
+        apply_suppressions,
         filter_by_severity,
     )
 
+    args._lenient_copybooks = not getattr(args, "strict_copybooks", False)
     result, prof = _parse_result_or_fail(args)
     ast = result.ast
 
     selected = getattr(args, "rules", None)
+    disabled = getattr(args, "disable", None)
+    if disabled:
+        from ..analysis.lint import ALL_RULES
+
+        selected = [r for r in (selected or ALL_RULES) if r not in set(disabled)]
     try:
         analyzer = LintAnalyzer(selected)
     except (
@@ -3385,9 +3477,20 @@ def _lint_one(args: argparse.Namespace) -> tuple[Any, Any, Any]:
     report = analyzer.analyze(
         ast,
         copybook_item_names=(
-            _lint_copybook_item_names(args, ast) if analyzer.rules else None
+            _lint_copybook_item_names(args, ast, result) if analyzer.rules else None
         ),
     )
+    # A COPY the search path could not supply was left as written: every
+    # rule ran without that member's fields and paragraphs, so the report
+    # says so rather than reading as complete.
+    for warning in getattr(result, "warnings", None) or []:
+        text = str(warning)
+        if text.endswith("the COPY was left as written"):
+            report.caveats.append(
+                f"{text}; no rule saw what it declares, so findings that "
+                "depend on it are missing (pass its folder with "
+                "--copybook-path, or --strict-copybooks to fail instead)"
+            )
     # A partial AST lints quietly, so the errors it was recovered from are
     # findings of their own: --fail-on then sees them (#249).
     add_parse_errors(report, list(result.errors))
@@ -3418,7 +3521,22 @@ def _lint_one(args: argparse.Namespace) -> tuple[Any, Any, Any]:
             _source_format_kwargs(args)["preprocess_fixed"],
             getattr(result, "expansion_copybooks", None) or (),
         )
-    report.findings = filter_by_severity(report.findings, args.min_severity)
+    # Policy, in order: lint.severity re-grades, an inline `cobol-lint:`
+    # comment silences, a baseline hides what was already known, and only
+    # then --min-severity trims what is shown -- so a re-graded finding is
+    # filtered at its new severity, and a baseline written before a
+    # --min-severity change still covers what the change brings back.
+    apply_severity_overrides(report, _lint_severity_overrides(args))
+    apply_suppressions(report, args.file)
+    if getattr(args, "write_baseline", None):
+        return report, prof, ast  # the caller records it whole, then filters
+    baseline_file = getattr(args, "baseline", None)
+    if baseline_file:
+        baseline = _load_lint_baseline(baseline_file)
+        apply_baseline(
+            report, args.file, baseline, os.path.dirname(os.path.abspath(baseline_file))
+        )
+    report.findings = filter_by_severity(report.findings, _lint_min_severity(args))
 
     for failure in report.failed_rules:
         print(
@@ -3426,6 +3544,87 @@ def _lint_one(args: argparse.Namespace) -> tuple[Any, Any, Any]:
             file=sys.stderr,
         )
     return report, prof, ast
+
+
+def _lint_severity_overrides(args: argparse.Namespace) -> dict[str, str] | None:
+    """``--severity RULE=LEVEL`` flags, or ``lint.severity`` from cobol.yml
+    (already a mapping), as one ``{selector: level}`` dict."""
+    from ..analysis.lint import ALL_RULES, PARSE_RULE, SEVERITIES
+
+    raw = getattr(args, "severity_overrides", None)
+    if not raw:
+        return None
+    if isinstance(raw, dict):
+        return {str(k): str(v) for k, v in raw.items()}
+    overrides: dict[str, str] = {}
+    for item in raw:
+        selector, sep, level = str(item).partition("=")
+        rule = selector.split("/", 1)[0]
+        if not sep or level not in SEVERITIES or rule not in (*ALL_RULES, PARSE_RULE):
+            print(
+                f"error: --severity {item}: expected RULE=LEVEL or "
+                f"RULE/KIND=LEVEL, with RULE one of {', '.join(ALL_RULES)} and "
+                f"LEVEL one of {', '.join(SEVERITIES)}",
+                file=sys.stderr,
+            )
+            sys.exit(2)  # a bad argument, as argparse would exit
+        overrides[selector] = level
+    return overrides
+
+
+def _lint_min_severity(args: argparse.Namespace) -> str:
+    """``--min-severity``, or its default for the output format: a person
+    reading text or a PR's annotations wants warnings and errors; a JSON or
+    SARIF consumer filters for itself and gets everything."""
+    chosen = getattr(args, "min_severity", None)
+    if chosen:
+        return str(chosen)
+    if getattr(args, "output_format", "json") in ("text", "github"):
+        return "warning"
+    return "info"
+
+
+_BASELINE_CACHE: dict[str, Any] = {}
+
+
+def _load_lint_baseline(path: str) -> Any:
+    """The baseline at *path* (read once per process), or exit 1 with why."""
+    from ..analysis.lint import load_baseline
+
+    key = os.path.abspath(path)
+    if key not in _BASELINE_CACHE:
+        try:
+            with open(path, encoding="utf-8") as handle:
+                _BASELINE_CACHE[key] = load_baseline(json.load(handle))
+        except FileNotFoundError:
+            _fail(
+                f"baseline {path} does not exist; create it with "
+                f"--write-baseline {path}"
+            )
+        except (OSError, ValueError, KeyError, TypeError) as exc:
+            _fail(f"baseline {path} could not be read: {exc}")
+    return _BASELINE_CACHE[key]
+
+
+def _write_lint_baseline(
+    args: argparse.Namespace, reports: list[tuple[str, Any]]
+) -> None:
+    """Record *reports*' findings in ``--write-baseline`` FILE, then trim
+    each report to ``--min-severity`` for display."""
+    from ..analysis.lint import baseline_document, filter_by_severity
+
+    path = args.write_baseline
+    document = baseline_document(reports, os.path.dirname(os.path.abspath(path)))
+    try:
+        with open(path, "w", encoding="utf-8") as handle:
+            json.dump(document, handle, indent=2)
+            handle.write("\n")
+    except OSError as exc:
+        _fail(f"could not write baseline {path}: {exc}")
+    total = sum(entry["count"] for entry in document["findings"])
+    print(f"note: wrote {total} finding(s) to baseline {path}", file=sys.stderr)
+    for _path, report in reports:
+        report.findings = filter_by_severity(report.findings, _lint_min_severity(args))
 
 
 def _lint_fails(report: Any, fail_on: str) -> bool:
@@ -3468,6 +3667,9 @@ def _cmd_lint(args: argparse.Namespace) -> None:
 def _lint_single(args: argparse.Namespace) -> None:
     """One FILE: the report shapes ``lint`` has always printed."""
     report, prof, ast = _lint_one(args)
+    if getattr(args, "write_baseline", None):
+        _write_lint_baseline(args, [(args.file, report)])
+        args.fail_on = "never"  # recording the findings is not failing on them
 
     if args.output_format in ("text", "github"):
         if prof is not None:
@@ -3542,9 +3744,11 @@ def _lint_selection(args: argparse.Namespace) -> tuple[list[str], Any]:
 def _lint_one_isolated(
     args: argparse.Namespace, path: str
 ) -> tuple[Any, Any, str | None]:
-    """Lint one file of a multi-file run: ``(report, ast, None)``, or
-    ``(None, None, why)`` when it could not be linted. Its diagnostics still
-    reach stderr; a failure never stops the other files."""
+    """Lint one file of a multi-file run: ``(report, identification, None)``,
+    or ``(None, None, why)`` when it could not be linted. Its diagnostics
+    still reach stderr; a failure never stops the other files. Returns the
+    report's identification dict rather than the AST so a worker process
+    hands back only what the output needs."""
     import contextlib
     import io
 
@@ -3570,7 +3774,48 @@ def _lint_one_isolated(
         print(f"error: {path}: {type(exc).__name__}: {exc}", file=sys.stderr)
         return None, None, f"{type(exc).__name__}: {exc}"
     sys.stderr.write(captured.getvalue())
-    return report, ast, None
+    return report, _identification(argparse.Namespace(file=path), ast), None
+
+
+def _lint_excluded(path: str, patterns: list[str]) -> bool:
+    """Whether *path* matches one of the ``--exclude`` / ``lint.exclude``
+    globs (``*`` crosses folders; a pattern is tried against the path as
+    given and against its absolute form, since config patterns are
+    resolved to absolute ones)."""
+    import fnmatch
+
+    absolute = os.path.abspath(path)
+    candidates = {
+        path,
+        absolute,
+        path.replace(os.sep, "/"),
+        absolute.replace(os.sep, "/"),
+    }
+    return any(
+        fnmatch.fnmatch(candidate, pattern)
+        or fnmatch.fnmatch(candidate, pattern + "/*")
+        for pattern in patterns
+        for candidate in candidates
+    )
+
+
+def _lint_files_parallel(
+    args: argparse.Namespace, files: list[str]
+) -> list[tuple[str, Any, Any, str | None]]:
+    """``(path, report, identification, why)`` for every file, in order: in
+    ``--workers`` processes (default the CPU count) when there is more than
+    one file, else in this process."""
+    workers = getattr(args, "workers", None) or os.cpu_count() or 1
+    workers = max(1, min(workers, len(files)))
+    if workers == 1:
+        return [(path, *_lint_one_isolated(args, path)) for path in files]
+    from concurrent.futures import ProcessPoolExecutor
+
+    with ProcessPoolExecutor(max_workers=workers) as pool:
+        results = list(
+            pool.map(_lint_one_isolated, [args] * len(files), files, chunksize=1)
+        )
+    return [(path, *result) for path, result in zip(files, results, strict=True)]
 
 
 def _drop_repeated_layout_findings(linted: list[tuple[str, Any, Any]]) -> None:
@@ -3618,15 +3863,27 @@ def _lint_many(args: argparse.Namespace) -> None:
             file=sys.stderr,
         )
 
+    excludes = list(getattr(args, "exclude", None) or [])
+    if excludes:
+        kept_files = [f for f in files if not _lint_excluded(f, excludes)]
+        if len(kept_files) != len(files):
+            print(
+                f"note: {len(files) - len(kept_files)} file(s) left out by exclude",
+                file=sys.stderr,
+            )
+        files = kept_files
+
     linted: list[tuple[str, Any, Any]] = []
     failures: list[tuple[str, str]] = []
-    for path in files:
-        report, ast, why = _lint_one_isolated(args, path)
+    for path, report, ident, why in _lint_files_parallel(args, files):
         if report is None:
             failures.append((path, why or "could not be linted"))
         else:
-            linted.append((path, report, ast))
+            linted.append((path, report, ident))
 
+    if getattr(args, "write_baseline", None):
+        _write_lint_baseline(args, [(path, report) for path, report, _ in linted])
+        args.fail_on = "never"  # recording the findings is not failing on them
     _drop_repeated_layout_findings(linted)
 
     fmt = args.output_format
@@ -3637,9 +3894,15 @@ def _lint_many(args: argparse.Namespace) -> None:
         "info": sum(r.info_count for _, r, _ in linted),
     }
     total = sum(totals.values())
+    hidden = {
+        "suppressed": sum(r.suppressed for _, r, _ in linted),
+        "baselined": sum(r.baselined for _, r, _ in linted),
+    }
     summary_line = (
         f"{total} finding(s) in {len(linted)} file(s): {totals['error']} error, "
         f"{totals['warning']} warning, {totals['info']} info"
+        + (f"; {hidden['suppressed']} suppressed" if hidden["suppressed"] else "")
+        + (f"; {hidden['baselined']} in baseline" if hidden["baselined"] else "")
         + (f"; {len(failures)} file(s) could not be linted" if failures else "")
     )
 
@@ -3684,9 +3947,8 @@ def _lint_many(args: argparse.Namespace) -> None:
         _json_out(sarif_log(results, notes), args.compact, output)
     else:
         entries = []
-        for path, report, ast in linted:
-            one = argparse.Namespace(file=path)
-            entry = _identification(one, ast)
+        for _path, report, ident in linted:
+            entry = dict(ident)
             entry.update(report.to_dict())
             entries.append(entry)
         document: dict[str, Any] = {
@@ -3698,6 +3960,7 @@ def _lint_many(args: argparse.Namespace) -> None:
                 "failed": len(failures),
                 "total": total,
                 **totals,
+                **hidden,
             },
         }
         if selection is not None:
@@ -5388,6 +5651,10 @@ def _config_to_dict(config: ProjectConfig) -> dict[str, Any]:
                 "rules": list(config.lint.rules),
                 "min_severity": config.lint.min_severity,
                 "fail_on": config.lint.fail_on,
+                "disable": list(config.lint.disable),
+                "severity": dict(config.lint.severity),
+                "exclude": list(config.lint.exclude),
+                "baseline": config.lint.baseline,
             }
         ),
         "tools": dict(config.tools),
@@ -5442,6 +5709,9 @@ def _cmd_config(args: argparse.Namespace) -> None:
             elif isinstance(value, bool):
                 # Spelled the way the file spells it, not Python's True.
                 lines.append(f"  {key}: {'true' if value else 'false'}")
+            elif isinstance(value, dict):
+                lines.append(f"  {key}:")
+                lines.extend(f"    {k}: {v}" for k, v in value.items())
             else:
                 lines.append(f"  {key}: {value}")
     for name, section_data in payload["tools"].items():

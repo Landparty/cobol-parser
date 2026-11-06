@@ -128,7 +128,7 @@ Verified against `python -m cobolparser <cmd> --help` on 2026-10-15. Order is
 | `dclgen-check` | `file` | — | A; +prof | `DclgenChecker` |
 | `redundancy` | `file` | `--min-clone-statements N` (3) | A; +prof | `RedundancyAnalyzer` |
 | `scan` | `[files ...]` | `--glob`..., `--files-from FILE`, `--analyzer NAME`... (`health,redundancy`), `--clones`, `--min-clone-members N` (2), `--min-clone-statements N` (3), `--workers N` (CPU count), `--encoding` (detected), `--cache-dir DIR` (off), `--format {json,sarif}` (json; sarif runs `lint`) | A without `--program` | `scan_version` report, or a SARIF log of every file's lint findings |
-| `lint` | `[FILE ...]` | `--glob PATTERN`..., `--files-from FILE`, `--changed-since REF`, `--extension EXT`... (`.cbl .cob .cobol`), `--rule RULE`... (all, incl. `line-length`), `--min-severity {error,warning,info}` (info), `--fail-on {error,warning,info,never}` (never), `--format {json,text,sarif,github}` (json) | A (`--program` default: every unit); +prof (one file only) | findings (or a SARIF 2.1.0 log, or GitHub workflow commands); several files: `{files, failures, summary}`; exit 3 on `--fail-on`, 1 when a file could not be linted |
+| `lint` | `[FILE ...]` | `--glob PATTERN`..., `--files-from FILE`, `--changed-since REF`, `--extension EXT`... (`.cbl .cob .cobol`), `--rule RULE`... (all, incl. `line-length`), `--disable RULE`..., `--severity RULE[/KIND]=LEVEL`..., `--min-severity {error,warning,info}` (warning for text/github, info for json/sarif), `--fail-on {error,warning,info,never}` (never), `--format {json,text,sarif,github}` (json), `--exclude PATTERN`..., `--baseline FILE`, `--write-baseline FILE`, `--strict-copybooks`, `--workers N` (CPU count) | A (`--program` default: every unit); +prof (one file only) | findings (or a SARIF 2.1.0 log, or GitHub workflow commands); several files: `{files, failures, summary}`; exit 3 on `--fail-on`, 1 when a file could not be linted |
 | `data-items` | `file` | — | A; +prof | `compute_program_data_items()` |
 | `program-signature` | `file` | — | A (`--program` default: every unit); +prof | `{"signatures": [...]}` |
 | `xref` | `file` | — | A; +prof | `XrefReport` |
@@ -218,7 +218,7 @@ stated" stays distinct from "equals the default"):
 | top level | `version`, `project`, `data`, `lint`, `mockymock`, `analyzer` (anything else is an error) |
 | `project:` | `copybook_path`, `callee_path`, `proc_path` (lists, resolved against the file's directory), `source_format` (`auto\|fixed\|free`), `debug_lines` (bool), `dialect` (`ibm-enterprise`), `error_recovery` (`collect-all\|fail-fast`), `seed`, `extensions`, `define` (normalized to `SYMBOL=VALUE`) |
 | `data:` → `DataDefaults` | `charset`, `endian`, `record_format`, `record_separator`, `rows` |
-| `lint:` → `LintDefaults` | `rules`, `min_severity`, `fail_on` |
+| `lint:` → `LintDefaults` | `rules`, `min_severity`, `fail_on`, `disable`, `severity` (`rule` or `rule/KIND` → level), `exclude` (globs, resolved against the file's folder), `baseline` (path, likewise) |
 | `mockymock:` / `analyzer:` | validated only as mappings, carried verbatim on `ProjectConfig.tools`; `tool_section(name)` returns the mapping or `{}` |
 
 * **Discovery** — `cobol.yml` then `cobol.yaml` in the cwd and each parent,
@@ -700,8 +700,32 @@ parse, one severity-graded finding list.
   `recursion-check`, `complexity`, `dclgen-check`, `sql-cics-check`).
   Argparse `choices` rejects an unknown id (exit 2) so a typo never reads as
   "found nothing" (`test_lint_subcommand.py::test_unknown_rule_is_rejected_by_argparse`).
-  Selection is normalized to canonical order. `--min-severity` filters
-  *after* the rules run, so summary counts match what is shown.
+  Selection is normalized to canonical order; `--disable RULE` (`lint.disable`)
+  removes rules from it. `--min-severity` filters *after* the rules run, so
+  summary counts match what is shown; with no flag and no `lint.min_severity`
+  it is `warning` for `--format text`/`github` (a person reading) and `info`
+  for `json`/`sarif` (a consumer that filters for itself) --
+  `_lint_min_severity`.
+* **Policy order in `_lint_one`**, after the source map and line-length:
+  `apply_severity_overrides` (`--severity RULE[/KIND]=LEVEL`, else
+  `lint.severity`; `_lint_severity_overrides`, a bad value exits 2), then
+  `apply_suppressions` (inline `cobol-lint:` comments, read from each
+  finding's origin file), then `apply_baseline` (`--baseline`/`lint.baseline`,
+  read once per process by `_load_lint_baseline`; missing file exits 1),
+  then `--min-severity`. `summary.suppressed` / `summary.baselined` count
+  what was hidden; text adds `; N suppressed; M in baseline`. Details of the
+  three: [analysis/lint.md](analysis/lint.md).
+* **`--write-baseline FILE`**: `_lint_one` skips the baseline and the
+  severity filter, `_write_lint_baseline` records every file's findings
+  (`baseline_document`, paths relative to FILE's folder) and then trims the
+  reports for display; the run exits 0 whatever `--fail-on` says.
+* **Copybooks lint leniently** (`args._lenient_copybooks`, set by `_lint_one`
+  unless `--strict-copybooks`): `_do_parse` appends the IBM stand-ins
+  (`preprocess/_system_copybooks.py`: `DFHAID`, `DFHBMSCA`, searched last)
+  and passes `skip_missing_copybooks=True`; each member still missing is a
+  caveat (`... the COPY was left as written; no rule saw what it declares`)
+  instead of exit 1. Only with a `--copybook-path`: without one no COPY is
+  expanded at all.
 * `--format json`: header plus `findings` / `rules_run` / `failed_rules` /
   `caveats` / `summary`. `--format text`: `file:line:column: severity [rule]
   message` per finding (the prefix editors and build logs parse), `note:`
@@ -718,14 +742,19 @@ parse, one severity-graded finding list.
   (`_github_escape`: `%`, CR, LF; `:` and `,` in properties). Caveats and
   failed rules print as plain `note:` lines. No problem matcher needed.
 * **Several files** (`_lint_many`): more than one FILE, or any of `--glob`,
-  `--files-from`, `--changed-since`. Each file runs through `_lint_one`
-  isolated (`_lint_one_isolated`: `_fail`'s `SystemExit` and any exception
-  become a `failures` entry, its stderr passed through), so one bad file
-  never stops the rest. Text/github print every file's findings, then
+  `--files-from`, `--changed-since`. `--exclude` / `lint.exclude` globs
+  (`_lint_excluded`, fnmatch, `*` crosses folders) drop files first, with a
+  `note:`. Each file runs through `_lint_one` isolated (`_lint_one_isolated`:
+  `_fail`'s `SystemExit` and any exception become a `failures` entry, its
+  stderr passed through), so one bad file never stops the rest; it returns
+  the report and the identification dict, not the AST, because
+  `_lint_files_parallel` runs files in `--workers` processes (default the CPU
+  count, `ProcessPoolExecutor`, order kept; 1 = in process). NIST's 459
+  programs: 96 s before, 62 s in one process (one parse per file), 16 s on 4 cores. Text/github print every file's findings, then
   `could not be linted` lines, then one total (`N finding(s) in M file(s):
   ...`); json is `{files: [{source_file, program_id, ...report}], failures:
   [{source_file, error}], summary: {file_count, linted, failed, total, error,
-  warning, info}}` plus `changed_since: {ref, changed_files, via_copybook}`;
+  warning, info, suppressed, baselined}}` plus `changed_since: {ref, changed_files, via_copybook}`;
   sarif is one log with a notification per failure. Exit 1 if any file
   failed, else 3 if any file hit `--fail-on`. `--profile` is ignored with a
   warning. One FILE alone keeps the single-file shapes above unchanged.
@@ -759,11 +788,12 @@ parse, one severity-graded finding list.
   unused copybook item `info` and a program-declared one `warning` (the
   `unused-variables` set difference); and gives real origins — a finding in
   an inlined member names the *copybook*; one the map cannot place has no
-  `origin`. `_lint_copybook_item_names` diffs expanded vs unexpanded declared
-  names over `program_units()` on both sides, narrowed the same way under
-  `--program` (diffing only the outermost would grade a contained program's
-  copybook fields `warning`; another unit's declaration must not subtract from
-  this one's set) — `test_nested_program_units.py::TestCopybookProvenanceCoversEveryUnit`.
+  `origin`. `_lint_copybook_item_names` reads it off the expansion source map
+  (an item declared on a line that maps to another file came from a
+  copybook; a name the program also declares itself is left out), over
+  `program_units()` of the (possibly `--program`-narrowed) AST -- no second,
+  unexpanded parse any more —
+  `test_nested_program_units.py::TestCopybookProvenanceCoversEveryUnit`.
 * **On-disk columns** (#301): analyzer columns count the *normalized* text
   (fixed-format columns 8-72, 7 short of an editor). `_lint_column_offset`
   judges the program as `CobolParser` does (`--source-format`, else
