@@ -1007,6 +1007,13 @@ class ProgramFixtureGenerator:
             for key in (site_key, override_key):
                 if key in override.status_overrides:
                     return {field_name: override.status_overrides[key]}
+        if boundary.ref.category == "SQL":
+            # A branch after this statement tests its SQLCODE (#840): the
+            # mock reports the scenario's witness (a negative SQLCODE for
+            # ``IF SQLCODE < 0``), success otherwise.
+            sql_code = index.sql_code_at(boundary.ref.line)
+            if sql_code is not None:
+                return {field_name: cls._return_code_value(sql_code.spec, override)}
         return {field_name: default}
 
     @staticmethod

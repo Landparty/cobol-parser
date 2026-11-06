@@ -216,6 +216,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+* **`gen-fixtures` drives branches on SQLCODE.** `IF SQLCODE < 0`,
+  `EVALUATE WS-RC` after `MOVE SQLCODE TO WS-RC`, and the like now constrain
+  the EXEC SQL statement before them: each scenario's SQL fixture status
+  carries a realistic code (100, -911, -805, ...) and the scenario verifies
+  (#840). An `EVALUATE` on a CALL's RETURN-CODE is driven the way an `IF`
+  already was (#839).
+* **`program-flow`: a section entered by PERFORM of one paragraph no longer
+  falls through its other paragraphs.** `PERFORM 1000-READ` in `IO-SEC`
+  left every later paragraph of `IO-SEC` reachable; now only the performed
+  range runs on (#842).
 * **`program-flow` no longer falls through out of a PERFORM-only
   paragraph.** A paragraph control only reaches by PERFORM returns to its
   performer when it ends, so the priming-read pattern (`PERFORM 1000-READ`,
