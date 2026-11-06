@@ -241,6 +241,17 @@ def _under(qname: str, group: str) -> bool:
     return qname == group or qname.startswith(group + ".")
 
 
+def _common_group(qnames: list[str]) -> str:
+    """The longest qualified name every one of *qnames* is or lies under."""
+    parts = [_base(q).split(".") for q in qnames]
+    common: list[str] = []
+    for level in zip(*parts, strict=False):
+        if len(set(level)) != 1:
+            break
+        common.append(level[0])
+    return ".".join(common)
+
+
 def _base(node: str) -> str:
     """An item key without its literal subscripts: ``T.A(2)`` -> ``T.A``."""
     return _SUBSCRIPT_RE.sub("", node)
@@ -814,11 +825,18 @@ class FieldWideningAnalyzer:
                 return qname
         return None
 
-    def _record_ports(self, program: str, record: str) -> set[tuple[str, str]]:
-        """(port kind, port key) of every file / CALL / LINKAGE port a field
-        of *record* meets in *program*."""
+    def _record_ports(self, start: _Start, record: str) -> dict[tuple[str, str], str]:
+        """(port kind, port key) -> the item passed, of every file / CALL /
+        LINKAGE port a field of *record* meets in the start's program.
+
+        A file port takes the whole record, so any field of it counts. A CALL
+        or LINKAGE argument is passed by its own address and length: only one
+        whose bytes hold the changed field changes for the other side. A field
+        before or after it in the same record (``CALL X USING ORD-CUST-ID``
+        when ``ORD-AMOUNT`` widens) keeps its own layout."""
+        program = start.program
         items = self._items.get(program, {})
-        ports: set[tuple[str, str]] = set()
+        met: dict[tuple[str, str], list[dict[str, Any]]] = {}
         for edge in self.graph.reports[program].get("edges") or []:
             for side, other in (("source", "target"), ("target", "source")):
                 node, port = edge[side], edge[other]
@@ -832,15 +850,42 @@ class FieldWideningAnalyzer:
                     _SUBSCRIPT_RE.sub("", str(node["name"]).upper())
                 )
                 if item is not None and item.get("record") == record:
-                    ports.add((port["kind"], str(port["name"])))
+                    met.setdefault((port["kind"], str(port["name"])), []).append(item)
+        ports: dict[tuple[str, str], str] = {}
+        for key, pieces in met.items():
+            if key[0] != PORT_FILE and not any(
+                self._holds(start, item) for item in pieces
+            ):
+                continue
+            # The argument is the group around every piece that meets the
+            # port (edges run per elementary item): REC when REC is passed.
+            names = [str(i.get("qualified_name") or record).upper() for i in pieces]
+            ports[key] = _common_group(names) or record
         return ports
+
+    @staticmethod
+    def _holds(start: _Start, item: dict[str, Any]) -> bool:
+        """True when *item*'s bytes include the start's (old) bytes: the item
+        is the start or a group around it, or (by offset) a REDEFINES over
+        them. Without offsets, only the name decides."""
+        qname = str(item.get("qualified_name") or "").upper()
+        if qname and _under(start.qname, qname):
+            return True
+        offset, length = item.get("offset"), item.get("length")
+        start_offset = start.item.get("offset")
+        if offset is None or length is None or start_offset is None:
+            return not qname
+        return bool(
+            int(offset) < int(start_offset) + start.old_bytes
+            and int(start_offset) < int(offset) + int(length)
+        )
 
     def _interfaces(
         self, start: _Start, record: str, size: str
     ) -> list[WideningFinding]:
         found: list[WideningFinding] = []
         program = start.program
-        for kind, key in sorted(self._record_ports(program, record)):
+        for (kind, key), argument in sorted(self._record_ports(start, record).items()):
             if kind == PORT_FILE:
                 datasets = sorted(
                     {
@@ -888,10 +933,27 @@ class FieldWideningAnalyzer:
                         "warning",
                         program,
                         f"call:{key}",
-                        f"{record} is passed as argument {position} of CALL "
-                        f"{callee}: {size}; the callee's LINKAGE record must "
-                        "change too, or it reads the fields after the change at "
-                        "their old offsets",
+                        (
+                            (
+                                f"{record} is passed as argument {position} of CALL "
+                                f"{callee}: {size}; the callee's LINKAGE record must "
+                                "change too, or it reads the fields after the change "
+                                "at their old offsets"
+                            )
+                            if argument == record
+                            else (
+                                f"{argument} is passed as argument {position} of CALL "
+                                f"{callee} and "
+                                + (
+                                    ""
+                                    if argument == start.qname
+                                    else f"holds {start.qname}, which "
+                                )
+                                + f"{'grows' if start.delta > 0 else 'shrinks'} by "
+                                f"{start.delta:+d} bytes; the callee's LINKAGE item "
+                                "must change too"
+                            )
+                        ),
                     )
                 )
                 for owner, callee_record in self._linkage_records(key):
