@@ -23,6 +23,7 @@ which one it means.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from decimal import Decimal, InvalidOperation
 from typing import Any
@@ -239,6 +240,9 @@ def _values_for(field_name: str, fixtures: list[BoundaryFixture]) -> list[str]:
     yields no values, which reads as "absent" -- unverified, the safe way to
     be wrong.
     """
+    status_borne = _status_values(field_name, fixtures)
+    if status_borne is not None:
+        return status_borne
     qualified = [
         (fixture, spec.column)
         for fixture in fixtures
@@ -263,6 +267,30 @@ def _values_for(field_name: str, fixtures: list[BoundaryFixture]) -> list[str]:
             if column in row:
                 values.append(row[column])
     return values
+
+
+_STATUS_BORNE = re.compile(r"^(?:SQL|FETCH)@(\d+)\.SQLCODE$")
+
+
+def _status_values(
+    field_name: str, fixtures: list[BoundaryFixture]
+) -> list[str] | None:
+    """The SQLCODE an EXEC SQL statement leaves (#840) is a synthetic field
+    (``SQL@<line>.SQLCODE``) that no record layout holds: the SQL fixture
+    on that line carries it in its ``status``. None when *field_name* is not
+    such a field, so the layout lookup runs as usual."""
+    match = _STATUS_BORNE.match(field_name)
+    if match is None:
+        return None
+    line = int(match.group(1))
+    return [
+        fixture.status["SQLCODE"]
+        for fixture in fixtures
+        if fixture.ref.category == "SQL"
+        and fixture.ref.line == line
+        and fixture.status
+        and "SQLCODE" in fixture.status
+    ]
 
 
 def _verdict_for(

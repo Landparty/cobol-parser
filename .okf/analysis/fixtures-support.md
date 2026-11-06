@@ -695,7 +695,7 @@ cleaning pass that recombines `NOT`-prefixed operators. Without that, `IF WS-X
 >= 5` parses as `GREATER` with right operand `= 5` for every consumer of
 `build_condition_expression`.
 
-### OR disjuncts and CALL RETURN-CODE (2026-11-05)
+### OR disjuncts, CALL RETURN-CODE and SQLCODE (2026-11-05, 2026-11-06)
 
 * Each variant of an OR is isolated (`_isolate_disjuncts`): the variant for
   one disjunct also carries the negation of every other disjunct, so a
@@ -708,8 +708,22 @@ cleaning pass that recombines `NOT`-prefixed operators. Without that, `IF WS-X
   IF / EVALUATE arm) constrains that CALL's synthetic field `CALL@<line>.RETURN-CODE`
   (`ProgramLayoutIndex.call_return_code`, `S9(4)` binary). The CALL's
   fixture row then gets a `RETURN-CODE` column: the scenario's witness, else
-  `0`. Any other RETURN-CODE read is unsupported: "RETURN-CODE is modeled
-  only in an IF after a CALL in the same paragraph" (#831).
+  `0`. The same holds for an `EVALUATE RETURN-CODE` / `EVALUATE field`
+  selector and an `EVALUATE TRUE` arm's comparison (#839). Any other
+  RETURN-CODE read is unsupported: "RETURN-CODE is modeled only in an IF or
+  EVALUATE after a CALL in the same paragraph" (#831).
+* SQLCODE works the same way (#840): a comparison on `SQLCODE`, or on a field
+  last written by `MOVE SQLCODE TO field`, constrains the nearest EXEC SQL
+  statement before it in the same paragraph (on every path; a CALL or a
+  write to SQLCODE in between breaks the link), through the synthetic field
+  `SQL@<line>.SQLCODE` / `FETCH@<line>.SQLCODE`
+  (`ProgramLayoutIndex.sql_code`, `S9(9)` binary; `_Carriers.sql_code`).
+  The SQL fixture's `status["SQLCODE"]` carries the witness, else `0`
+  (`program_fixtures._status_dict`). `domains.SQLCODE_PREFERENCES` makes the
+  solver pick codes DB2 really returns (0, 100, -911, -805, -803, -811, -904,
+  -180; a FETCH prefers 100 and -911 before 0) over picture midpoints.
+  SQLSTATE is not modeled. The verifier reads these fields from the fixture's
+  status, not a layout column (`verification._status_values`).
 * An OCCURS DEPENDING ON counter declared as its own 01 gets its table's
   bounds too (`_link_odo_counters_across_records`, #832).
 

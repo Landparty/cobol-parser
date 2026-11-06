@@ -148,14 +148,20 @@ step deliberately.
   the procedure before its end: `THRU` target, `A` itself, or a performed
   section's last member), plus every procedure control reaches otherwise --
   the entry point and ENTRYs, any target of a non-PERFORM edge (GO TO, ALTER,
-  CICS HANDLE, SQL WHENEVER), members of `_sections_entered` and declarative
-  sections, declarative procedures, a procedure with no incoming edge that no
+  CICS HANDLE, SQL WHENEVER), declarative sections (wholesale), declarative
+  procedures, an unreferenced section header whose first member is reached
+  (`_first_member`: the header inherits it), a procedure with no incoming edge that no
   performed range holds (kept as before so dead-code does not move), and the
   successor of any such procedure that does not terminate. A paragraph only
   ever PERFORMed, as its range's last procedure, gets no `FALL_THROUGH` edge,
   so the priming-read pattern (`PERFORM 1000-READ` then `PERFORM 2000-PROCESS
   UNTIL ...`, each performing 1000-READ) no longer shows a MIXED cycle.
-  Pinned by `tests/regression/test_open_gaps_2026_11_06.py` and
+  A section entered through one of its paragraphs (PERFORM or PERFORM THRU
+  into its middle) does not free the rest of its members: only the range
+  performed runs on, so `PERFORM 1000-READ` in `IO-SEC` leaves a later
+  `3000-WRITE` unreachable and `PERFORM P-A THRU P-C` draws no `P-C -> P-D`
+  (#842). Pinned by `tests/regression/test_open_gaps_2026_11_06.py`,
+  `tests/unit/analysis/test_issue_842_section_fall_through.py` and
   `TestFinding1RecursionPrimingRead`.
 * **Own statements only.** Procedure names are local to a program unit, and
   `get_all_statements()` also returns every contained program's statements,
