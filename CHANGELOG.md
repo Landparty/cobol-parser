@@ -9,6 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+* **Eight lint rules from other COBOL linters.** After a survey of
+  SonarQube's COBOL rules, IBM Developer for z/OS code review and open-source
+  COBOL linters (ideas only, no code): `constant-condition` (`IF A = A`,
+  `A = 'X' AND A = 'Y'`), `duplicate-branch` (a WHEN or ELSE IF that repeats
+  an earlier test and never runs), `self-assignment` (`MOVE X TO X`),
+  `stop-run-in-subprogram`, `string-pointer` (a STRING/UNSTRING pointer set
+  to 0, or too small for its field), `loop-variable` (a PERFORM VARYING body
+  that changes its control variable), and at info `evaluate-other` and
+  `nesting-depth`. In CardDemo's VSAM/MQ extension they find
+  `MOVE WS-CICS-RESP2-CD TO WS-CICS-RESP2-CD` where the edited `-D` field
+  was meant; the base CardDemo programs get no false warning.
+
 * **A GitHub Action, and a new-code gate like Sonar's.** This repository is
   now a composite action (`uses: landparty/cobol-parser@<tag>`): pick the
   rules, and judge each one on new code only or on the whole codebase. It

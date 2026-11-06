@@ -125,6 +125,15 @@ Seven rules look for common coding bugs: `truncation`, `subscript-range`,
 `next-sentence`, `perform-range`, `file-status`, `uninitialized` and
 `obsolete-verb`. They run by default; select one with `--rule truncation`.
 
+Eight more come from what other COBOL linters check: `constant-condition`
+(`IF A = A`, `A = 'X' AND A = 'Y'`), `duplicate-branch` (a WHEN or ELSE IF
+that repeats an earlier test), `self-assignment` (`MOVE X TO X`),
+`stop-run-in-subprogram`, `string-pointer` (a pointer set to 0, or too small
+for its field), `loop-variable` (a PERFORM VARYING body that changes its
+control variable), and two info rules, `evaluate-other` (no WHEN OTHER) and
+`nesting-depth` (more than 5 levels). Turn off one you do not want with
+`--disable RULE` or `lint.disable` in `cobol.yml`.
+
 `call-check` compares each static CALL with the program it calls (argument
 count and byte lengths). It runs only when lint can find the callees: pass
 `--callee-path DIR` (repeatable) or set `project.callee_path` in `cobol.yml`.
