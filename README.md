@@ -165,6 +165,8 @@ cobol-parser lint src/ORDRPT.cbl src/ORDEDIT.cbl --rule truncation --rule file-s
 cobol-parser lint src/ORDPOST.cbl --callee-path src --format text   # also checks each CALL against its callee
 cobol-parser lint --changed-since origin/main --format github --fail-on error
 cobol-parser lint src/*.cbl --format sarif -o lint.sarif
+cobol-parser lint --glob 'src/**/*.cbl' --write-baseline lint-baseline.json
+cobol-parser lint --glob 'src/**/*.cbl' --baseline lint-baseline.json --fail-on warning
 cobol-parser scan --glob 'src/*.cbl' --analyzer health --clones --cache-dir .cache
 cobol-parser scan src/*.cbl --format sarif -o scan.sarif
 cobol-parser config
@@ -208,7 +210,17 @@ rule also compares every CALL with the program it calls (argument count,
 passing mode, byte length, usage), so a caller passing 8 bytes to a 10-byte
 LINKAGE item fails the lint gate.
 `--rule` narrows the run, `--min-severity` the output, and `--fail-on error`
+
+`--rule` and `--disable` narrow the run, `--severity RULE=LEVEL` re-grades a
+rule, `--min-severity` trims the output (by default `text` and `github` show
+warnings and errors, `json` and `sarif` everything), and `--fail-on error`
 exits 3 when a finding at that severity was reported, so it can gate a build.
+A comment silences one finding where it is (`*> cobol-lint:
+disable-next-line=dead-code`), and `--write-baseline` / `--baseline` record
+today's findings so a gate on a legacy codebase fails only on new ones.
+IBM's CICS copybooks `DFHAID` and `DFHBMSCA` are built in, and a copybook
+that cannot be found is named in the report's caveats instead of failing the
+file (`--strict-copybooks` restores the failure).
 It takes many files at once (`FILE...`, `--glob`, `--files-from`),
 `--changed-since REF` lints only the programs a git change touched (and those
 that `COPY` a changed copybook), and `--format github` annotates the pull

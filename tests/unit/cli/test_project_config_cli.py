@@ -175,7 +175,7 @@ def test_explicit_min_severity_wins(project):
 def test_no_config_ignores_the_file(project):
     args = run_capturing_args(["lint", "PROG.cbl", "--no-config"], "lint")
     assert args.copybook_path == []
-    assert args.min_severity == "info"  # the built-in default
+    assert args.min_severity is None  # the built-in default: chosen by --format
 
 
 def test_explicit_config_path_is_used_instead_of_the_search(project, tmp_path):

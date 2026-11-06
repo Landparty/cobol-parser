@@ -240,11 +240,41 @@ class TestFinding9MissingCopybookIsACleanError:
                        PROCEDURE DIVISION.
                            STOP RUN.
                 """))
-        proc = _cli("lint", str(src), "--compact", "--copybook-path", str(tmp_path))
+        proc = _cli(
+            "lint",
+            str(src),
+            "--compact",
+            "--copybook-path",
+            str(tmp_path),
+            "--strict-copybooks",
+        )
         assert proc.returncode == 1
         assert "Traceback" not in proc.stderr
         assert "NOSUCH" in proc.stderr
         assert "not found" in proc.stderr
+
+    def test_lint_without_strict_copybooks_lints_and_says_so(
+        self, tmp_path: Path
+    ) -> None:
+        """By default lint finishes the file and names the missing member in
+        its caveats, rather than failing it (CardDemo: 17 of 29 programs
+        failed on IBM's DFHAID / DFHBMSCA)."""
+        import json
+
+        src = tmp_path / "PROG.cbl"
+        src.write_text(textwrap.dedent("""\
+                       IDENTIFICATION DIVISION.
+                       PROGRAM-ID. PROG.
+                       DATA DIVISION.
+                       WORKING-STORAGE SECTION.
+                       COPY NOSUCH.
+                       PROCEDURE DIVISION.
+                           STOP RUN.
+                """))
+        proc = _cli("lint", str(src), "--compact", "--copybook-path", str(tmp_path))
+        assert proc.returncode == 0, proc.stderr
+        report = json.loads(proc.stdout)
+        assert any("NOSUCH" in c and "left as written" in c for c in report["caveats"])
 
 
 class TestFinding10VersionMatchesPackage:

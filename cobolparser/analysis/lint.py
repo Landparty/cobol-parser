@@ -42,6 +42,7 @@ Two properties matter more than breadth here:
 from __future__ import annotations
 
 import functools
+import re
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 from typing import Any
@@ -145,9 +146,14 @@ _SEVERITY_LINKAGE: dict[str, str] = {
 # itself) -- that is an infinite loop, not a smell. MEDIUM means an escape
 # route exists and the loop terminates if the data ever satisfies it.
 # LOW is a self-CALL in a program declared IS RECURSIVE: legal, only noted.
+#
+# MEDIUM is info, not warning: a loop with a way out is how COBOL without
+# PERFORM UNTIL writes every loop (``GO TO DELAY-LOOP`` behind an IF), and
+# whether the data ever takes the way out is not something the analyzer can
+# know. On the NIST suite it was 3,600 warnings, a sixth of the whole report.
 _SEVERITY_RECURSION: dict[str, str] = {
     "HIGH": "error",
-    "MEDIUM": "warning",
+    "MEDIUM": "info",
     "LOW": "info",
 }
 
@@ -236,6 +242,12 @@ class LintReport:
     # docstring. Empty means every rule that ran examined everything it
     # knows how to examine.
     caveats: list[str] = field(default_factory=list)
+    # Findings an inline ``cobol-lint: disable`` comment silenced
+    # (apply_suppressions), and findings already recorded in the baseline
+    # file (apply_baseline). Counted, not listed: a reader should know the
+    # report is quieter than the program, not wade through what was hidden.
+    suppressed: int = 0
+    baselined: int = 0
 
     @property
     def error_count(self) -> int:
@@ -278,6 +290,8 @@ class LintReport:
                 "warning": self.warning_count,
                 "info": self.info_count,
                 "by_rule": self.counts_by_rule(),
+                "suppressed": self.suppressed,
+                "baselined": self.baselined,
             },
         }
 
@@ -340,6 +354,298 @@ def _deduplicate(findings: list[LintFinding]) -> list[LintFinding]:
         seen.add(key)
         unique.append(finding)
     return unique
+
+
+# -- Severity overrides, inline suppressions, baseline ----------------------
+
+
+def _rule_matches(selector: str, finding: LintFinding) -> bool:
+    """Whether *selector* (``all``, ``rule`` or ``rule/KIND``) names *finding*."""
+    if selector.lower() == "all":
+        return True
+    rule, _, kind = selector.partition("/")
+    if rule.lower() != finding.rule:
+        return False
+    return not kind or kind.upper() == (finding.kind or "").upper()
+
+
+def apply_severity_overrides(
+    report: LintReport, overrides: dict[str, str] | None
+) -> LintReport:
+    """Re-grade findings by ``lint.severity``: a ``rule/KIND`` key wins over a
+    bare ``rule`` key (``{recursion-check: warning,
+    io-sequence/FILE_LEFT_OPEN: error}``)."""
+    if not overrides:
+        return report
+    for finding in report.findings:
+        specific = f"{finding.rule}/{finding.kind}" if finding.kind else None
+        level = None
+        if specific is not None:
+            level = next(
+                (v for k, v in overrides.items() if k.upper() == specific.upper()),
+                None,
+            )
+        if level is None:
+            level = overrides.get(finding.rule)
+        if level is not None:
+            if level not in _SEVERITY_RANK:
+                raise ValueError(f"unknown severity: {level!r}")
+            finding.severity = level
+    return report
+
+
+#: ``cobol-lint: disable=dead-code,unused-variables`` and its siblings. The
+#: rule list is optional: without it the directive covers every rule.
+_DIRECTIVE_RE = re.compile(
+    r"cobol-lint:\s*(disable-next-line|disable-file|disable|enable)\b"
+    r"(?:\s*=\s*([A-Za-z0-9_\-/]+(?:\s*,\s*[A-Za-z0-9_\-/]+)*))?",
+    re.IGNORECASE,
+)
+
+
+def _is_comment_line(line: str) -> bool:
+    """A whole-line comment: column 7 ``*`` or ``/`` in fixed format, or a
+    line whose text starts with ``*>`` (or ``*``) in free format."""
+    if len(line) > 6 and line[6] in "*/":
+        return True
+    return line.lstrip().startswith("*>")
+
+
+def _directive_in_comment(line: str, start: int) -> bool:
+    """Whether the directive found at *start* sits in a comment: a comment
+    line, or after a ``*>`` that is not inside a literal."""
+    if _is_comment_line(line):
+        return True
+    quote: str | None = None
+    for position in range(min(start, len(line) - 1)):
+        ch = line[position]
+        if quote is not None:
+            if ch == quote:
+                quote = None
+        elif ch in "'\"":
+            quote = ch
+        elif ch == "*" and line[position + 1] == ">":
+            return True
+    return False
+
+
+@dataclass
+class _FileDirectives:
+    """The suppressions one file declares."""
+
+    whole_file: set[str] = field(default_factory=set)
+    lines: dict[int, set[str]] = field(default_factory=dict)
+    #: ``(first, last, rules)``; *last* is ``None`` while still open.
+    blocks: list[tuple[int, int | None, set[str]]] = field(default_factory=list)
+
+    def covers(self, line: int | None, finding: LintFinding) -> bool:
+        selectors = set(self.whole_file)
+        if line is not None:
+            selectors |= self.lines.get(line, set())
+            for first, last, rules in self.blocks:
+                if first <= line and (last is None or line <= last):
+                    selectors |= rules
+        return any(_rule_matches(sel, finding) for sel in selectors)
+
+
+def _enable_closes(enabled: set[str], disabled: set[str]) -> bool:
+    """Whether ``enable=<enabled>`` ends a ``disable=<disabled>`` block:
+    ``all`` ends every block, a bare rule ends that rule's blocks (with or
+    without a KIND), and ``rule/KIND`` ends only a block of exactly that."""
+    wanted = {e.lower() for e in enabled}
+    if "all" in wanted:
+        return True
+    for selector in (d.lower() for d in disabled):
+        if selector in wanted or selector.partition("/")[0] in wanted:
+            return True
+    return False
+
+
+def parse_suppressions(text: str) -> _FileDirectives:
+    """Read every ``cobol-lint:`` directive in one file's text.
+
+    * ``*> cobol-lint: disable=RULE`` after code silences that line;
+    * on a comment line of its own, ``disable=RULE`` silences from there to
+      the matching ``enable=RULE`` (or the end of the file);
+    * ``disable-next-line=RULE`` silences the next line that is not a
+      comment or blank;
+    * ``disable-file=RULE`` silences the whole file.
+
+    RULE is a rule id, ``rule/KIND`` (``unused-variables/FILE``), or a
+    comma-separated list of them; leaving it out means every rule.
+    """
+    from .._lines import split_source_lines
+
+    directives = _FileDirectives()
+    lines = split_source_lines(text)
+    pending_next: set[str] = set()
+    for number, line in enumerate(lines, start=1):
+        match = _DIRECTIVE_RE.search(line)
+        comment_only = _is_comment_line(line) or not line.strip()
+        if pending_next and not comment_only:
+            directives.lines.setdefault(number, set()).update(pending_next)
+            pending_next = set()
+        if match is None or not _directive_in_comment(line, match.start()):
+            continue
+        action = match.group(1).lower()
+        rules = {r.strip() for r in (match.group(2) or "all").split(",") if r.strip()}
+        if action == "disable-file":
+            directives.whole_file |= rules
+        elif action == "disable-next-line":
+            pending_next |= rules
+        elif action == "disable":
+            if _is_comment_line(line):
+                directives.blocks.append((number, None, rules))
+            else:
+                directives.lines.setdefault(number, set()).update(rules)
+        else:  # enable: close the open blocks it names
+            for index, (first, last, block_rules) in enumerate(directives.blocks):
+                if last is None and _enable_closes(rules, block_rules):
+                    directives.blocks[index] = (first, number, block_rules)
+    return directives
+
+
+def apply_suppressions(
+    report: LintReport,
+    source_file: str,
+    read_text: Callable[[str], str | None] | None = None,
+) -> LintReport:
+    """Drop findings an inline ``cobol-lint:`` comment silences.
+
+    A finding is judged in the file it is reported in -- its ``origin`` when
+    the program was copybook-expanded (so a directive inside a copybook
+    silences that copybook's findings in every program), else
+    *source_file* -- and on that file's line. A finding with no line can be
+    silenced only by ``disable-file``. The count lands in
+    ``report.suppressed``.
+    """
+    import os
+
+    def default_read(path: str) -> str | None:
+        try:
+            with open(path, encoding="utf-8", errors="replace") as handle:
+                return handle.read()
+        except OSError:
+            return None
+
+    read = read_text or default_read
+    cache: dict[str, _FileDirectives | None] = {}
+
+    def directives_for(path: str) -> _FileDirectives | None:
+        key = os.path.normcase(os.path.abspath(path))
+        if key not in cache:
+            text = read(path)
+            cache[key] = (
+                parse_suppressions(text)
+                if text is not None and "cobol-lint:" in text.lower()
+                else None
+            )
+        return cache[key]
+
+    kept: list[LintFinding] = []
+    for finding in report.findings:
+        line: int | None
+        if finding.origin_file is not None and finding.origin_line is not None:
+            path, line = finding.origin_file, finding.origin_line
+        else:
+            path = source_file
+            line = finding.location.line if finding.location is not None else None
+        directives = directives_for(path)
+        if directives is not None and directives.covers(line, finding):
+            report.suppressed += 1
+            continue
+        kept.append(finding)
+    report.findings = kept
+    return report
+
+
+BASELINE_VERSION = 1
+
+_DIGITS_RE = re.compile(r"\d+")
+
+
+def baseline_fingerprint(
+    finding: LintFinding, source_file: str, base: str
+) -> tuple[str, str, str, str]:
+    """What a baseline entry matches on: rule, kind, the file the finding is
+    in (relative to *base*, posix), and its symbol -- or, for a finding with
+    no symbol, its message with numbers blanked. Never the line: an edit
+    above a known finding must not make it new."""
+    import os
+
+    path = finding.origin_file or source_file
+    try:
+        rel = os.path.relpath(os.path.abspath(path), os.path.abspath(base))
+    except ValueError:  # another drive on Windows
+        rel = os.path.abspath(path)
+    anchor = finding.symbol or _DIGITS_RE.sub("#", finding.message)
+    return (finding.rule, finding.kind or "", rel.replace(os.sep, "/"), anchor)
+
+
+def baseline_document(
+    reports: Iterable[tuple[str, LintReport]], base: str
+) -> dict[str, Any]:
+    """The baseline JSON for these per-file reports.
+
+    A finding inside a copybook is reported by every program that COPYs it;
+    each program is matched against the baseline on its own, so an entry's
+    count is the most any one program reported, not their sum.
+    """
+    counts: dict[tuple[str, str, str, str], int] = {}
+    for source_file, report in reports:
+        mine: dict[tuple[str, str, str, str], int] = {}
+        for finding in report.findings:
+            key = baseline_fingerprint(finding, source_file, base)
+            mine[key] = mine.get(key, 0) + 1
+        for key, count in mine.items():
+            counts[key] = max(counts.get(key, 0), count)
+    return {
+        "version": BASELINE_VERSION,
+        "tool": "cobol-parser lint",
+        "findings": [
+            {"rule": r, "kind": k or None, "file": f, "anchor": a, "count": n}
+            for (r, k, f, a), n in sorted(counts.items())
+        ],
+    }
+
+
+def load_baseline(document: dict[str, Any]) -> dict[tuple[str, str, str, str], int]:
+    """Counts by fingerprint from a :func:`baseline_document`."""
+    if not isinstance(document, dict) or document.get("version") != BASELINE_VERSION:
+        raise ValueError(
+            f"not a cobol-parser lint baseline (expected version {BASELINE_VERSION})"
+        )
+    counts: dict[tuple[str, str, str, str], int] = {}
+    for entry in document.get("findings") or []:
+        key = (
+            str(entry["rule"]),
+            str(entry.get("kind") or ""),
+            str(entry["file"]),
+            str(entry["anchor"]),
+        )
+        counts[key] = counts.get(key, 0) + int(entry.get("count", 1))
+    return counts
+
+
+def apply_baseline(
+    report: LintReport,
+    source_file: str,
+    baseline: dict[tuple[str, str, str, str], int],
+    base: str,
+) -> LintReport:
+    """Drop the findings *baseline* already records, up to its count for
+    each fingerprint; what is left is new. ``baseline`` is not modified."""
+    budget = dict(baseline)
+    kept: list[LintFinding] = []
+    for finding in report.findings:
+        key = baseline_fingerprint(finding, source_file, base)
+        if budget.get(key, 0) > 0:
+            budget[key] -= 1
+            report.baselined += 1
+            continue
+        kept.append(finding)
+    report.findings = kept
+    return report
 
 
 def filter_by_severity(
@@ -905,6 +1211,30 @@ def stamp_report_origins(
     return report
 
 
+def _procedure_nodes(ast: CobolProgram) -> dict[str, Any]:
+    """Every paragraph and section of *ast*, by its procedure key (the bare
+    name, or ``"<para> OF <section>"`` for a shared name)."""
+    from ._procedures import ProcedureIndex
+
+    if ast.procedure_division is None:
+        return {}
+    index = ProcedureIndex.build(ast.procedure_division)
+    return {entry.key: entry.node for entry in index.entries}
+
+
+def _is_exit_only(node: Any) -> bool:
+    """Whether a paragraph holds nothing but a bare ``EXIT`` (or nothing)."""
+    from ..models.statements.misc import ExitStatement
+
+    statements = list(getattr(node, "statements", None) or [])
+    if getattr(node, "paragraphs", None):  # a section: never "only EXIT"
+        return False
+    return all(
+        isinstance(stmt, ExitStatement) and stmt.exit_type in (None, "PARAGRAPH")
+        for stmt in statements
+    )
+
+
 class LintAnalyzer:
     """Runs several analyzers over one AST and flattens them into findings.
 
@@ -1116,17 +1446,28 @@ class LintAnalyzer:
         from .dead_code import DeadCodeAnalyzer
 
         report = DeadCodeAnalyzer().analyze(ast)
-        return [
-            LintFinding(
-                rule="dead-code",
-                severity="warning",
-                message=f"{item.procedure_type.lower()} {item.name} can never be reached",
-                location=item.location,
-                symbol=item.name,
-                kind=item.procedure_type,
+        procedures = _procedure_nodes(ast)
+        findings: list[LintFinding] = []
+        for item in report.dead_items:
+            node = procedures.get(item.qualified_name or item.name)
+            # An unreachable `0000-MAIN-EXIT. EXIT.` after a CICS RETURN is
+            # a convention, not dead logic: there is nothing in it to delete
+            # but the label. Seen, as info, rather than a warning to fix.
+            exit_only = node is not None and _is_exit_only(node)
+            findings.append(
+                LintFinding(
+                    rule="dead-code",
+                    severity="info" if exit_only else "warning",
+                    message=(
+                        f"{item.procedure_type.lower()} {item.name} can never be reached"
+                        + (" (it holds only EXIT)" if exit_only else "")
+                    ),
+                    location=item.location,
+                    symbol=item.name,
+                    kind=item.procedure_type,
+                )
             )
-            for item in report.dead_items
-        ]
+        return findings
 
     def _unused_variables(
         self, ast: CobolProgram, copybook_item_names: set[str] | None
@@ -1138,18 +1479,36 @@ class LintAnalyzer:
         )
         findings: list[LintFinding] = []
         for item in result.unused_items:
+            message = (
+                f"{item.section} item {item.name} (level {item.level:02d}) "
+                "is never referenced in the PROCEDURE DIVISION"
+            )
+            if item.used_group:
+                message = (
+                    f"{item.section} item {item.name} (level {item.level:02d}) "
+                    f"is never referenced by name; its group {item.used_group} "
+                    "is used as a whole"
+                )
             findings.append(
                 LintFinding(
                     rule="unused-variables",
                     # An unused item the program declares itself is dead
-                    # weight its author can delete; one that arrived through
-                    # a COPY is normal -- a copybook describes a whole
-                    # record and no single program uses every field of it.
-                    severity="info" if item.from_copybook else "warning",
-                    message=(
-                        f"{item.section} item {item.name} (level {item.level:02d}) "
-                        "is never referenced in the PROCEDURE DIVISION"
+                    # weight its author can delete. Three kinds are info:
+                    # one that arrived through a COPY (a copybook describes
+                    # a whole record and no single program uses every field
+                    # of it), a FILE record field (likewise the layout of a
+                    # record the program reads or writes whole, often INTO
+                    # or FROM working storage), and a field of a group the
+                    # code names (`IF ACCTFILE-STATUS = '00'`): its bytes
+                    # are used, only its own name is not.
+                    severity=(
+                        "info"
+                        if item.from_copybook
+                        or item.used_group
+                        or item.section == "FILE"
+                        else "warning"
                     ),
+                    message=message,
                     location=item.location,
                     symbol=item.name,
                     kind=item.section,
@@ -1251,6 +1610,7 @@ class LintAnalyzer:
         from .recursion_risk import RecursionRiskAnalyzer
 
         result = RecursionRiskAnalyzer().analyze(ast, flow_report=flow_report)
+        procedures = _procedure_nodes(ast)
         findings: list[LintFinding] = []
         for risk in result.risks:
             # A risk describes a cycle, not a point -- RecursionRisk carries
@@ -1262,12 +1622,21 @@ class LintAnalyzer:
                 if risk.mechanism == "CALL"
                 else (risk.procedures[0] if risk.procedures else None)
             )
+            # Anchored on that procedure's header, so the finding has a line
+            # a GitHub annotation, a SARIF result and an inline suppression
+            # can point at (a CALL cycle on the PROGRAM-ID's unit is left
+            # without one: the self-CALL itself is not tracked here).
+            node = (
+                procedures.get(risk.procedures[0])
+                if risk.mechanism != "CALL" and risk.procedures
+                else None
+            )
             findings.append(
                 LintFinding(
                     rule="recursion-check",
                     severity=_SEVERITY_RECURSION.get(risk.severity, "warning"),
                     message=risk.explanation,
-                    location=None,
+                    location=node.location if node is not None else None,
                     symbol=symbol,
                     kind=risk.mechanism,
                 )
