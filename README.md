@@ -231,7 +231,7 @@ chosen rules on the whole codebase instead. `lint`, `scan` and `call-check`
 write SARIF 2.1.0 with `--format sarif`, which GitHub code scanning and IDE
 problem panes read directly. CI recipe and pre-commit hooks:
 [docs/ci-lint.md](docs/ci-lint.md). This repository is also a GitHub Action
-(`uses: landparty/cobol-parser@v3.5.0`) that runs the gate in a few lines:
+(`uses: landparty/cobol-parser@main`, or a release tag) that runs the gate in a few lines:
 [docs/github-action.md](docs/github-action.md).
 
 `scan` runs `health` and `redundancy` by default; `--analyzer` picks others

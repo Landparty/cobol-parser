@@ -29,7 +29,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0              # history back to the base branch
-      - uses: landparty/cobol-parser@v3.5.0
+      - uses: landparty/cobol-parser@main
         with:
           copybook-path: copybooks
           fail-on: error
@@ -41,8 +41,10 @@ the lines it added or edited. A pull request that adds no new error passes,
 however many old findings the programs already had. On a push to `main` it
 judges what the push brought in.
 
-Use a release tag of this repository (`v3.5.0` and later carry the action).
-`@main` follows the latest commit.
+`@main` follows the latest commit. For runs that only change when you
+decide, pin a release tag instead (`@vX.Y.Z`): any release published after
+this action was added carries `action.yml`; earlier tags, 3.5.0 included,
+do not.
 
 **This repository is private.** For a workflow in another repository to use
 it, open this repository's **Settings → Actions → General → Access** and
@@ -51,7 +53,7 @@ allow access from repositories owned by the same account or organization.
 ## Choosing rules and scopes
 
 ```yaml
-      - uses: landparty/cobol-parser@v3.5.0
+      - uses: landparty/cobol-parser@main
         with:
           rules: dead-code, truncation, call-check, unused-variables
           scope: new                         # the default for every rule
@@ -118,7 +120,7 @@ An input given to the action overrides the file; `cobol.yml`'s
 | `sarif-file` | none | also write a SARIF log, for code scanning |
 | `args` | none | extra `cobol-parser lint` arguments, as typed |
 | `python-version` | `3.12` | Python to run on (empty: the runner's `python3`) |
-| `version` | this action's own copy | a cobol-parser release from PyPI instead, e.g. `3.5.0` |
+| `version` | this action's own copy | a cobol-parser release from PyPI instead (one that has `lint --new-code-since`) |
 
 Outputs: `exit-code` (0 clean, 3 a finding reached `fail-on`, 1 a file could
 not be linted, 2 bad input), `scope` (`new` or `all`) and `base-ref`.
@@ -151,7 +153,7 @@ step instead of quietly linting everything.
     steps:
       - uses: actions/checkout@v4
         with: { fetch-depth: 0 }
-      - uses: landparty/cobol-parser@v3.5.0
+      - uses: landparty/cobol-parser@main
         with:
           sarif-file: cobol-lint.sarif
       - uses: github/codeql-action/upload-sarif@v3

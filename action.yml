@@ -81,7 +81,8 @@ inputs:
     default: "3.12"
   version:
     description: >-
-      cobol-parser to install from PyPI, e.g. '3.5.0'. Default: the copy of
+      cobol-parser to install from PyPI instead (a release that has
+      `lint --new-code-since`). Default: the copy of
       cobol-parser this action was checked out from, so the action and the
       linter are always the same version.
     default: ""

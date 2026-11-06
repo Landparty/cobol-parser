@@ -144,7 +144,7 @@ request adds or edits) or the whole codebase:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - uses: landparty/cobol-parser@v3.5.0
+      - uses: landparty/cobol-parser@main
         with:
           fail-on: error
           all-code-rules: call-check
