@@ -51,17 +51,24 @@ flag ordering cannot change the report.
 
 **Severity is per finding, not per rule.** An analyzer that grades itself
 keeps its grading: MOVE's ERROR/WARNING kinds map to error/warning,
-recursion's HIGH/MEDIUM (HIGH = a cycle with no escape route, i.e. an infinite
-loop) to error/warning, complexity's rating to warning (HIGH) / info
-(MODERATE), with LOW producing no finding at all. The rest carry a fixed
-severity: dead code, I/O `FILE_LEFT_OPEN` and `REWRITE_WITHOUT_READ` (#736)
-warn; every other I/O kind
+recursion's HIGH (a cycle with no escape route, i.e. an infinite loop) to
+error and MEDIUM (a loop with a way out: how COBOL without PERFORM UNTIL
+writes every loop; 3,600 NIST warnings before 2026-11-06) to info,
+complexity's rating to warning (HIGH) / info (MODERATE), with LOW producing no
+finding at all. The rest carry a fixed severity: dead code, I/O
+`FILE_LEFT_OPEN` and `REWRITE_WITHOUT_READ` (#736) warn; every other I/O kind
 (including the OPEN-mode kinds `*_WRONG_MODE` and `OPEN_AFTER_LOCK`, #548) and
-every LINKAGE kind but `UNREFERENCED_LINKAGE` are errors. An unused item is a
-warning when the program declares it and only info when it came from a
-copybook (`copybook_item_names`) â€” a copybook describes a whole record and no
-one program uses every field of it. The `_SEVERITY_*` tables in the module are
-the whole of that policy.
+every LINKAGE kind but `UNREFERENCED_LINKAGE` are errors. A dead paragraph
+holding only `EXIT` (`_is_exit_only`: CardDemo's `0000-MAIN-EXIT` after a
+CICS RETURN) is info. An unused item is a warning when the program declares
+it, and info when it came from a copybook (`copybook_item_names`; a copybook
+describes a whole record and no one program uses every field of it), when it
+is a FILE record field (likewise a record layout, often read INTO working
+storage), or when a group above it is named in the PROCEDURE DIVISION
+(`UnusedVariableItem.used_group`: `ACCTFILE-STAT1` under the FILE STATUS
+group `ACCTFILE-STATUS` -- its bytes are used, only its name is not; 58% of
+CardDemo's unused warnings). The `_SEVERITY_*` tables and `_unused_variables`
+/ `_dead_code` in the module are the whole of that policy.
 
 **`LintFinding.symbol`** is the *name* the finding is about (paragraph, data
 item, file, called program), not a source excerpt. It is what lets a consumer
@@ -81,6 +88,11 @@ stored-procedure CALL argument), and `failed_rules` records a rule that raised â
 only its own findings, never the other rules'. A consumer gating on `findings`
 alone must still surface both lists.
 
+**Every recursion finding has a line**: a cycle is anchored on its first
+procedure's header (`_procedure_nodes`, a `ProcedureIndex` by key), so a
+GitHub annotation, a SARIF result and an inline suppression can point at it;
+only a CALL cycle stays without one.
+
 Two rules (`recursion-check`, `complexity`) need the CFG; `LintAnalyzer`
 builds it at most once per `analyze()` call and accepts a precomputed
 `flow_report`. Findings identical in every visible field collapse to one
@@ -93,6 +105,39 @@ Recursion's `LOW` (a self-CALL into an `IS RECURSIVE` program) maps to `info`
 
 CLI: `cobol-parser lint <file.cbl>` (see cli.md), including `--format text`,
 `--min-severity`, and `--fail-on` (exit 3).
+
+## Policy: overrides, suppressions, baseline
+
+Three library functions the `lint` CLI applies, in this order, after the
+source map (see [../cli.md](../cli.md) for the flags and config keys):
+
+* `apply_severity_overrides(report, {selector: level})` re-grades: a
+  `rule/KIND` selector wins over a bare `rule` (KIND compared case-blind).
+* `apply_suppressions(report, source_file, read_text=None)` drops findings
+  an inline comment silences, judged in the file the finding is *in* (its
+  `origin`, so a directive in a copybook silences that copybook's findings
+  in every program; else *source_file*) and on that file's line.
+  `parse_suppressions(text)` reads a file's directives: `cobol-lint:
+  disable=SEL[,SEL]` after code covers that line; on a comment line of its
+  own it opens a block closed by `enable=SEL` (a bare rule closes its
+  `rule/KIND` blocks too; `_enable_closes`) or the end of the file;
+  `disable-next-line` covers the next line that is not blank or a comment;
+  `disable-file` the whole file and locationless findings. No selector =
+  every rule. A directive counts only in a comment (column-7 `*`/`/`, a
+  `*>` line, or after an inline `*>` outside a literal --
+  `_directive_in_comment`). Files without the text `cobol-lint:` are not
+  parsed. `report.suppressed` counts the drops.
+* `baseline_document(reports, base)` / `load_baseline(doc)` /
+  `apply_baseline(report, source_file, baseline, base)`: JSON `{version: 1,
+  tool, findings: [{rule, kind, file, anchor, count}]}`. A fingerprint
+  (`baseline_fingerprint`) is rule, kind, the finding's file relative to the
+  baseline's folder (posix), and its symbol -- or, with no symbol, its
+  message with digits blanked; never the line. A count is the most any one
+  program reported (a copybook finding repeats per program, and each program
+  is matched on its own), and a finding beyond the count is new.
+  `report.baselined` counts the drops.
+
+Both counters are in `to_dict()["summary"]` (`suppressed`, `baselined`).
 
 ## Line length (`line-length`)
 

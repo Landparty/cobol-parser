@@ -617,7 +617,15 @@ exponentially on unterminated REPLACING).
   same for an ordinary COPY: the statement stays as written, a "... the COPY
   was left as written" warning goes to `statistics.warnings`, every other
   member still expands, and the parse then warns "COPY X was not expanded".
-  Default False (raise). The MCP workspace turns it on.
+  Default False (raise). The MCP workspace turns it on, and so does the
+  `lint` CLI (unless `--strict-copybooks`), which also appends the IBM
+  stand-ins below.
+* **IBM-supplied CICS copybooks** (`preprocess/_system_copybooks.py`):
+  `system_copybooks/` ships `DFHAID.cpy` and `DFHBMSCA.cpy` (IBM's field
+  names and PICTUREs, EBCDIC VALUEs as hex literals; package data in
+  `pyproject.toml` and `MANIFEST.in`). `with_system_copybooks(paths)`
+  appends that folder last (a real copy on the path wins), and leaves an
+  empty path empty. Only `lint` uses it so far.
 
 ### REPLACING
 

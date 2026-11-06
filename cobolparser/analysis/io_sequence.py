@@ -405,12 +405,20 @@ class IOSequenceAnalyzer:
         # loop it could not see out of, so "still open" is only "open at the
         # point the walk gave up".
         leftover = () if self._ended_in_cycle else self._maybe_open_files()
+        # No statement is missing at a line of its own, so the finding sits on
+        # the file's SELECT: a location an editor, a GitHub annotation and an
+        # inline suppression can all point at, rather than none.
+        select_locations = {
+            select.file_name.upper(): select.location
+            for select in ast.find_all_by_type("SelectStatement")
+            if isinstance(select, SelectStatement) and select.file_name
+        }
         for file_name in leftover:
             self._emit(
                 IOSequenceViolation(
                     kind=IOViolationKind.FILE_LEFT_OPEN,
                     file_name=file_name,
-                    location=None,
+                    location=select_locations.get(file_name.upper()),
                     message=(
                         f"File '{file_name}' is still open at end of program "
                         "(missing CLOSE statement)"

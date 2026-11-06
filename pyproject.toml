@@ -68,6 +68,11 @@ Repository = "https://github.com/Landparty/cobol-parser"
 [tool.setuptools.packages.find]
 include = ["cobolparser*"]
 
+# Stand-ins for IBM-supplied copybooks (DFHAID, DFHBMSCA), the last place a
+# COPY is looked for; see cobolparser/preprocess/_system_copybooks.py.
+[tool.setuptools.package-data]
+"cobolparser.preprocess" = ["system_copybooks/*.cpy"]
+
 # cythonize() writes each generated .c file next to its .pyx source inside the
 # package tree; keep the generated C and Cython sources out of built wheels.
 [tool.setuptools.exclude-package-data]

@@ -9,6 +9,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+* **Lint you can adopt on a legacy codebase.** Inline suppression
+  (`*> cobol-lint: disable=RULE`, `disable-next-line`, `disable` ... `enable`
+  blocks, `disable-file`; `rule/KIND` selectors), a baseline
+  (`--write-baseline FILE`, then `--baseline FILE` / `lint.baseline` reports
+  only new findings, matched without line numbers), per-rule settings
+  (`--disable`, `--severity RULE[/KIND]=LEVEL`, and `lint.disable`,
+  `lint.severity`, `lint.exclude` in `cobol.yml`), `--exclude` globs, and
+  `--workers` (several files lint in parallel, default the CPU count). The
+  summary counts what was suppressed or baselined.
+* **`lint` no longer fails a file on one missing copybook.** IBM's CICS
+  copybooks `DFHAID` and `DFHBMSCA` are built in (searched last), and any
+  other missing member is left out with a caveat naming it;
+  `--strict-copybooks` keeps the old exit 1. On AWS CardDemo, 17 of 29
+  programs used to fail.
+
+### Changed
+
+* **Less lint noise.** Graded info rather than warning: a field of a group
+  the program uses whole (`ACCTFILE-STAT1` under the FILE STATUS group;
+  `UnusedVariableItem.used_group` names the group), a FILE record field, a
+  PERFORM/GO TO loop that has a way out (`recursion-check` MEDIUM), an
+  unreachable paragraph holding only `EXIT`, and `CICS_NO_RESP_HANDLING` on
+  ASSIGN, FORMATTIME, ENDBR and SYNCPOINT. `move-type-check` no longer flags
+  an all-digit literal moved to a numeric item (`MOVE '05' TO WS-CODE`).
+  `--format text` and `github` default to `--min-severity warning`. On
+  CardDemo the warnings went from 396 to 159.
+* **Every `recursion-check` and `FILE_LEFT_OPEN` finding has a line** (the
+  cycle's first paragraph; the STOP RUN, else the file's SELECT), so it shows
+  on a pull request and can be suppressed inline.
+* **`lint` parses each file once**: copybook provenance now comes from the
+  expansion source map instead of a second, unexpanded parse.
+
 * **A friendlier first run of the CLI.** `cobol-parser --help` groups the
   41 commands by task (parse, lint and CI, one program, a codebase, test
   data, reference) and ends with a quick start, the exit codes and where

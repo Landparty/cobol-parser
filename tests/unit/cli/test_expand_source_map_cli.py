@@ -150,6 +150,8 @@ class TestLintReportsOrigins:
             str(library),
             "--format",
             "text",
+            "--min-severity",
+            "info",
         )
 
         assert f"{library / 'CUSTOMER.cpy'}:4:12:" in out
@@ -182,6 +184,8 @@ class TestLintReportsOrigins:
                 str(library),
                 "--format",
                 "text",
+                "--min-severity",
+                "info",
             )
 
         assert f"{library / 'CUSTOMER.cpy'}:4: info [unused-variables]" in out
@@ -217,6 +221,8 @@ class TestLintReportsOrigins:
             str(tmp_path),
             "--format",
             "text",
+            "--min-severity",
+            "info",
         )
 
         assert f"{tmp_path / 'FREEMEM.cpy'}:4:4:" in out
@@ -243,6 +249,8 @@ class TestLintReportsOrigins:
             str(library),
             "--format",
             "text",
+            "--min-severity",
+            "info",
         )
 
         assert f"{library / 'CUSTOMER.cpy'}:4:12:" in out
