@@ -489,6 +489,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   section's `min_severity` and `fail_on` also reach `call-check` and
   `widen-check`). A tracked 1.4 MB `coverage.json` is removed and ignored.
 
+## [3.6.0](https://github.com/Landparty/cobol-parser/compare/v3.5.0...v3.6.0) (2026-11-06)
+
+
+### Features
+
+* **lint:** eight code-pattern rules from other COBOL linters ([ec30f75](https://github.com/Landparty/cobol-parser/commit/ec30f7526143c6f7408834bd3e2fbd5088f1010f))
+* **lint:** eight code-pattern rules from other COBOL linters ([7b46a3d](https://github.com/Landparty/cobol-parser/commit/7b46a3d02aa27f6e2a59e24829e4d294e56ebfbe))
+* **lint:** GitHub Action with a Sonar-style new-code gate per rule ([5fae4c8](https://github.com/Landparty/cobol-parser/commit/5fae4c80c3b23308e0c4cb71eb09d53a24b6b7f3))
+* **lint:** GitHub Action with a Sonar-style new-code gate per rule ([9e2caf4](https://github.com/Landparty/cobol-parser/commit/9e2caf4ee5001ed416898f92d1389760dddaf279))
+* **lint:** ten rules for what IBM's compiler rejects or warns about ([3ff8202](https://github.com/Landparty/cobol-parser/commit/3ff820275156d84f1e4ca33f57a04365dd31c648))
+* **lint:** ten rules for what IBM's compiler rejects or warns about ([b676c13](https://github.com/Landparty/cobol-parser/commit/b676c13eb501f079dc8126c8d4c612c069f91e01))
+
+
+### Documentation
+
+* **action:** pin [@main](https://github.com/main) or a release tag, not v3.5.0 ([92f5f08](https://github.com/Landparty/cobol-parser/commit/92f5f086edcd67283c31b4fb5f03b434d82af114))
+
 ## [3.5.0](https://github.com/Landparty/cobol-parser/compare/v3.4.0...v3.5.0) (2026-11-06)
 
 
