@@ -3,7 +3,7 @@ type: Log
 title: OKF Update Log
 description: Dated log of OKF bundle updates, newest first.
 tags: [log, changelog, history]
-timestamp: 2026-11-05T00:00:00Z
+timestamp: 2026-11-06T00:00:00Z
 ---
 
 # OKF Update Log
@@ -13,6 +13,18 @@ follows up on even when a day or two out of order -- that adjacency is
 deliberate. Anything else appended to the bottom is a mistake: five
 entries, including both 2026-09-15 sections, were found there on
 2026-09-15 and moved back up.
+
+## 2026-11-06 -- open gaps from the cobol-test run on PAYMAIN + PAYCALC
+
+- [analysis/flow.md](analysis/flow.md): a procedure only ever PERFORMed (as
+  its range's last procedure) no longer gets a `FALL_THROUGH` edge
+  (`graph._sequential_procedures`), so the priming-read pattern shows no
+  spurious cycle.
+- [generators/fixtures.md](generators/fixtures.md): a CALL fixture's
+  `direction` is derived from its arguments instead of `""`.
+- [generators/record-data.md](generators/record-data.md):
+  `GeneratedDataset.record_image_gap` and `IncompleteRecordImageWarning` for
+  record images built with FILLER-skipping options.
 
 ## 2026-11-05 -- widen-check: CALL arguments beside the widened field
 

@@ -16,6 +16,7 @@ import os
 import random
 import zlib
 from collections.abc import Callable
+from typing import Any
 
 from ..analysis.boundary_inventory import (
     Boundary,
@@ -830,7 +831,7 @@ class ProgramFixtureGenerator:
         self._register_layout(layouts, boundary.record_names, boundary, fields)
         fixture = BoundaryFixture(
             ref=ref,
-            direction=boundary.direction,
+            direction=boundary.direction or _call_direction(boundary.call_args),
             layout=fields,
             sequence=[row],
             unresolved=list(boundary.unresolved),
@@ -1334,3 +1335,28 @@ class ProgramFixtureGenerator:
 
 
 __all__ = ["ProgramFixtureGenerator"]
+
+
+def _call_direction(call_args: Any) -> str:
+    """One fixture-level direction for a CALL, whose boundary carries a
+    direction per argument only (``boundary_inventory`` leaves the
+    statement-level one empty). The fixture schema documents ``direction``
+    as IN / OUT / BIDIRECTIONAL / STATUS_ONLY, and an empty string reached
+    consumers as is: all-IN arguments give IN, any OUT or BIDIRECTIONAL one
+    gives BIDIRECTIONAL (the fixture supplies values, so never OUT), and a
+    CALL with no data
+    argument (its fixture holds only the RETURN-CODE the mock supplies) is
+    IN -- never STATUS_ONLY, which consumers read as "no row to set"."""
+    directions = {
+        str(getattr(arg, "direction", "") or "")
+        for arg in call_args or ()
+        if call_argument_data_name(arg.name) is not None
+    } - {""}
+    if not directions:
+        return "IN"
+    if directions == {"IN"}:
+        return "IN"
+    # Any OUT or BIDIRECTIONAL argument: the callee writes back, and the
+    # fixture itself always supplies at least one value (it exists only when
+    # it has fields), so it is never a pure OUT boundary.
+    return "BIDIRECTIONAL"

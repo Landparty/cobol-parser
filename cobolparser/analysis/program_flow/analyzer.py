@@ -168,6 +168,7 @@ class ProgramFlowAnalyzer:
                 if (node := self._nodes.get(name)) is not None
                 and node.procedure_type == "SECTION"
             },
+            entry_points=self._sequential_entries(declaratives),
         )
 
         # Mark the first procedure as entry point before cycle/reachability analysis
@@ -224,6 +225,14 @@ class ProgramFlowAnalyzer:
         report.unreachable_nodes = self._unreachable_nodes
         report.branch_nodes = self._branch_nodes
         return report
+
+    def _sequential_entries(self, declaratives: set[str]) -> list[str]:
+        """Where control starts other than by PERFORM or a branch: the first
+        procedure after DECLARATIVES, and every ENTRY."""
+        first = next(
+            (p for p in self._ordered_procedures if p not in declaratives), None
+        )
+        return [*([first] if first is not None else []), *self._entry_points]
 
     @staticmethod
     def _declarative_procedures(index: ProcedureIndex) -> set[str]:

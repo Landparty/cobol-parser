@@ -140,9 +140,23 @@ step deliberately.
   (entry point / ENTRY, a written GO TO from another section, or the target of
   any other `GOTO_EDGE_TYPES` edge -- ALTER, CICS HANDLE, and any handler
   branch added to that set later -- wherever it is written). That gate is
-  stricter than the plain last-paragraph fall-through, which stays an
-  over-approximation. Pinned by
+  stricter than the plain last-paragraph fall-through. Pinned by
   `tests/unit/analysis/test_exit_section_and_alterable_goto.py`.
+* **PERFORM-only procedures do not fall through.** `graph._sequential_procedures`
+  (given `entry_points`, which the analyzer always passes) decides which
+  procedures' ends run on: the interior of every performed range (`A` up to
+  the procedure before its end: `THRU` target, `A` itself, or a performed
+  section's last member), plus every procedure control reaches otherwise --
+  the entry point and ENTRYs, any target of a non-PERFORM edge (GO TO, ALTER,
+  CICS HANDLE, SQL WHENEVER), members of `_sections_entered` and declarative
+  sections, declarative procedures, a procedure with no incoming edge that no
+  performed range holds (kept as before so dead-code does not move), and the
+  successor of any such procedure that does not terminate. A paragraph only
+  ever PERFORMed, as its range's last procedure, gets no `FALL_THROUGH` edge,
+  so the priming-read pattern (`PERFORM 1000-READ` then `PERFORM 2000-PROCESS
+  UNTIL ...`, each performing 1000-READ) no longer shows a MIXED cycle.
+  Pinned by `tests/regression/test_open_gaps_2026_11_06.py` and
+  `TestFinding1RecursionPrimingRead`.
 * **Own statements only.** Procedure names are local to a program unit, and
   `get_all_statements()` also returns every contained program's statements,
   so references (and `ProcedureScanner.collect_entry_points`) read only the

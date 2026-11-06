@@ -57,6 +57,11 @@ for the annotated, editor-readable form)::
     dataset = CopybookDataGenerator(options).generate_from_file("CUSTOMER.cpy")
     dataset.write_records("CUSTOMER.BIN", EncodingOptions(charset=Charset.EBCDIC))
 
+A dataset generated with the CSV-shaped defaults (FILLER skipped, OCCURS
+capped) still renders records, but they are short: its record-image methods
+then emit an :class:`IncompleteRecordImageWarning` naming the bytes covered
+against the record's length.
+
 :mod:`.storage` owns the byte widths this depends on and :mod:`.encoding`
 the byte values, including a documented list of what is *not* modelled
 (:func:`.encoding.encoding_caveats`).
@@ -104,7 +109,7 @@ from .compare import (
     compare_records,
 )
 from .copybook import CopybookDataGenerator, parse_copybook_records, select_record
-from .dataset import GeneratedDataset
+from .dataset import GeneratedDataset, IncompleteRecordImageWarning
 from .decoding import (
     DecodedField,
     DecodedRecord,
@@ -171,6 +176,7 @@ __all__ = [
     "FileFacts",
     "FixtureBundle",
     "GeneratedDataset",
+    "IncompleteRecordImageWarning",
     "MAX_VARIABLE_RECORD",
     "OdoControl",
     "PlacedField",

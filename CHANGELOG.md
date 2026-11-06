@@ -168,6 +168,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+* **`program-flow` no longer falls through out of a PERFORM-only
+  paragraph.** A paragraph control only reaches by PERFORM returns to its
+  performer when it ends, so the priming-read pattern (`PERFORM 1000-READ`,
+  then `PERFORM 2000-PROCESS UNTIL ...` that performs `1000-READ` again)
+  lost its spurious `FALL_THROUGH` edge and "cycle".
+* **A CALL fixture in a `gen-fixtures` bundle has a `direction`.** It was
+  `""`; it is now IN when every argument is IN (or only RETURN-CODE is
+  left) and BIDIRECTIONAL when the callee writes any argument back.
+* **Short record images are no longer silent.** A `GeneratedDataset` built
+  with the CSV-shaped defaults (FILLER skipped, OCCURS capped) emits an
+  `IncompleteRecordImageWarning` from `to_records()`, `write_records()`,
+  `to_hex_dump()` and `record_length()`, naming the bytes it covers.
+
 * **`widen-check` no longer flags a CALL argument beside the widened
   field.** `CALL 'CUSTLKUP' USING ORD-CUST-ID` was reported as passing the
   whole record when `ORD-AMOUNT`, later in the same record, widened; a

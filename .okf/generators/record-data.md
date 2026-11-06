@@ -42,7 +42,7 @@ dataset.write_csv("customers.csv")
 
 ## Modules
 
-- **`options.py`** — `DataGeneratorOptions`: `rows`, `seed`, `include_filler`, `include_condition_filler`, `include_redefines`, `expand_occurs`, `max_occurs`, `respect_values`, `use_condition_values`, `semantic_hints`, `header_style`, `unique_fields`, `blank_rate`, `record_varying`; `for_record_image()` returns the byte-complete variant.
+- **`options.py`** — `DataGeneratorOptions`: `rows`, `seed`, `include_filler`, `include_condition_filler`, `include_redefines`, `expand_occurs`, `max_occurs`, `respect_values`, `use_condition_values`, `semantic_hints`, `header_style`, `unique_fields`, `blank_rate`, `record_varying`; `for_record_image()` returns the byte-complete variant. A dataset generated with lossy options carries `record_image_gap = (covered, full)` (set by `CopybookDataGenerator.generate_from_record`), and its record-image methods (`to_records`, `write_records`, `to_hex_dump`, `record_length`) then emit `IncompleteRecordImageWarning` (a `UserWarning`, exported from `cobolparser.generators.data`); CSV output never warns.
 - **`errors.py`** — `CopybookLayoutError` and `ProgramLayoutError` (both `ValueError` subclasses; `encoding.RecordEncodingError` subclasses `CopybookLayoutError`).
 - **`layout.py`** — `FieldCategory`, `FieldSpec`, `flatten_record()`: the rules that turn a nested `CobolDataItem` tree into a flat list of columns. Also `expand_condition_values()`, `condition_ranges()`, `condition_values_exhaustive()`, `OdoControl`, `present_indexes()`, `VaryingLength`.
 - **`layout_offsets.py`** — `LayoutItem`, `compute_record_layout()`, `compute_program_data_items()`: record-relative byte offsets/lengths for every data item. See [Byte widths and offsets](#byte-widths-and-offsets).

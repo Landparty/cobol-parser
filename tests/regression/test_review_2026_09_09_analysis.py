@@ -71,10 +71,15 @@ PROCEDURE DIVISION.
     def test_priming_read_is_not_a_cycle_risk(self):
         ast = _parse(self.PRIMING_READ)
         flow = ProgramFlowAnalyzer().analyze(ast)
-        # The CFG still carries the over-approximated MIXED cycle ...
-        assert any(d["kind"] == "MIXED" for d in flow.cycle_details)
-        # ... but a PERFORM returns from the end of its range, so it is
-        # not a runtime loop.
+        # 1000-READ is only ever PERFORMed, so its end returns to the
+        # performer: no fall-through edge into 2000-PROCESS, and no MIXED
+        # cycle through it (cobol-test run on PAYMAIN, 2026-11-06).
+        assert not any(
+            e.source == "1000-READ" and e.edge_type.value == "FALL_THROUGH"
+            for e in flow.edges
+        )
+        assert flow.cycle_details == []
+        # A PERFORM returns from the end of its range: not a runtime loop.
         report = RecursionRiskAnalyzer().analyze(ast, flow_report=flow)
         assert report.risks == []
         lint = LintAnalyzer(["recursion-check"]).analyze(ast)
