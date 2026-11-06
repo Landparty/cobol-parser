@@ -123,7 +123,8 @@ def test_readme_examples_run(tmp_path: Path) -> None:
     for kind, example in examples:
         if kind == "bash":
             if (_needs_jcl(example) and not has_jcl) or (
-                "--changed-since" in example and not has_git
+                ("--changed-since" in example or "--new-code-since" in example)
+                and not has_git
             ):
                 continue
             args = example.split(maxsplit=1)[1]

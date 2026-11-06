@@ -143,6 +143,11 @@ class LintDefaults:
     exclude: tuple[str, ...] = ()
     #: The baseline file (``lint.baseline``), resolved likewise.
     baseline: str | None = None
+    #: ``lint.scope``: which rules ``lint --new-code-since`` judges on new
+    #: code only (``new``) and which on the whole codebase (``all``), as
+    #: ``--scope`` values: a bare ``new``/``all`` default, then
+    #: ``RULE=new|all`` entries.
+    scope: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -352,6 +357,32 @@ def _lint_severity_overrides(value: Any, source: Path) -> tuple[tuple[str, str],
     return tuple(out)
 
 
+def _lint_scope(value: Any, source: Path) -> tuple[str, ...]:
+    """``lint.scope``: ``new`` / ``all``, or a mapping of ``default`` and
+    rule (or ``rule/KIND``) to one of them, e.g. ``{default: new,
+    call-check: all}``. Validated here so a typo fails loudly."""
+    if value is None:
+        return ()
+    from ..cli._new_code import parse_scopes
+
+    if isinstance(value, dict):
+        items: list[str] = []
+        for key, scope in value.items():
+            items.append(str(scope) if str(key) == "default" else f"{key}={scope}")
+    elif isinstance(value, str):
+        items = [value]
+    else:
+        raise ConfigError(
+            f"{source}: lint.scope: expected new, all, or a mapping of rule "
+            "to new/all"
+        )
+    try:
+        parse_scopes(items)
+    except ValueError as exc:
+        raise ConfigError(f"{source}: lint.scope: {exc}") from exc
+    return tuple(items)
+
+
 def _severity(
     value: Any, where: str, source: Path, extra: tuple[str, ...] = ()
 ) -> str | None:
@@ -385,6 +416,7 @@ _LINT_KEYS = (
     "severity",
     "exclude",
     "baseline",
+    "scope",
 )
 _TOP_LEVEL_KEYS = ("version", "project", "data", "lint", *_TOOL_SECTIONS)
 
@@ -424,6 +456,7 @@ def _build_lint(raw: Any, source: Path) -> LintDefaults:
             if lint.get("baseline") is not None
             else None
         ),
+        scope=_lint_scope(lint.get("scope"), source),
     )
 
 

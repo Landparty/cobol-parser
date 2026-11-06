@@ -192,6 +192,11 @@ source map (see [../cli.md](../cli.md) for the flags and config keys):
 
 Both counters are in `to_dict()["summary"]` (`suppressed`, `baselined`).
 
+`LintReport.outside_new_code` counts the findings `lint --new-code-since`
+dropped as not on new code (`cli/_new_code.py` `apply_new_code`, see
+[../cli.md](../cli.md#lint)). It is `None` when no new-code period was given,
+and only then is `outside_new_code` absent from the summary.
+
 ## Line length (`line-length`)
 
 The one **source rule** (`SOURCE_RULES`; `ALL_RULES = RULES + SOURCE_RULES`):

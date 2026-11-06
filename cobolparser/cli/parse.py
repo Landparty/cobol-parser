@@ -3040,6 +3040,10 @@ def _build_lint_parser(subparsers: argparse._SubParsersAction) -> None:
             "  cobol-parser lint --glob 'src/**/*.cbl' --format sarif -o lint.sarif\n"
             "  cobol-parser lint --changed-since origin/main --format github "
             "--fail-on error\n"
+            "  cobol-parser lint --new-code-since origin/main --format github "
+            "--fail-on warning\n"
+            "  cobol-parser lint --new-code-since origin/main --scope "
+            "call-check=all --fail-on error\n"
             "  cobol-parser lint --glob 'src/**/*.cbl' --write-baseline "
             "lint-baseline.json\n"
             "  cobol-parser lint --glob 'src/**/*.cbl' --baseline "
@@ -3052,7 +3056,12 @@ def _build_lint_parser(subparsers: argparse._SubParsersAction) -> None:
             "RULE is a rule id, rule/KIND, a comma-separated list, or left out\n"
             "for every rule. In fixed format the comment can be a '*' line.\n"
             "  cobol-parser lint src/PAYMAIN.cbl --callee-path src/ --rule call-check\n"
-            "\nMore than one file, --glob, --files-from or --changed-since lints\n"
+            "\nNew code (like a Sonar quality gate): --new-code-since REF keeps only\n"
+            "the findings on lines added or edited since REF. --scope RULE=all\n"
+            "judges one rule on the whole codebase instead (--scope all: every\n"
+            "rule; lint.scope in cobol.yml).\n"
+            "\nMore than one file, --glob, --files-from, --changed-since or\n"
+            "--new-code-since lints\n"
             "every file in one run: text and github print each file's findings,\n"
             "json is {files, failures, summary}, sarif is one log. A file that\n"
             "cannot be read or parsed is reported and the others still run.\n"
@@ -3092,6 +3101,40 @@ def _build_lint_parser(subparsers: argparse._SubParsersAction) -> None:
             "changed copybook. Picks from FILE/--glob/--files-from when given, "
             "else from every git-tracked program (--extension). Nothing "
             "changed is a clean run (exit 0)."
+        ),
+    )
+    p.add_argument(
+        "--new-code-since",
+        metavar="REF",
+        help=(
+            "Report only findings on new code: the lines added or edited "
+            "since REF (from its merge base with HEAD; working-tree edits and "
+            "untracked files count), like Sonar's new-code quality gate. A "
+            "finding with no line counts when its whole file is new. Rules "
+            "--scope sets to 'all' still report everywhere. Lints the "
+            "programs the change touched (and those COPYing a changed "
+            "copybook), or every program when a rule is scoped 'all'."
+        ),
+    )
+    p.add_argument(
+        "--scope",
+        action="append",
+        dest="scopes",
+        metavar="[RULE=]new|all",
+        help=(
+            "With --new-code-since: judge RULE (or rule/KIND) on new code "
+            "only ('new') or on the whole codebase ('all'); a bare 'new' or "
+            "'all' sets every rule's default (default: new). Repeatable; "
+            "lint.scope in cobol.yml"
+        ),
+    )
+    p.add_argument(
+        "--summary-file",
+        metavar="FILE",
+        help=(
+            "Also append a Markdown summary of the run to FILE (totals, "
+            "findings per rule, the findings themselves); pass "
+            "$GITHUB_STEP_SUMMARY to show it on the Actions run page"
         ),
     )
     p.add_argument(
@@ -3564,6 +3607,13 @@ def _lint_one(args: argparse.Namespace) -> tuple[Any, Any, Any]:
         apply_baseline(
             report, args.file, baseline, os.path.dirname(os.path.abspath(baseline_file))
         )
+    new_code = getattr(args, "_new_code", None)
+    if new_code is not None:
+        from ._new_code import apply_new_code
+
+        apply_new_code(
+            report, args.file, new_code, args._scope_default, args._scope_rules
+        )
     report.findings = filter_by_severity(report.findings, _lint_min_severity(args))
 
     for failure in report.failed_rules:
@@ -3689,6 +3739,7 @@ def _lint_wants_many(args: argparse.Namespace) -> bool:
         or args.glob
         or getattr(args, "files_from", None)
         or getattr(args, "changed_since", None)
+        or getattr(args, "new_code_since", None)
     )
 
 
@@ -3702,9 +3753,11 @@ def _cmd_lint(args: argparse.Namespace) -> None:
         or args.glob
         or getattr(args, "files_from", None)
         or getattr(args, "changed_since", None)
+        or getattr(args, "new_code_since", None)
     ):
         print(
-            "error: lint needs a FILE, --glob, --files-from or --changed-since",
+            "error: lint needs a FILE, --glob, --files-from, --changed-since "
+            "or --new-code-since",
             file=sys.stderr,
         )
         sys.exit(2)
@@ -3717,6 +3770,16 @@ def _lint_single(args: argparse.Namespace) -> None:
     if getattr(args, "write_baseline", None):
         _write_lint_baseline(args, [(args.file, report)])
         args.fail_on = "never"  # recording the findings is not failing on them
+    if getattr(args, "summary_file", None):
+        counts = {
+            "error": report.error_count,
+            "warning": report.warning_count,
+            "info": report.info_count,
+        }
+        hidden = {"suppressed": report.suppressed, "baselined": report.baselined}
+        _write_lint_summary(
+            args.summary_file, args, [(args.file, report, None)], [], counts, hidden
+        )
 
     if args.output_format in ("text", "github"):
         if prof is not None:
@@ -3764,6 +3827,34 @@ def _lint_selection(args: argparse.Namespace) -> tuple[list[str], Any]:
     explicit = bool(args.files or args.glob or getattr(args, "files_from", None))
     files = _collect_scan_files(args) if explicit else []
     ref = getattr(args, "changed_since", None)
+    new_ref = getattr(args, "new_code_since", None)
+    if new_ref:
+        from ._new_code import every_rule_new, new_code_since
+
+        try:
+            args._new_code = new_code_since(new_ref)
+        except ChangedFilesError as exc:
+            _fail(f"--new-code-since: {exc}")
+        if not ref and every_rule_new(args._scope_default, args._scope_rules):
+            # Nothing outside the change can report: lint only what it touched.
+            ref = new_ref
+        elif not ref:
+            if explicit:
+                return files, None
+            extensions = tuple(
+                getattr(args, "extensions", None) or DEFAULT_PROGRAM_EXTENSIONS
+            )
+            try:
+                return (
+                    program_candidates(
+                        tracked_files(),
+                        extensions,
+                        list(getattr(args, "copybook_path", None) or []),
+                    ),
+                    None,
+                )
+            except ChangedFilesError as exc:
+                _fail(f"--new-code-since: {exc}")
     if not ref:
         return files, None
 
@@ -3777,7 +3868,12 @@ def _lint_selection(args: argparse.Namespace) -> tuple[list[str], Any]:
             else program_candidates(tracked_files(), extensions, copybook_dirs)
         )
     except ChangedFilesError as exc:
-        _fail(f"--changed-since: {exc}")
+        flag = (
+            "--changed-since"
+            if getattr(args, "changed_since", None)
+            else ("--new-code-since")
+        )
+        _fail(f"{flag}: {exc}")
     selection = select_changed_programs(changed, candidates, copybook_dirs, extensions)
     for program, members in selection.via_copybook.items():
         print(
@@ -3900,13 +3996,14 @@ def _lint_many(args: argparse.Namespace) -> None:
             "warning: --profile is only supported when linting one file; ignoring",
             file=sys.stderr,
         )
+    _lint_prepare_scopes(args)
     files, selection = _lint_selection(args)
     if not files and selection is None:
         _fail("No input files: the FILE arguments, --glob and --files-from named none.")
     if not files:
+        since = getattr(args, "changed_since", None) or args.new_code_since
         print(
-            f"note: no COBOL program changed since {args.changed_since}; "
-            "nothing to lint",
+            f"note: no COBOL program changed since {since}; nothing to lint",
             file=sys.stderr,
         )
 
@@ -3945,13 +4042,24 @@ def _lint_many(args: argparse.Namespace) -> None:
         "suppressed": sum(r.suppressed for _, r, _ in linted),
         "baselined": sum(r.baselined for _, r, _ in linted),
     }
+    new_code = getattr(args, "_new_code", None)
+    if new_code is not None:
+        hidden["outside_new_code"] = sum(r.outside_new_code or 0 for _, r, _ in linted)
     summary_line = (
         f"{total} finding(s) in {len(linted)} file(s): {totals['error']} error, "
         f"{totals['warning']} warning, {totals['info']} info"
         + (f"; {hidden['suppressed']} suppressed" if hidden["suppressed"] else "")
         + (f"; {hidden['baselined']} in baseline" if hidden["baselined"] else "")
+        + (
+            f"; {hidden['outside_new_code']} outside new code"
+            if hidden.get("outside_new_code")
+            else ""
+        )
         + (f"; {len(failures)} file(s) could not be linted" if failures else "")
     )
+    summary_file = getattr(args, "summary_file", None)
+    if summary_file:
+        _write_lint_summary(summary_file, args, linted, failures, totals, hidden)
 
     if fmt in ("text", "github"):
         chunks: list[str] = []
@@ -4012,9 +4120,16 @@ def _lint_many(args: argparse.Namespace) -> None:
         }
         if selection is not None:
             document["changed_since"] = {
-                "ref": args.changed_since,
+                "ref": getattr(args, "changed_since", None) or args.new_code_since,
                 "changed_files": selection.changed,
                 "via_copybook": selection.via_copybook,
+            }
+        if new_code is not None:
+            document["new_code"] = {
+                "ref": new_code.ref,
+                "default_scope": args._scope_default,
+                "rule_scopes": dict(args._scope_rules),
+                "changed_files": new_code.changed_paths(),
             }
         _json_out(document, args.compact, output)
 
@@ -4025,6 +4140,123 @@ def _lint_many(args: argparse.Namespace) -> None:
     fail_on = getattr(args, "fail_on", "never")
     if any(_lint_fails(report, fail_on) for _, report, _ in linted):
         sys.exit(3)
+
+
+def _lint_prepare_scopes(args: argparse.Namespace) -> None:
+    """Validate ``--scope`` / ``lint.scope`` into ``args._scope_default``
+    and ``args._scope_rules`` (exit 2 on a bad value, as argparse would)."""
+    from ._new_code import parse_scopes
+
+    try:
+        default, per_rule = parse_scopes(getattr(args, "scopes", None))
+    except ValueError as exc:
+        print(f"error: --scope: {exc}", file=sys.stderr)
+        sys.exit(2)
+    args._scope_default, args._scope_rules = default, per_rule
+    args._new_code = None
+
+
+#: The most findings a ``--summary-file`` lists one by one.
+_SUMMARY_FINDING_LIMIT = 200
+
+
+def _md_cell(text: Any) -> str:
+    return str(text).replace("|", "\\|").replace("\n", " ")
+
+
+def _write_lint_summary(
+    path: str,
+    args: argparse.Namespace,
+    linted: list[tuple[str, Any, Any]],
+    failures: list[tuple[str, str]],
+    totals: dict[str, int],
+    hidden: dict[str, int],
+) -> None:
+    """Append a Markdown summary of a multi-file lint to *path* (GitHub's
+    ``$GITHUB_STEP_SUMMARY``, which shows every finding even past the
+    annotation limits a pull request diff applies)."""
+    total = sum(totals.values())
+    out = ["## COBOL lint", ""]
+    new_code = getattr(args, "_new_code", None)
+    if new_code is not None and not (
+        args._scope_default == "all"
+        and all(v == "all" for v in args._scope_rules.values())
+    ):
+        overrides = ", ".join(
+            f"`{rule}`: {scope}" for rule, scope in sorted(args._scope_rules.items())
+        )
+        out.append(
+            f"New code since `{new_code.ref}`; rules judged on "
+            + ("new code only" if args._scope_default == "new" else "all code")
+            + (f" (except {overrides})" if overrides else "")
+            + "."
+        )
+        out.append("")
+    verdict = "No findings" if not total else f"**{total} finding(s)**"
+    out.append(
+        f"{verdict} in {len(linted)} file(s): {totals['error']} error, "
+        f"{totals['warning']} warning, {totals['info']} info."
+    )
+    notes = []
+    if hidden.get("suppressed"):
+        notes.append(f"{hidden['suppressed']} suppressed by comments")
+    if hidden.get("baselined"):
+        notes.append(f"{hidden['baselined']} in the baseline")
+    if hidden.get("outside_new_code"):
+        notes.append(f"{hidden['outside_new_code']} outside new code")
+    if notes:
+        out.append("Not shown: " + ", ".join(notes) + ".")
+    by_rule: dict[str, dict[str, int]] = {}
+    rows = []
+    for source, report, _ident in linted:
+        for finding in report.findings:
+            counts = by_rule.setdefault(
+                finding.rule, {"error": 0, "warning": 0, "info": 0}
+            )
+            counts[finding.severity] = counts.get(finding.severity, 0) + 1
+            where = finding.origin_file or source
+            line = finding.origin_line or (
+                finding.location.line if finding.location is not None else None
+            )
+            rows.append(
+                (
+                    {"error": 0, "warning": 1, "info": 2}.get(finding.severity, 3),
+                    os.path.relpath(where) if os.path.isabs(where) else where,
+                    line or 0,
+                    finding,
+                )
+            )
+    if by_rule:
+        out += ["", "| Rule | Error | Warning | Info |", "|---|---:|---:|---:|"]
+        for rule in sorted(by_rule):
+            c = by_rule[rule]
+            out.append(f"| `{rule}` | {c['error']} | {c['warning']} | {c['info']} |")
+    if failures:
+        out += ["", "**Could not be linted:**", ""]
+        out += [f"* `{_md_cell(p)}`: {_md_cell(why)}" for p, why in failures]
+    if rows:
+        rows.sort(key=lambda r: (r[0], r[1], r[2]))
+        out += [
+            "",
+            "| Severity | File | Line | Rule | Message |",
+            "|---|---|---:|---|---|",
+        ]
+        for _rank, where, line, finding in rows[:_SUMMARY_FINDING_LIMIT]:
+            out.append(
+                f"| {finding.severity} | `{_md_cell(where)}` | {line or ''} | "
+                f"`{finding.rule}` | {_md_cell(finding.message)} |"
+            )
+        if len(rows) > _SUMMARY_FINDING_LIMIT:
+            out.append("")
+            out.append(
+                f"...and {len(rows) - _SUMMARY_FINDING_LIMIT} more (run with "
+                "--format json or sarif for the full list)."
+            )
+    try:
+        with open(path, "a", encoding="utf-8") as handle:
+            handle.write("\n".join(out) + "\n\n")
+    except OSError as exc:
+        print(f"warning: could not write --summary-file {path}: {exc}", file=sys.stderr)
 
 
 # -- Subcommand: data-items ----------------------------------------------------
@@ -5702,6 +5934,7 @@ def _config_to_dict(config: ProjectConfig) -> dict[str, Any]:
                 "severity": dict(config.lint.severity),
                 "exclude": list(config.lint.exclude),
                 "baseline": config.lint.baseline,
+                "scope": list(config.lint.scope),
             }
         ),
         "tools": dict(config.tools),

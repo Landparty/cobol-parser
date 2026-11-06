@@ -1,0 +1,143 @@
+# Self-test of the COBOL lint GitHub Action (action.yml at the repo root).
+# Builds a throwaway repository whose feature branch adds findings to a
+# program that already had one, then runs the action on it the way another
+# repository would, in each scope, and checks what it reported.
+#
+# Runs only when the action itself changes, so it costs nothing otherwise.
+name: lint-action self-test
+
+on:
+  pull_request:
+    paths:
+      - action.yml
+      - scripts/github-action/**
+      - cobolparser/cli/_new_code.py
+      - .github/workflows/lint-action.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  self-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build a demo repository
+        shell: bash
+        run: |
+          set -euo pipefail
+          demo="$RUNNER_TEMP/demo"
+          mkdir -p "$demo/src"
+          cd "$demo"
+          git init -q -b main
+          git config user.email ci@example.com
+          git config user.name ci
+          cat > src/PAY.cbl <<'EOF'
+                 IDENTIFICATION DIVISION.
+                 PROGRAM-ID. PAY.
+                 DATA DIVISION.
+                 WORKING-STORAGE SECTION.
+                 01 WS-OLD-UNUSED   PIC X(10).
+                 01 WS-A            PIC 9(5).
+                 01 WS-SHORT        PIC 9(2).
+                 PROCEDURE DIVISION.
+                 MAIN-PARA.
+                     MOVE 12345 TO WS-A
+                     DISPLAY WS-A
+                     DISPLAY WS-SHORT
+                     STOP RUN.
+          EOF
+          git add -A && git commit -qm base
+          git checkout -qb feature
+          # The change: one more unused item and a truncating MOVE.
+          sed -i 's/^       01 WS-SHORT        PIC 9(2)\.$/&\n       01 WS-NEW-UNUSED   PIC X(4)./' src/PAY.cbl
+          sed -i 's/^           DISPLAY WS-SHORT$/           MOVE WS-A TO WS-SHORT\n&/' src/PAY.cbl
+          git commit -qam feature
+          git diff main -- src/PAY.cbl
+
+      # 1. New code only: the old unused item is not reported, the two new
+      #    findings are, and fail-on warning fails the step.
+      - name: "scope: new"
+        id: new
+        uses: ./
+        continue-on-error: true
+        with:
+          working-directory: ${{ runner.temp }}/demo
+          base-ref: main
+          scope: new
+          fail-on: warning
+          sarif-file: ${{ runner.temp }}/new.sarif
+
+      # 2. The whole codebase: all three findings.
+      - name: "scope: all"
+        id: all
+        uses: ./
+        with:
+          working-directory: ${{ runner.temp }}/demo
+          scope: all
+          fail-on: never
+          sarif-file: ${{ runner.temp }}/all.sarif
+
+      # 3. New code, but unused-variables judged on everything; rules picked.
+      - name: "per-rule scope"
+        id: mixed
+        uses: ./
+        with:
+          working-directory: ${{ runner.temp }}/demo
+          base-ref: main
+          rules: unused-variables, truncation
+          all-code-rules: unused-variables
+          fail-on: error
+          sarif-file: ${{ runner.temp }}/mixed.sarif
+
+      # 4. One rule only, scope left to auto: on this pull_request event that
+      #    is new code since base-ref.
+      - name: "rules: truncation"
+        id: one
+        uses: ./
+        with:
+          working-directory: ${{ runner.temp }}/demo
+          base-ref: main
+          rules: truncation
+          fail-on: never
+          sarif-file: ${{ runner.temp }}/one.sarif
+
+      - name: Check what each run reported
+        shell: bash
+        env:
+          NEW_EXIT: ${{ steps.new.outputs.exit-code }}
+          NEW_SCOPE: ${{ steps.new.outputs.scope }}
+          ALL_SCOPE: ${{ steps.all.outputs.scope }}
+          ONE_SCOPE: ${{ steps.one.outputs.scope }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json, os, sys
+          tmp = os.environ["RUNNER_TEMP"]
+          def symbols(name):
+              log = json.load(open(f"{tmp}/{name}.sarif"))
+              return sorted(
+                  (r["ruleId"], r["message"]["text"].split()[2] if r["ruleId"] == "unused-variables" else r["ruleId"])
+                  for r in log["runs"][0]["results"]
+              )
+          checks = {
+              "new": [("truncation", "truncation"), ("unused-variables", "WS-NEW-UNUSED")],
+              "all": [("truncation", "truncation"), ("unused-variables", "WS-NEW-UNUSED"), ("unused-variables", "WS-OLD-UNUSED")],
+              "mixed": [("truncation", "truncation"), ("unused-variables", "WS-NEW-UNUSED"), ("unused-variables", "WS-OLD-UNUSED")],
+              "one": [("truncation", "truncation")],
+          }
+          failed = False
+          for name, expected in checks.items():
+              got = symbols(name)
+              ok = got == sorted(expected)
+              failed |= not ok
+              print(f"{'ok ' if ok else 'BAD'} {name}: {got}")
+          expect = {"NEW_EXIT": "3", "NEW_SCOPE": "new", "ALL_SCOPE": "all", "ONE_SCOPE": "new"}
+          for key, value in expect.items():
+              ok = os.environ[key] == value
+              failed |= not ok
+              print(f"{'ok ' if ok else 'BAD'} {key}={os.environ[key]} (want {value})")
+          sys.exit(1 if failed else 0)
+          PY

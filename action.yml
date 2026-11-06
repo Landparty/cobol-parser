@@ -1,0 +1,149 @@
+name: COBOL lint
+description: >-
+  Lint COBOL with cobol-parser: pick the rules, and gate each one on new code
+  only (the lines a pull request adds or edits) or on the whole codebase.
+author: Samuel Dion
+branding:
+  icon: check-square
+  color: blue
+
+inputs:
+  paths:
+    description: >-
+      Programs to lint: files or globs ('**' recurses), separated by spaces,
+      commas or new lines. Default: every program git tracks (.cbl, .cob,
+      .cobol), copybook folders left out.
+    default: ""
+  rules:
+    description: >-
+      Only run these rules (space, comma or new-line separated). Default:
+      every rule, including ones added in later cobol-parser releases. See
+      `cobol-parser lint --help` for the rule ids.
+    default: ""
+  disable:
+    description: Never run these rules.
+    default: ""
+  scope:
+    description: >-
+      Default scope of every rule. 'new': only findings on lines the change
+      added or edited count (like Sonar's new-code quality gate). 'all':
+      every finding in the linted programs counts. 'auto' (default): 'new'
+      on pull_request and merge_group events, and on push when the previous
+      commit is known; 'all' otherwise.
+    default: auto
+  new-code-rules:
+    description: Rules (or rule/KIND) always judged on new code only, whatever 'scope' says.
+    default: ""
+  all-code-rules:
+    description: Rules (or rule/KIND) always judged on the whole codebase, whatever 'scope' says.
+    default: ""
+  base-ref:
+    description: >-
+      Where new code starts (a branch, tag or commit; compared from its merge
+      base with HEAD). Default: the pull request's base branch, or the commit
+      before a push.
+    default: ""
+  fail-on:
+    description: "Fail the step when a finding reaches this severity: error, warning, info or never."
+    default: error
+  min-severity:
+    description: "Hide findings below this severity (error, warning, info). Default: warning, or cobol.yml lint.min_severity."
+    default: ""
+  severity:
+    description: "Re-grade rules: RULE=LEVEL or RULE/KIND=LEVEL entries, e.g. 'dead-code=error'."
+    default: ""
+  copybook-path:
+    description: Copybook folders (space, comma or new-line separated). Default from cobol.yml.
+    default: ""
+  callee-path:
+    description: Folders of CALLed programs; turns on the call-check rule. Default from cobol.yml.
+    default: ""
+  config:
+    description: "cobol.yml to read. Default: the one found from working-directory upwards; 'none' reads none."
+    default: ""
+  baseline:
+    description: Baseline file of known findings to leave out (see --write-baseline).
+    default: ""
+  working-directory:
+    description: Directory to run in (the repository root by default).
+    default: "."
+  summary:
+    description: Write a Markdown summary with every finding to the job summary.
+    default: "true"
+  sarif-file:
+    description: Also write a SARIF 2.1.0 log here, for github/codeql-action/upload-sarif.
+    default: ""
+  args:
+    description: Extra arguments passed to `cobol-parser lint` as is.
+    default: ""
+  python-version:
+    description: Python used to run cobol-parser (3.11 or later). Empty skips actions/setup-python and uses the runner's python3.
+    default: "3.12"
+  version:
+    description: >-
+      cobol-parser to install from PyPI, e.g. '3.5.0'. Default: the copy of
+      cobol-parser this action was checked out from, so the action and the
+      linter are always the same version.
+    default: ""
+
+outputs:
+  exit-code:
+    description: "cobol-parser lint's exit code: 0 clean, 3 a finding reached fail-on, 1 a file could not be linted, 2 bad arguments."
+    value: ${{ steps.lint.outputs.exit-code }}
+  scope:
+    description: The default scope the run used (new or all).
+    value: ${{ steps.lint.outputs.scope }}
+  base-ref:
+    description: Where new code started, when scope was new.
+    value: ${{ steps.lint.outputs.base-ref }}
+
+runs:
+  using: composite
+  steps:
+    - if: inputs.python-version != ''
+      uses: actions/setup-python@v5
+      with:
+        python-version: ${{ inputs.python-version }}
+
+    - name: Install cobol-parser
+      shell: bash
+      env:
+        COBOL_LINT_VERSION: ${{ inputs.version }}
+        COBOL_LINT_ACTION_PATH: ${{ github.action_path }}
+      run: |
+        set -euo pipefail
+        python3 -m pip install --disable-pip-version-check --quiet --upgrade pip
+        if [ -n "$COBOL_LINT_VERSION" ]; then
+          python3 -m pip install --disable-pip-version-check --quiet "cobol-parser==$COBOL_LINT_VERSION"
+        else
+          python3 -m pip install --disable-pip-version-check --quiet "$COBOL_LINT_ACTION_PATH"
+        fi
+        python3 -m cobolparser --version
+
+    - name: Lint COBOL
+      id: lint
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      env:
+        IN_PATHS: ${{ inputs.paths }}
+        IN_RULES: ${{ inputs.rules }}
+        IN_DISABLE: ${{ inputs.disable }}
+        IN_SCOPE: ${{ inputs.scope }}
+        IN_NEW_RULES: ${{ inputs.new-code-rules }}
+        IN_ALL_RULES: ${{ inputs.all-code-rules }}
+        IN_BASE_REF: ${{ inputs.base-ref }}
+        IN_FAIL_ON: ${{ inputs.fail-on }}
+        IN_MIN_SEVERITY: ${{ inputs.min-severity }}
+        IN_SEVERITY: ${{ inputs.severity }}
+        IN_COPYBOOK_PATH: ${{ inputs.copybook-path }}
+        IN_CALLEE_PATH: ${{ inputs.callee-path }}
+        IN_CONFIG: ${{ inputs.config }}
+        IN_BASELINE: ${{ inputs.baseline }}
+        IN_SUMMARY: ${{ inputs.summary }}
+        IN_SARIF: ${{ inputs.sarif-file }}
+        IN_ARGS: ${{ inputs.args }}
+        EVENT_NAME: ${{ github.event_name }}
+        PR_BASE: ${{ github.base_ref }}
+        MERGE_GROUP_BASE: ${{ github.event.merge_group.base_sha }}
+        PUSH_BEFORE: ${{ github.event.before }}
+      run: bash "$GITHUB_ACTION_PATH/scripts/github-action/lint.sh"

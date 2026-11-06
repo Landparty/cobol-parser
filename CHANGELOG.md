@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+* **A GitHub Action, and a new-code gate like Sonar's.** This repository is
+  now a composite action (`uses: landparty/cobol-parser@<tag>`): pick the
+  rules, and judge each one on new code only or on the whole codebase. It
+  annotates the pull request, writes a job summary listing every finding,
+  and can write SARIF. Underneath, `lint --new-code-since REF` keeps only
+  the findings on lines added or edited since REF's merge base,
+  `--scope [RULE=]new|all` (and `lint.scope` in `cobol.yml`) sets which
+  rules that applies to, and `--summary-file FILE` appends a Markdown
+  summary. See `docs/github-action.md`.
 * **Lint finds the classic bugs it used to miss.** Seven new rules, on by
   default: `truncation` (a MOVE, ADD, SUBTRACT or COMPUTE that cuts digits
   or characters), `subscript-range` (a literal subscript past its OCCURS),
