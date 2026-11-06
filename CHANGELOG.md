@@ -9,6 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+* **Lint reports what IBM's compiler would.** Ten new rules, on by default,
+  for the mistakes Enterprise COBOL rejects or warns about, so they show up
+  in the editor and the CI gate instead of the compile listing:
+  `undefined-name`, `value-clause` (a VALUE that does not fit its PICTURE, a
+  level-88 value that can never be true), `data-layout` (REDEFINES larger
+  than its target, RECORD CONTAINS against the record), `comparison` (a
+  comparison that is always false), `search-table`, `divide-by-zero`,
+  `subscript-usage` (subscript count, missing subscript, reference
+  modification out of range), `procedure-structure` (duplicate and empty
+  paragraphs), `corresponding` and `arithmetic-operand`.
+
 * **Eight lint rules from other COBOL linters.** After a survey of
   SonarQube's COBOL rules, IBM Developer for z/OS code review and open-source
   COBOL linters (ideas only, no code): `constant-condition` (`IF A = A`,
@@ -236,6 +247,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   expansion source map instead of a second, unexpanded parse.
 
 ### Fixed
+
+* **PERFORM VARYING ... AFTER ... UNTIL no longer swallows a following GO
+  TO.** The last AFTER condition read `GO TO X` as part of itself, so the GO
+  TO was missing from the AST and the flow graph.
 
 * **`gen-fixtures` drives branches on SQLCODE.** `IF SQLCODE < 0`,
   `EVALUATE WS-RC` after `MOVE SQLCODE TO WS-RC`, and the like now constrain

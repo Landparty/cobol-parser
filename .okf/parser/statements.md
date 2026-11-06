@@ -114,7 +114,8 @@ The recurring defect in this layer is a statement with no trailing period that
 must stop at a boundary *without consuming it*. The rules:
 
 1. **Every verb is a boundary.** Each verb word must be in
-   `_utils.STATEMENT_TOKEN_TYPES` (its `TokenType`, when it has one) **and**
+   `_utils.STATEMENT_TOKEN_TYPES` (its `TokenType`, when it has one; `GO TO`
+   lexes as `GO` then `TO`, so `GO` is there besides `GOTO`) **and**
    `STATEMENT_KEYWORDS` (its string, including verbs with no `TokenType` such as
    `PURGE` / `RAISE` / `RESUME`, which only a value check can catch). The
    legacy verbs CHAIN / NOTE / EXHIBIT / EXAMINE / TRANSFORM are the

@@ -125,6 +125,13 @@ Seven rules look for common coding bugs: `truncation`, `subscript-range`,
 `next-sentence`, `perform-range`, `file-status`, `uninitialized` and
 `obsolete-verb`. They run by default; select one with `--rule truncation`.
 
+Ten more report what IBM's compiler would reject (`error`) or warn about
+(`warning`), so a CI gate catches it before the mainframe compile:
+`undefined-name`, `value-clause`, `data-layout`, `comparison`, `search-table`,
+`divide-by-zero`, `subscript-usage`, `procedure-structure`, `corresponding`
+and `arithmetic-operand`. `undefined-name` stays quiet, with a caveat, for a
+program whose COPY members were not all found.
+
 Eight more come from what other COBOL linters check: `constant-condition`
 (`IF A = A`, `A = 'X' AND A = 'Y'`), `duplicate-branch` (a WHEN or ELSE IF
 that repeats an earlier test), `self-assignment` (`MOVE X TO X`),

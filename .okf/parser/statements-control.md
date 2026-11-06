@@ -159,7 +159,9 @@ arm.
   consuming) at `AFTER` only when `for_varying=True` -- a plain `PERFORM UNTIL`
   condition may contain an `AFTER` token. Both UNTIL loops
   (`_collect_until_condition_tokens`, `_parse_until_condition_only`) stop at
-  `STATEMENT_TOKEN_TYPES` / `STATEMENT_KEYWORDS` and at any `SCOPE_TERMINATORS`
+  `STATEMENT_TOKEN_TYPES` (which holds `GO` as well as `GOTO`: the last `AFTER
+  ... UNTIL` used to swallow a following `GO TO X`) / `STATEMENT_KEYWORDS` and at
+  any `SCOPE_TERMINATORS`
   word (an out-of-line PERFORM owns none: in `IF c PERFORM p UNTIL d END-IF STOP
   RUN.` the `END-IF` belongs to the IF), read `AFTER` and terminators through
   `keyword_upper()`, and drop WHITESPACE / NEWLINE / CONTINUATION / COMMENT

@@ -1,14 +1,14 @@
 ---
 type: Module
 title: Static Analysis
-description: Routing page for cobolparser/analysis/ (34 public modules + the program_flow/ package + 6 private helpers) and dialects/le_signatures.py -- calling conventions shared by every analyzer, which .okf/analysis/*.md file covers which analyzer, the module map and the public imports.
+description: Routing page for cobolparser/analysis/ (35 public modules + the program_flow/ package + 6 private helpers) and dialects/le_signatures.py -- calling conventions shared by every analyzer, which .okf/analysis/*.md file covers which analyzer, the module map and the public imports.
 tags: [analysis, routing, dead-code, program-flow, lint, xref, field-lineage, business-rules, fixtures, codebase-graph, sql-cics-lint, le-signatures]
 timestamp: 2026-10-15T00:00:00Z
 ---
 
 # Static Analysis
 
-`cobolparser/analysis/` holds every static analyzer: 34 public modules, the
+`cobolparser/analysis/` holds every static analyzer: 35 public modules, the
 `program_flow/` package (the control-flow graph, 8 modules) and 6 private
 helpers (`_procedures.py`, `_names.py`, `_files.py`, `_cics.py`,
 `_sql_whenever.py`, `_sql_flow.py`) the analyzers share so they cannot
@@ -89,6 +89,7 @@ Report origins after copybook expansion: [analysis/lint.md](analysis/lint.md).
 | `language_env_analyzer.py` | `LanguageEnvironmentAnalyzer` | [sql-cics-ims](analysis/sql-cics-ims.md) |
 | `dialects/le_signatures.py` | `le_service_signature`, `intrinsic_signature`, `catalog_to_dict` | [sql-cics-ims](analysis/sql-cics-ims.md) |
 | `bug_patterns.py` | `BugPatternAnalyzer`, `BUG_PATTERN_RULES`, `BUG_PATTERN_DESCRIPTIONS`, `walk_statements` (the seven bug-pattern lint rules) | [lint](analysis/lint.md#bug-pattern-rules) |
+| `compiler_checks.py` | `CompilerCheckAnalyzer`, `CompilerChecks`, `COMPILER_RULES`, `COMPILER_RULE_DESCRIPTIONS` (the ten compiler-check lint rules) | [lint](analysis/lint.md#compiler-check-rules) |
 | `code_patterns.py` | `CodePatternAnalyzer`, `CODE_PATTERN_RULES`, `CODE_PATTERN_DESCRIPTIONS`, `run_code_pattern` (the eight code-pattern lint rules, ideas from other COBOL linters) | [lint](analysis/lint.md#code-pattern-rules) |
 | `lint.py` | `LintAnalyzer`, `RULES`, `ALL_RULES`, `add_call_check_findings`, `add_line_length_findings`, `line_length_findings`, `filter_by_severity`, `add_parse_errors`, `apply_source_map`, `stamp_report_origins`, `fixed_format_column_offset` | [lint](analysis/lint.md) |
 | `sarif.py` | `sarif_log`, `SarifResult`, `SarifNotification`, `lint_results`, `call_check_results` | [lint](analysis/lint.md#sarif-output) |

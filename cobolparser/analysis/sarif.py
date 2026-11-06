@@ -30,6 +30,7 @@ from typing import Any
 
 from .bug_patterns import BUG_PATTERN_DESCRIPTIONS
 from .code_patterns import CODE_PATTERN_DESCRIPTIONS
+from .compiler_checks import COMPILER_RULE_DESCRIPTIONS
 
 SARIF_VERSION = "2.1.0"
 SARIF_SCHEMA = "https://json.schemastore.org/sarif-2.1.0.json"
@@ -63,6 +64,7 @@ RULE_DESCRIPTIONS: dict[str, str] = {
     "call-check": "CALL interface disagrees with the CALLed program",
     # The bug-pattern rules describe themselves.
     **BUG_PATTERN_DESCRIPTIONS,
+    **COMPILER_RULE_DESCRIPTIONS,
     **CODE_PATTERN_DESCRIPTIONS,
 }
 

@@ -187,7 +187,10 @@ do not reintroduce COMMENT tokens into the stream.
 The stream also carries `omitted_source_lines` -- the lines
 `strip_unexpanded_copy_statements` blanked -- which the EVALUATE parser consults
 before treating adjacent WHENs as stacked (see
-[statements-control.md](statements-control.md)).
+[statements-control.md](statements-control.md)). The same list is copied onto
+every program unit as `CobolProgram.omitted_copy_lines` (not serialized), so
+an analyzer can tell a program with a missing COPY member (lint's
+`undefined-name` stays quiet then).
 
 ## Source passes before lexing
 

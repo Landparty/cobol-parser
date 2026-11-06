@@ -42,7 +42,7 @@ Individual statement parsers are in [statements.md](statements.md).
 | `data_clauses.py` | `DataItemClauseParser` — data-item entries + PICTURE/VALUE/USAGE/OCCURS/... clauses; owns the optional `_data_fast` Cython fast-path invocation |
 | `data_file_description.py` | `FileDescriptionClauseParser` — FD/SD file-description clause capture (BLOCK/RECORD/LABEL/...) |
 | `data_report_description.py` | `ReportDescriptionClauseParser` — REPORT SECTION `RD` clause capture (CODE/CONTROLS/PAGE LIMIT/HEADING/FIRST-LAST DETAIL/FOOTING/GLOBAL) |
-| `data_special_entries.py` | `SpecialEntryParser` — level-88 condition names, level-66 RENAMES, data-division EXEC SQL blocks |
+| `data_special_entries.py` | `SpecialEntryParser` — level-88 condition names (each value's literal kind in `ConditionNameItem.value_kinds`), level-66 RENAMES, data-division EXEC SQL blocks |
 | `procedure.py` | PROCEDURE DIVISION — paragraph/section dispatch loop, ParseContext attachment, AST node; hosts the shared `StatementParserRegistry` cache; supporting logic delegated to the three `procedure_*.py` collaborators below |
 | `procedure_registry.py` | `create_statement_registry()` — registers all 72 statement parsers in first-match priority order (new statement parsers register here); order invariant pinned by `tests/unit/test_procedure_registry_dispatch_order.py`; every registered parser also needs a fixture in `tests/regression/test_swallow_sweep.py` |
 | `procedure_boundaries.py` | `is_paragraph_or_section_start` / `is_section_marker` / `is_statement_keyword` lookahead predicates |

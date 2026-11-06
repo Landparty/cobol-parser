@@ -700,6 +700,10 @@ parse, one severity-graded finding list.
   `recursion-check`, `complexity`, `dclgen-check`, `sql-cics-check`), the
   bug-pattern rules (`truncation`, `subscript-range`, `next-sentence`,
   `perform-range`, `file-status`, `uninitialized`, `obsolete-verb`), the
+  compiler-check rules (`undefined-name`, `value-clause`, `data-layout`,
+  `comparison`, `search-table`, `divide-by-zero`, `subscript-usage`,
+  `procedure-structure`, `corresponding`, `arithmetic-operand`; see
+
   code-pattern rules (`constant-condition`, `duplicate-branch`,
   `self-assignment`, `stop-run-in-subprogram`, `string-pointer`,
   `loop-variable`, `evaluate-other`, `nesting-depth`; see

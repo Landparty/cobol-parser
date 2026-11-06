@@ -106,6 +106,8 @@ class CobolProgram(ASTNode):             # CobolProgram(program_name, location);
     unit_kind: str                       # "PROGRAM" | "CLASS" | "FACTORY" | "OBJECT" | "METHOD" | "FUNCTION"
     program_attributes: list[str]        # property: INITIAL / COMMON / RECURSIVE subset
     is_recursive: bool                   # property
+    omitted_copy_lines: tuple[tuple[int, int], ...]  # (first, last) lines of COPY
+                                         # statements left unexpanded; not serialized
 
 class CobolDivision(ASTNode):            # CobolDivision(division_name, location)
     division_name: str                   # property
@@ -341,7 +343,9 @@ class OccursClause(ASTNode):         # OccursClause(location)
     key_clauses: list[dict]    # {"direction": "ASCENDING"|"DESCENDING",
                                #  "keys": [...]} — SEARCH ALL keys
 
-class ConditionNameItem(ASTNode):    # level 88: name, values, false_value
+class ConditionNameItem(ASTNode):    # level 88: name, values, false_value,
+                                     # value_kinds ("string"/"numeric"/"figurative"/
+                                     # "all" per values entry; not serialized)
 class RenamesItem(ASTNode):          # level 66: name, renames_from, renames_through
 ```
 

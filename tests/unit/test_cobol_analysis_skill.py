@@ -80,8 +80,11 @@ def test_lint_rule_list_matches_the_analyzer():
         16: "sixteen",
         17: "seventeen",
         18: "eighteen",
+        26: "twenty-six",
+        27: "twenty-seven",
+        28: "twenty-eight",
     }
-    # Past twenty the skill writes the count in digits.
+    # Any other count is written in digits.
     assert f"`lint` runs {words.get(len(RULES), str(len(RULES)))} rules" in text
     for rule in RULES:
         assert f"`{rule}`" in text

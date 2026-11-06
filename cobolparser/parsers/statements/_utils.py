@@ -51,6 +51,7 @@ STATEMENT_TOKEN_TYPES: frozenset = frozenset(
         TokenType.EXIT,
         TokenType.GENERATE,
         TokenType.GOBACK,
+        TokenType.GO,
         TokenType.GOTO,
         TokenType.IF,
         TokenType.INITIALIZE,
