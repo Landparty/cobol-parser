@@ -78,6 +78,15 @@ RULES: tuple[str, ...] = (
     "file-status",
     "uninitialized",
     "obsolete-verb",
+    # Checks found in other COBOL linters (code_patterns.py).
+    "constant-condition",
+    "duplicate-branch",
+    "self-assignment",
+    "stop-run-in-subprogram",
+    "string-pointer",
+    "loop-variable",
+    "evaluate-other",
+    "nesting-depth",
 )
 
 #: Rule id of the fixed-format layout check (:func:`add_line_length_findings`).
@@ -1383,12 +1392,16 @@ class LintAnalyzer:
         bug_context: list[Any] = []
 
         def bug_patterns(rule: str) -> list[LintFinding]:
-            # One shared context per unit: the seven bug-pattern rules reuse
-            # one data index, xref and CFG instead of building seven.
+            # One shared context per unit: the bug- and code-pattern rules reuse
+            # one data index, xref and CFG instead of building one each.
             from .bug_patterns import _Context
 
             if not bug_context:
                 bug_context.append(_Context(ast, self._flow(ast, flow_report)))
+            if rule in CODE_PATTERN_RULES:
+                found = run_code_pattern(bug_context[0], rule)
+            else:
+                found = bug_context[0].run(rule)
             return [
                 LintFinding(
                     rule=f.rule,
@@ -1398,12 +1411,13 @@ class LintAnalyzer:
                     symbol=f.symbol,
                     kind=f.kind,
                 )
-                for f in bug_context[0].run(rule)
+                for f in found
             ]
 
         from .bug_patterns import BUG_PATTERN_RULES
+        from .code_patterns import CODE_PATTERN_RULES, run_code_pattern
 
-        for bug_rule in BUG_PATTERN_RULES:
+        for bug_rule in BUG_PATTERN_RULES + CODE_PATTERN_RULES:
             collectors[bug_rule] = functools.partial(bug_patterns, bug_rule)
 
         for rule in self._rules:

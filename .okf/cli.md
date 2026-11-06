@@ -701,7 +701,10 @@ parse, one severity-graded finding list.
   `unused-variables`, `move-type-check`, `io-sequence`, `linkage-check`,
   `recursion-check`, `complexity`, `dclgen-check`, `sql-cics-check`), the
   bug-pattern rules (`truncation`, `subscript-range`, `next-sentence`,
-  `perform-range`, `file-status`, `uninitialized`, `obsolete-verb`; see
+  `perform-range`, `file-status`, `uninitialized`, `obsolete-verb`), the
+  code-pattern rules (`constant-condition`, `duplicate-branch`,
+  `self-assignment`, `stop-run-in-subprogram`, `string-pointer`,
+  `loop-variable`, `evaluate-other`, `nesting-depth`; see
   [analysis/lint.md](analysis/lint.md)), `line-length` and `call-check`.
   Argparse `choices` rejects an unknown id (exit 2) so a typo never reads as
   "found nothing" (`test_lint_subcommand.py::test_unknown_rule_is_rejected_by_argparse`).

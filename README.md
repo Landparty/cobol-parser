@@ -205,6 +205,20 @@ cleanly:
 | `uninitialized` | A numeric item read but never set, with no VALUE |
 | `obsolete-verb` | ALTER |
 
+Eight more rules check what other COBOL linters (SonarQube, IBM Developer for
+z/OS code review) check:
+
+| Rule | Finds |
+|---|---|
+| `constant-condition` | A condition that is always true or false: `IF WS-A = WS-A`, `WS-A = 'X' AND WS-A = 'Y'` |
+| `duplicate-branch` | An EVALUATE WHEN or an ELSE IF that repeats an earlier test, so its statements never run |
+| `self-assignment` | `MOVE X TO X` |
+| `stop-run-in-subprogram` | STOP RUN in a CALLed program (PROCEDURE DIVISION USING, or nested), which ends the whole run unit |
+| `string-pointer` | A STRING/UNSTRING pointer set to 0 just before, or whose PICTURE cannot reach the field's length + 1 |
+| `loop-variable` | A PERFORM VARYING body that changes its own control variable |
+| `evaluate-other` | EVALUATE without WHEN OTHER (info) |
+| `nesting-depth` | IF/EVALUATE/PERFORM nested more than 5 deep (info) |
+
 With `--callee-path DIR` (or `callee_path` in `cobol.yml`), the `call-check`
 rule also compares every CALL with the program it calls (argument count,
 passing mode, byte length, usage), so a caller passing 8 bytes to a 10-byte

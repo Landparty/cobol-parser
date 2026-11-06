@@ -89,6 +89,7 @@ Report origins after copybook expansion: [analysis/lint.md](analysis/lint.md).
 | `language_env_analyzer.py` | `LanguageEnvironmentAnalyzer` | [sql-cics-ims](analysis/sql-cics-ims.md) |
 | `dialects/le_signatures.py` | `le_service_signature`, `intrinsic_signature`, `catalog_to_dict` | [sql-cics-ims](analysis/sql-cics-ims.md) |
 | `bug_patterns.py` | `BugPatternAnalyzer`, `BUG_PATTERN_RULES`, `BUG_PATTERN_DESCRIPTIONS`, `walk_statements` (the seven bug-pattern lint rules) | [lint](analysis/lint.md#bug-pattern-rules) |
+| `code_patterns.py` | `CodePatternAnalyzer`, `CODE_PATTERN_RULES`, `CODE_PATTERN_DESCRIPTIONS`, `run_code_pattern` (the eight code-pattern lint rules, ideas from other COBOL linters) | [lint](analysis/lint.md#code-pattern-rules) |
 | `lint.py` | `LintAnalyzer`, `RULES`, `ALL_RULES`, `add_call_check_findings`, `add_line_length_findings`, `line_length_findings`, `filter_by_severity`, `add_parse_errors`, `apply_source_map`, `stamp_report_origins`, `fixed_format_column_offset` | [lint](analysis/lint.md) |
 | `sarif.py` | `sarif_log`, `SarifResult`, `SarifNotification`, `lint_results`, `call_check_results` | [lint](analysis/lint.md#sarif-output) |
 | `field_lineage.py` | `FieldFlowAnalyzer` | [lineage](analysis/lineage.md) |

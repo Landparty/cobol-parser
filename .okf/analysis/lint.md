@@ -1,7 +1,7 @@
 ---
 type: Module
 title: Lint Analyzer
-description: LintAnalyzer (analysis/lint.py) -- runs nine analyzers and seven bug-pattern rules (bug_patterns.py) over one parse plus the line-length source rule and the call-check cross-program rule and flattens them into one severity-graded LintFinding stream; per-unit linting, caveats and failed rules, and the source-map origin stamping (apply_source_map, stamp_report_origins, fixed_format_column_offset) shared by every analyzer CLI.
+description: LintAnalyzer (analysis/lint.py) -- runs nine analyzers, seven bug-pattern rules (bug_patterns.py) and eight code-pattern rules (code_patterns.py) over one parse plus the line-length source rule and the call-check cross-program rule and flattens them into one severity-graded LintFinding stream; per-unit linting, caveats and failed rules, and the source-map origin stamping (apply_source_map, stamp_report_origins, fixed_format_column_offset) shared by every analyzer CLI.
 tags: [analysis, lint, findings, severity, source-map, origin]
 timestamp: 2026-10-15T00:00:00Z
 ---
@@ -40,7 +40,8 @@ lint output with no change here.
 `unused-variables`, `move-type-check`, `io-sequence`, `linkage-check`,
 `recursion-check`, `complexity`, `dclgen-check`, `sql-cics-check`; the `RULES`
 tuple, in that order, followed by the seven bug-pattern rules of
-[Bug-pattern rules](#bug-pattern-rules), which have no subcommand) rather
+[Bug-pattern rules](#bug-pattern-rules) and the eight of [Code-pattern
+rules](#code-pattern-rules), which have no subcommand) rather
 than a second private
 vocabulary, so
 `lint --rule dead-code` and `cobol-parser dead-code` are visibly the same
@@ -143,6 +144,45 @@ shape in `COCRDUPC`, `CBTRN03C`'s NEXT SENTENCE leaves its inline PERFORM
 UNTIL, and 11 balance fields `S9(10)V99` moved into `S9(9)V99` screen
 fields; NIST + shamrice (486 files) 786 [169], dominated by the suite's
 deliberate truncation and ALTER tests.
+
+## Code-pattern rules
+
+`code_patterns.py` (`CodePatternAnalyzer(rules=None).analyze(ast, flow_report=None)`
+-> `CodePatternReport.findings: list[BugFinding]`) holds eight rules whose
+ideas come from other COBOL linters (SonarQube's COBOL rules, IBM Developer
+for z/OS code review, Code4z, open-source linters such as plumbline); only
+the ideas were taken, no code. They are in `RULES` after the bug-pattern
+rules and run by default. Lint runs them through `run_code_pattern(context,
+rule)` on the **same** `bug_patterns._Context` as the bug-pattern rules (one
+data index, xref and CFG per unit). Comparisons against a literal the field
+cannot hold, empty and duplicate paragraphs and divide by zero are left to
+the compiler-diagnostic rules.
+
+| Rule | `kind` | Severity | What and what not |
+|---|---|---|---|
+| `constant-condition` | `IDENTICAL_OPERANDS` | warning | a relation (`=`, `NOT =`, `<`, `>`, `<=`, `>=`) with the same operand text on both sides (spacing and case normalized, subscripts and reference modification included) in an IF or PERFORM UNTIL / AFTER condition. Not for literals or `FUNCTION` operands (RANDOM, CURRENT-DATE) |
+| | `CONTRADICTORY_AND` | warning | two `=` tests of one operand against different literals of the same kind in one AND chain (abbreviated `X = 1 AND 2` too, the parser expands it). Literals compare by value: `1` = `01`, `'A'` = `'A '` |
+| `duplicate-branch` | `DUPLICATE_WHEN` | warning | a WHEN whose selectors are all plain literals or conditions (ALSO included) and repeat a WHEN of an **earlier group**. WHENs with no statements share the next WHEN's, so `WHEN X WHEN X stmts` (CardDemo `COCRDLIC`) is one group and quiet. Ranges, ANY, figuratives and data names are skipped |
+| | `DUPLICATE_CONDITION` | warning | an `IF c ... ELSE IF c` chain repeating a condition (compared on the condition tree without locations); judged from the chain's head |
+| `self-assignment` | `SELF_MOVE` | warning | `MOVE X TO ... X` with the same reference text |
+| `stop-run-in-subprogram` | `STOP_RUN_IN_CALLED_PROGRAM` | warning | STOP RUN in a unit whose PROCEDURE DIVISION has USING (`using_parameters` metadata) or that is a nested program |
+| `string-pointer` | `POINTER_BELOW_ONE` | error | MOVE 0 / ZERO or INITIALIZE (no REPLACING) of a pointer, then a STRING / UNSTRING WITH POINTER it later in the same statement block, with no statement between whose serialized form names the pointer |
+| | `POINTER_TOO_SMALL` | warning | the pointer's PICTURE has fewer integer digits than `len(field) + 1` (STRING: the INTO field; UNSTRING: the sending field). Elementary alphanumeric fields, or groups without OCCURS sized by `program_signature._byte_length`; reference-modified fields skipped |
+| `loop-variable` | `VARYING_VARIABLE_STEPPED` | warning | inside a PERFORM VARYING body (inline statements, or the PERFORMed paragraph / THRU range, one level: no further PERFORMs), ADD / SUBTRACT / MULTIPLY / DIVIDE into, SET UP / DOWN BY, a GIVING from itself, or a COMPUTE whose expression names the VARYING / AFTER variable |
+| | `VARYING_VARIABLE_ASSIGNED` | info | MOVE, SET TO, INITIALIZE or another store into it (often a deliberate early exit) |
+| `evaluate-other` | `EVALUATE_WITHOUT_OTHER` | info | an EVALUATE with no WHEN OTHER |
+| `nesting-depth` | `NESTING_TOO_DEEP` | info | IF / EVALUATE / SEARCH / inline PERFORM nested more than `MAX_NESTING` (5) deep; `ELSE IF` does not add a level; one finding per top-level statement |
+
+Messages carry no line numbers: locations are expanded-source positions that
+`apply_source_map` re-stamps, a line inside a message would not be.
+
+Measured 2026-11-06 with every code-pattern rule (warnings; info in
+brackets): CardDemo `app/cbl` 0 [7], the `app-*` extensions 2 -- `CODATE01`
+/ `COACCT01` `MOVE WS-CICS-RESP2-CD TO WS-CICS-RESP2-CD` where the `-D` edit
+field was meant; NIST + shamrice (487 files) 8 [74]: NIST's deliberate
+PERFORM VARYING manipulation tests and STOP RUN in the `OBIC` subprograms.
+Until a duplicate WHEN was grouped, CardDemo `COCRDLIC`'s `WHEN X WHEN X`
+was the only false warning.
 
 ## Cross-program rule (`call-check`)
 
