@@ -801,3 +801,110 @@ def _compare_one(
             f"{call} RETURNING {site.returning} but {callee.entry} declares no "
             "RETURNING item",
         )
+
+
+# ---------------------------------------------------------------------------
+# One program against callees found on a search path (the lint rule)
+# ---------------------------------------------------------------------------
+
+#: File names tried for a CALLed program NAME in each callee directory.
+CALLEE_EXTENSIONS: tuple[str, ...] = ("", ".cbl", ".CBL", ".cob", ".COB")
+
+
+def find_callee_file(name: str, callee_paths: Iterable[str]) -> str | None:
+    """The source file of program *name* in *callee_paths* (``NAME``,
+    ``NAME.cbl``, ``name.cob``, ...), first directory first, else None."""
+    import os
+
+    for directory in callee_paths:
+        try:
+            entries = set(os.listdir(directory))
+        except OSError:
+            continue
+        for candidate in (name, name.lower()):
+            for ext in CALLEE_EXTENSIONS:
+                if candidate + ext in entries:
+                    return os.path.join(directory, candidate + ext)
+    return None
+
+
+@dataclass
+class CalleeCheck:
+    """What :meth:`CalleeResolver.check_program` found for one program."""
+
+    report: CallInterfaceReport
+    #: CALL targets with no source file in the callee directories.
+    not_found: list[str] = field(default_factory=list)
+
+
+class CalleeResolver:
+    """Check one already-parsed program's CALLs against callees looked up
+    by name in *callee_paths* -- what ``lint``'s ``call-check`` rule runs.
+
+    Each callee file is parsed once per resolver and reduced to its
+    interfaces, so a multi-file lint run that CALLs one subprogram from a
+    hundred programs parses it once. A program's own contained programs
+    are reached first, as COBOL scope says.
+    """
+
+    def __init__(
+        self,
+        callee_paths: Iterable[str],
+        *,
+        copybook_paths: Iterable[str] | None = None,
+        debug_lines: bool = False,
+    ) -> None:
+        self.callee_paths = list(callee_paths)
+        self.copybook_paths = list(copybook_paths or [])
+        self.debug_lines = debug_lines
+        # path -> interfaces of that file (None: it did not parse)
+        self._parsed: dict[str, dict[str, list[_Interface]] | None] = {}
+
+    def _interfaces_of(self, path: str) -> dict[str, list[_Interface]] | None:
+        if path not in self._parsed:
+            results = list(
+                parse_files_with_copybooks(
+                    [path],
+                    copybook_paths=self.copybook_paths,
+                    workers=1,
+                    debug_lines=self.debug_lines,
+                )
+                if self.copybook_paths
+                else parse_files([path], workers=1, debug_lines=self.debug_lines)
+            )
+            parse = results[0].result if results else None
+            if (
+                parse is None
+                or parse.ast is None
+                or parse.ast.procedure_division is None
+            ):
+                self._parsed[path] = None
+            else:
+                interfaces: dict[str, list[_Interface]] = {}
+                CallInterfaceChecker._absorb(path, parse.ast, interfaces, [])
+                self._parsed[path] = interfaces
+        return self._parsed[path]
+
+    def check_program(self, path: str, ast: CobolProgram) -> CalleeCheck:
+        interfaces: dict[str, list[_Interface]] = {}
+        calls: list[_CallSite] = []
+        CallInterfaceChecker._absorb(path, ast, interfaces, calls)
+        not_found: list[str] = []
+        unparsed: list[str] = []
+        wanted = sorted({t for site in calls for t in site.targets} - set(interfaces))
+        for name in wanted:
+            found = find_callee_file(name, self.callee_paths)
+            if found is None:
+                not_found.append(name)
+                continue
+            callee = self._interfaces_of(found)
+            if callee is None:
+                unparsed.append(f"{name} ({found})")
+                continue
+            for key, entries in callee.items():
+                interfaces.setdefault(key, []).extend(entries)
+        report = CallInterfaceReport()
+        CallInterfaceChecker._compare(interfaces, calls, report)
+        for note in unparsed:
+            report.unchecked.append(f"CALL {note}: the callee did not parse")
+        return CalleeCheck(report=report, not_found=not_found)

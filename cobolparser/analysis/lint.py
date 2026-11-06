@@ -41,6 +41,7 @@ Two properties matter more than breadth here:
 
 from __future__ import annotations
 
+import functools
 import re
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
@@ -69,6 +70,14 @@ RULES: tuple[str, ...] = (
     "complexity",
     "dclgen-check",
     "sql-cics-check",
+    # Bug patterns no analyzer above looks for (bug_patterns.py).
+    "truncation",
+    "subscript-range",
+    "next-sentence",
+    "perform-range",
+    "file-status",
+    "uninitialized",
+    "obsolete-verb",
 )
 
 #: Rule id of the fixed-format layout check (:func:`add_line_length_findings`).
@@ -80,8 +89,18 @@ LINE_LENGTH_RULE = "line-length"
 #: Rules that check the source text itself rather than the parsed program.
 SOURCE_RULES: tuple[str, ...] = (LINE_LENGTH_RULE,)
 
-#: Every rule id a caller can select: the AST rules, then the source rules.
-ALL_RULES: tuple[str, ...] = RULES + SOURCE_RULES
+#: Rule id of the cross-program CALL interface check
+#: (:func:`add_call_check_findings`). It needs the CALLed programs' source
+#: as well (``--callee-path``), so like ``line-length`` it is selected with
+#: ``--rule`` but run by the caller, not by :class:`LintAnalyzer`.
+CALL_CHECK_RULE = "call-check"
+
+#: Rules that read other programs than the one linted.
+PROGRAM_SET_RULES: tuple[str, ...] = (CALL_CHECK_RULE,)
+
+#: Every rule id a caller can select: the AST rules, then the source rules,
+#: then the cross-program rules.
+ALL_RULES: tuple[str, ...] = RULES + SOURCE_RULES + PROGRAM_SET_RULES
 
 _RULE_ORDER: dict[str, int] = {name: order for order, name in enumerate(ALL_RULES)}
 
@@ -1097,6 +1116,52 @@ def add_line_length_findings(
     return report
 
 
+def add_call_check_findings(
+    report: LintReport, path: str, ast: CobolProgram, resolver: Any
+) -> LintReport:
+    """Run the ``call-check`` rule for one program and merge its findings.
+
+    *resolver* is a :class:`~.call_interface.CalleeResolver`: every CALL of
+    *ast* is compared with the PROCEDURE DIVISION USING / ENTRY of the
+    program it reaches (a contained program, or a source file named after
+    the target in the resolver's callee directories) -- argument count,
+    passing mode, byte length, usage and RETURNING, the checks of
+    ``cobol-parser call-check``. Each finding sits at its CALL's line.
+
+    Run it BEFORE :func:`apply_source_map`: the line counts *ast*'s
+    (possibly copybook-expanded) text, like every analyzer finding. What
+    could not be checked -- a target with no source file, a callee that did
+    not parse, a dynamic CALL with unknown targets -- goes to ``caveats``.
+    Modified in place and returned.
+    """
+    checked = resolver.check_program(path, ast)
+    added = [
+        LintFinding(
+            rule=CALL_CHECK_RULE,
+            severity=finding.severity,
+            message=finding.message,
+            location=SourceLocation(line=finding.line, column=1),
+            symbol=finding.callee,
+            column_known=False,
+            kind=finding.kind.upper().replace("-", "_"),
+        )
+        for finding in checked.report.findings
+        if finding.line > 0
+    ]
+    if checked.not_found:
+        report.caveats.append(
+            "call-check: no source found under --callee-path for "
+            f"{', '.join(checked.not_found)}; those CALLs were not checked"
+        )
+    for note in checked.report.unchecked:
+        report.caveats.append(f"call-check: {note}")
+    if CALL_CHECK_RULE not in report.rules_run:
+        report.rules_run.append(CALL_CHECK_RULE)
+    if added:
+        report.findings = _deduplicate(sorted(report.findings + added, key=_sort_key))
+    return report
+
+
 #: The location-shaped keys :func:`stamp_report_origins` stamps, each with
 #: the sibling key its origin goes under. A ``"location"`` keeps the plain
 #: ``"origin"`` every consumer already reads; the rest name their own, since
@@ -1315,6 +1380,31 @@ class LintAnalyzer:
             "dclgen-check": lambda: self._dclgen_check(ast, report),
             "sql-cics-check": lambda: self._sql_cics(ast, report),
         }
+        bug_context: list[Any] = []
+
+        def bug_patterns(rule: str) -> list[LintFinding]:
+            # One shared context per unit: the seven bug-pattern rules reuse
+            # one data index, xref and CFG instead of building seven.
+            from .bug_patterns import _Context
+
+            if not bug_context:
+                bug_context.append(_Context(ast, self._flow(ast, flow_report)))
+            return [
+                LintFinding(
+                    rule=f.rule,
+                    severity=f.severity,
+                    message=f.message,
+                    location=f.location,
+                    symbol=f.symbol,
+                    kind=f.kind,
+                )
+                for f in bug_context[0].run(rule)
+            ]
+
+        from .bug_patterns import BUG_PATTERN_RULES
+
+        for bug_rule in BUG_PATTERN_RULES:
+            collectors[bug_rule] = functools.partial(bug_patterns, bug_rule)
 
         for rule in self._rules:
             try:

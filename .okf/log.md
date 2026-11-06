@@ -14,6 +14,16 @@ deliberate. Anything else appended to the bottom is a mistake: five
 entries, including both 2026-09-15 sections, were found there on
 2026-09-15 and moved back up.
 
+## 2026-11-06 -- lint batch 2: bug-pattern rules and call-check in lint
+
+- [analysis/lint.md](analysis/lint.md#bug-pattern-rules): seven bug-pattern
+  rules from `bug_patterns.py` join `RULES`; `call-check` is a
+  `PROGRAM_SET_RULES` id run by `add_call_check_findings` with a
+  `CalleeResolver` ([analysis.md](analysis.md) module map).
+- [cli.md](cli.md#lint): `lint --callee-path DIR`.
+- `IfStatement.ended_by_end_if` / `period_after_end_if` (not serialized),
+  set by `if_parser.py`, back the `next-sentence` rule.
+
 ## 2026-11-06 -- open gaps from the cobol-test run on PAYMAIN + PAYCALC
 
 - [analysis/flow.md](analysis/flow.md): a procedure only ever PERFORMed (as

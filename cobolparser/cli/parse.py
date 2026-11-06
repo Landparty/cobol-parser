@@ -3051,6 +3051,7 @@ def _build_lint_parser(subparsers: argparse._SubParsersAction) -> None:
             "  *> cobol-lint: disable-file=RULE         (the whole file)\n"
             "RULE is a rule id, rule/KIND, a comma-separated list, or left out\n"
             "for every rule. In fixed format the comment can be a '*' line.\n"
+            "  cobol-parser lint src/PAYMAIN.cbl --callee-path src/ --rule call-check\n"
             "\nMore than one file, --glob, --files-from or --changed-since lints\n"
             "every file in one run: text and github print each file's findings,\n"
             "json is {files, failures, summary}, sarif is one log. A file that\n"
@@ -3124,9 +3125,23 @@ def _build_lint_parser(subparsers: argparse._SubParsersAction) -> None:
         metavar="RULE",
         help=(
             "Run only this rule (repeatable). Rule ids are the analyzer "
-            "subcommand names plus line-length (fixed-format text past "
-            "column 72 or 80): " + ", ".join(ALL_RULES) + ". Default: all "
+            "subcommand names, the bug-pattern rules, line-length "
+            "(fixed-format text past column 72 or 80) and call-check (needs "
+            "--callee-path): " + ", ".join(ALL_RULES) + ". Default: all "
             "of them."
+        ),
+    )
+    p.add_argument(
+        "--callee-path",
+        action="append",
+        default=[],
+        metavar="DIR",
+        help=(
+            "Directory holding CALLed programs' source, found by program "
+            "name (NAME, NAME.cbl, NAME.cob; repeatable; cobol.yml "
+            "callee_path). Turns on the call-check rule: every CALL is "
+            "compared with the callee's PROCEDURE DIVISION USING (argument "
+            "count, passing mode, byte length, usage), as `call-check` does."
         ),
     )
     p.add_argument(
@@ -3446,8 +3461,10 @@ def _lint_one(args: argparse.Namespace) -> tuple[Any, Any, Any]:
     ``--min-severity`` and every finding placed on disk. Exits 1 through
     :func:`_fail` when the file cannot be read or parsed at all."""
     from ..analysis.lint import (
+        CALL_CHECK_RULE,
         LINE_LENGTH_RULE,
         LintAnalyzer,
+        add_call_check_findings,
         add_line_length_findings,
         add_parse_errors,
         apply_baseline,
@@ -3508,6 +3525,17 @@ def _lint_one(args: argparse.Namespace) -> tuple[Any, Any, Any]:
             for f in report.findings
             if f.location is not None
         }
+    callee_paths = list(getattr(args, "callee_path", None) or [])
+    if callee_paths and (selected is None or CALL_CHECK_RULE in selected):
+        # Before the map: call-check lines count this parse's text too.
+        add_call_check_findings(
+            report, args.file, ast, _lint_callee_resolver(args, callee_paths)
+        )
+        source_map = expansion_map or {
+            f.location.line: (args.file, f.location.line)
+            for f in report.findings
+            if f.location is not None
+        }
     # Analyzer columns count the normalized text, 7 short of the real column
     # on a fixed-format line; the offset turns them back into the column an
     # editor shows (#301).
@@ -3544,6 +3572,25 @@ def _lint_one(args: argparse.Namespace) -> tuple[Any, Any, Any]:
             file=sys.stderr,
         )
     return report, prof, ast
+
+
+#: One CalleeResolver per (callee dirs, copybook dirs) for the process, so a
+#: multi-file lint parses each CALLed program once, not once per caller.
+_LINT_CALLEE_RESOLVERS: dict[tuple[tuple[str, ...], tuple[str, ...]], Any] = {}
+
+
+def _lint_callee_resolver(args: argparse.Namespace, callee_paths: list[str]) -> Any:
+    from ..analysis.call_interface import CalleeResolver
+
+    copybooks = tuple(getattr(args, "copybook_path", None) or [])
+    key = (tuple(callee_paths), copybooks)
+    if key not in _LINT_CALLEE_RESOLVERS:
+        _LINT_CALLEE_RESOLVERS[key] = CalleeResolver(
+            callee_paths,
+            copybook_paths=list(copybooks),
+            debug_lines=bool(getattr(args, "debug_lines", False)),
+        )
+    return _LINT_CALLEE_RESOLVERS[key]
 
 
 def _lint_severity_overrides(args: argparse.Namespace) -> dict[str, str] | None:
