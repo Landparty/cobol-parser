@@ -14,6 +14,17 @@ deliberate. Anything else appended to the bottom is a mistake: five
 entries, including both 2026-09-15 sections, were found there on
 2026-09-15 and moved back up.
 
+## 2026-11-06 -- lint batch 3: compiler-check rules
+
+- [analysis/lint.md](analysis/lint.md#compiler-check-rules): ten rules from
+  `compiler_checks.py` (what IBM's compiler rejects or warns about) join
+  `RULES` after `obsolete-verb` ([analysis.md](analysis.md) module map).
+- [ast-models.md](ast-models.md): `CobolProgram.omitted_copy_lines` and
+  `ConditionNameItem.value_kinds` (neither serialized).
+- [parser/statements-control.md](parser/statements-control.md): `GO` joins
+  `STATEMENT_TOKEN_TYPES`, so PERFORM VARYING ... AFTER ... UNTIL stops at a
+  following `GO TO`.
+
 ## 2026-11-06 -- lint batch 2: bug-pattern rules and call-check in lint
 
 - [analysis/lint.md](analysis/lint.md#bug-pattern-rules): seven bug-pattern

@@ -80,6 +80,9 @@ def test_lint_rule_list_matches_the_analyzer():
         16: "sixteen",
         17: "seventeen",
         18: "eighteen",
+        26: "twenty-six",
+        27: "twenty-seven",
+        28: "twenty-eight",
     }
     assert f"`lint` runs {words[len(RULES)]} rules" in text
     for rule in RULES:

@@ -78,6 +78,17 @@ RULES: tuple[str, ...] = (
     "file-status",
     "uninitialized",
     "obsolete-verb",
+    # What IBM's compiler rejects or warns about (compiler_checks.py).
+    "undefined-name",
+    "value-clause",
+    "data-layout",
+    "comparison",
+    "search-table",
+    "divide-by-zero",
+    "subscript-usage",
+    "procedure-structure",
+    "corresponding",
+    "arithmetic-operand",
 )
 
 #: Rule id of the fixed-format layout check (:func:`add_line_length_findings`).
@@ -1405,6 +1416,40 @@ class LintAnalyzer:
 
         for bug_rule in BUG_PATTERN_RULES:
             collectors[bug_rule] = functools.partial(bug_patterns, bug_rule)
+
+        compiler: list[Any] = []
+
+        def compiler_checks(rule: str) -> list[LintFinding]:
+            # Shares the bug-pattern context (data index, xref, CFG).
+            from .bug_patterns import _Context
+            from .compiler_checks import CompilerChecks
+
+            if not bug_context:
+                bug_context.append(_Context(ast, self._flow(ast, flow_report)))
+            if not compiler:
+                compiler.append(CompilerChecks(bug_context[0]))
+            checks = compiler[0]
+            found = checks.run(rule)
+            report.caveats.extend(checks.caveats)
+            checks.caveats.clear()
+            return [
+                LintFinding(
+                    rule=f.rule,
+                    severity=f.severity,
+                    message=f.message,
+                    location=f.location,
+                    symbol=f.symbol,
+                    kind=f.kind,
+                )
+                for f in found
+            ]
+
+        from .compiler_checks import COMPILER_RULES
+
+        for compiler_rule in COMPILER_RULES:
+            collectors[compiler_rule] = functools.partial(
+                compiler_checks, compiler_rule
+            )
 
         for rule in self._rules:
             try:

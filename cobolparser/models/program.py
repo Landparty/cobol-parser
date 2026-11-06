@@ -306,6 +306,11 @@ class CobolProgram(ASTNode):
         # — ~7 traversals per program. Memoizing converts that into one
         # traversal + 6 O(1) returns. Invalidated by add_division().
         self._cached_all_statements: list[CobolStatement] | None = None
+        #: ``(first, last)`` source lines of COPY statements the parser
+        #: could not expand and left out. Not serialized; a rule that would
+        #: read a missing declaration as an error (lint's ``undefined-name``)
+        #: stays quiet when it is non-empty.
+        self.omitted_copy_lines: tuple[tuple[int, int], ...] = ()
 
     @property
     def divisions(self) -> list[CobolDivision]:

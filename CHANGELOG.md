@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+* **Lint reports what IBM's compiler would.** Ten new rules, on by default,
+  for the mistakes Enterprise COBOL rejects or warns about, so they show up
+  in the editor and the CI gate instead of the compile listing:
+  `undefined-name`, `value-clause` (a VALUE that does not fit its PICTURE, a
+  level-88 value that can never be true), `data-layout` (REDEFINES larger
+  than its target, RECORD CONTAINS against the record), `comparison` (a
+  comparison that is always false), `search-table`, `divide-by-zero`,
+  `subscript-usage` (subscript count, missing subscript, reference
+  modification out of range), `procedure-structure` (duplicate and empty
+  paragraphs), `corresponding` and `arithmetic-operand`.
 * **Lint finds the classic bugs it used to miss.** Seven new rules, on by
   default: `truncation` (a MOVE, ADD, SUBTRACT or COMPUTE that cuts digits
   or characters), `subscript-range` (a literal subscript past its OCCURS),
@@ -216,6 +226,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+* **PERFORM VARYING ... AFTER ... UNTIL no longer swallows a following GO
+  TO.** The last AFTER condition read `GO TO X` as part of itself, so the GO
+  TO was missing from the AST and the flow graph.
 * **`program-flow` no longer falls through out of a PERFORM-only
   paragraph.** A paragraph control only reaches by PERFORM returns to its
   performer when it ends, so the priming-read pattern (`PERFORM 1000-READ`,

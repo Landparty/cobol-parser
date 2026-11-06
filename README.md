@@ -205,6 +205,22 @@ cleanly:
 | `uninitialized` | A numeric item read but never set, with no VALUE |
 | `obsolete-verb` | ALTER |
 
+Ten more catch what IBM's compiler would reject or warn about, before the
+mainframe compile does (an `error` is what the compiler rejects):
+
+| Rule | Finds |
+|---|---|
+| `undefined-name` | A data name, paragraph or file nothing declares (quiet, with a caveat, when a COPY member could not be expanded) |
+| `value-clause` | A VALUE that does not fit its PICTURE (`PIC X(3) VALUE 'ABCDE'`, `PIC 9(3) VALUE 12345`, `PIC 9 VALUE SPACES`), a level-88 value its item can never hold, a VALUE in the LINKAGE or FILE SECTION |
+| `data-layout` | A REDEFINES larger than the item it redefines, a `RECORD CONTAINS` that disagrees with the record |
+| `comparison` | A comparison that can never be true: `PIC 9(3)` against 5000, an unsigned item `< 0`, `PIC X(3) = 'ABCDE'` |
+| `search-table` | SEARCH on a table without INDEXED BY, SEARCH ALL without a KEY |
+| `divide-by-zero` | DIVIDE by the literal zero |
+| `subscript-usage` | A wrong number of subscripts, a table element with none, a subscript on a non-table, `(start:length)` outside the item |
+| `procedure-structure` | A duplicated paragraph name; an empty paragraph (info) |
+| `corresponding` | MOVE CORRESPONDING between groups with no names in common |
+| `arithmetic-operand` | ADD, COMPUTE ... on a PIC X or group item |
+
 With `--callee-path DIR` (or `callee_path` in `cobol.yml`), the `call-check`
 rule also compares every CALL with the program it calls (argument count,
 passing mode, byte length, usage), so a caller passing 8 bytes to a 10-byte

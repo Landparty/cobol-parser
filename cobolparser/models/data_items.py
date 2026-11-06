@@ -1166,10 +1166,18 @@ class ConditionNameItem(ASTNode):
         #: ``SET condition-name TO FALSE`` moves into the conditional
         #: variable; ``None`` when the entry has no such phrase.
         self.false_value: str | None = None
+        #: The kind of literal each entry of ``values`` was written as --
+        #: ``"string"``, ``"numeric"``, ``"figurative"`` or ``"all"`` -- in
+        #: the same order (``values`` keeps a quoted literal's content only,
+        #: so ``'7'`` and ``7`` both read ``7``). ``None`` where the parser
+        #: did not record it. Not serialized; lint's ``value-clause`` rule
+        #: reads it.
+        self.value_kinds: list[str | None] = []
 
-    def add_value(self, value: str) -> None:
+    def add_value(self, value: str, kind: str | None = None) -> None:
         """Add a VALUE entry for this condition name."""
         self.values.append(value)
+        self.value_kinds.append(kind)
 
     def to_dict(self) -> dict[str, Any]:
         return {

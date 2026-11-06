@@ -1,7 +1,7 @@
 ---
 type: Module
 title: Lint Analyzer
-description: LintAnalyzer (analysis/lint.py) -- runs nine analyzers and seven bug-pattern rules (bug_patterns.py) over one parse plus the line-length source rule and the call-check cross-program rule and flattens them into one severity-graded LintFinding stream; per-unit linting, caveats and failed rules, and the source-map origin stamping (apply_source_map, stamp_report_origins, fixed_format_column_offset) shared by every analyzer CLI.
+description: LintAnalyzer (analysis/lint.py) -- runs nine analyzers, seven bug-pattern rules (bug_patterns.py) and ten compiler-check rules (compiler_checks.py) over one parse plus the line-length source rule and the call-check cross-program rule and flattens them into one severity-graded LintFinding stream; per-unit linting, caveats and failed rules, and the source-map origin stamping (apply_source_map, stamp_report_origins, fixed_format_column_offset) shared by every analyzer CLI.
 tags: [analysis, lint, findings, severity, source-map, origin]
 timestamp: 2026-10-15T00:00:00Z
 ---
@@ -40,7 +40,8 @@ lint output with no change here.
 `unused-variables`, `move-type-check`, `io-sequence`, `linkage-check`,
 `recursion-check`, `complexity`, `dclgen-check`, `sql-cics-check`; the `RULES`
 tuple, in that order, followed by the seven bug-pattern rules of
-[Bug-pattern rules](#bug-pattern-rules), which have no subcommand) rather
+[Bug-pattern rules](#bug-pattern-rules) and the ten of
+[Compiler-check rules](#compiler-check-rules), which have no subcommand) rather
 than a second private
 vocabulary, so
 `lint --rule dead-code` and `cobol-parser dead-code` are visibly the same
@@ -143,6 +144,55 @@ shape in `COCRDUPC`, `CBTRN03C`'s NEXT SENTENCE leaves its inline PERFORM
 UNTIL, and 11 balance fields `S9(10)V99` moved into `S9(9)V99` screen
 fields; NIST + shamrice (486 files) 786 [169], dominated by the suite's
 deliberate truncation and ALTER tests.
+
+## Compiler-check rules
+
+`compiler_checks.py` (`CompilerCheckAnalyzer(rules=None).analyze(ast,
+flow_report=None)` -> `CompilerCheckReport` with `findings: list[BugFinding]`
+and `caveats`) holds ten rules for what IBM Enterprise COBOL's compiler rejects
+or warns about, so the problem shows up in the editor or CI gate before a
+mainframe compile. Severity follows the compiler: rejected (S/E) = error,
+accepted with a warning = warning, informational = info. Messages name the
+problem, not an `IGY` number (numbers vary by release). In `RULES` after
+`obsolete-verb`, run by default. Lint's `_analyze_unit` reuses the
+bug-pattern `_Context` (one data index, xref and CFG) through
+`CompilerChecks(context)`; its `caveats` go to `LintReport.caveats`.
+`value-clause` and `data-layout` also run on a unit with no PROCEDURE
+DIVISION.
+
+| Rule | `kind` | Severity | What and what not |
+|---|---|---|---|
+| `undefined-name` | `DATA_NAME_UNDEFINED` / `PROCEDURE_NAME_UNDEFINED` / `FILE_NAME_UNDEFINED` | error | xref `undefined` entries with a reference at or after the PROCEDURE DIVISION line. Skipped (caveat) when `CobolProgram.omitted_copy_lines` is non-empty, an `EXEC SQL INCLUDE` other than SQLCA/SQLDA was left unexpanded, or there is a SCREEN / REPORT / COMMUNICATION SECTION. Not for DEBUG-ITEM subfields, `PERFORM FOREVER`, a file name used as a qualifier, or a name declared in an enclosing program |
+| `value-clause` | `VALUE_WRONG_CATEGORY` | error | quoted non-number, SPACES, QUOTES, HIGH-/LOW-VALUES on a numeric item |
+| | `VALUE_QUOTED_NUMBER`, `VALUE_NUMERIC_FOR_ALPHANUMERIC`, `VALUE_TOO_LONG`, `VALUE_TOO_MANY_DIGITS`, `VALUE_DECIMALS_LOST`, `VALUE_SIGN_LOST` | warning | the literal against the PICTURE (`ALL` literals, edited, national, P-scaled and COMP-5 digit counts skipped) |
+| | `VALUE_IGNORED` | warning | a non-88 VALUE in the FILE or LINKAGE SECTION |
+| | `CONDITION_NEVER_TRUE` / `CONDITION_VALUE_WRONG_CATEGORY` | warning / error | level-88 values, using `ConditionNameItem.value_kinds` (set by `data_special_entries.py`, not serialized) |
+| `data-layout` | `REDEFINES_LARGER` | warning | below level 01, both lengths known (`compute_record_layout`; not with OCCURS, ODO or national) |
+| | `RECORD_CONTAINS_MISMATCH` | warning | fixed `RECORD CONTAINS n` (no TO, not VARYING) against the longest 01 of the FD |
+| `comparison` | `COMPARISON_ALWAYS_FALSE` / `_TRUE` | warning | relational `ConditionalExpression`s anywhere in a statement: numeric item vs a literal with more integer digits, unsigned item vs a negative literal or `< 0`, alphanumeric `=` / `NOT =` a longer literal whose extra part is not spaces. Binary (COMP/COMP-4/COMP-5) items are skipped (TRUNC(BIN)) |
+| | `COMPARISON_NONNUMERIC_LITERAL` | warning | numeric item `=` / `NOT =` a quoted literal that is not a number |
+| `search-table` | `SEARCH_NOT_A_TABLE`, `SEARCH_NO_INDEX`, `SEARCH_ALL_NO_KEY` | error | the SEARCH table item's OCCURS clause |
+| `divide-by-zero` | `DIVIDE_BY_ZERO` | error | DIVIDE BY / INTO a literal zero, `/ 0` in a COMPUTE |
+| `subscript-usage` | `SUBSCRIPT_COUNT`, `SUBSCRIPT_MISSING`, `SUBSCRIPT_NOT_A_TABLE`, `REFMOD_OUT_OF_RANGE` | error | word-by-word over `_statement_strings`; a count with `+`/`-` in it is not judged (the parser's text loses the spacing that tells `(I +1)` from `(I + 1)`); qualifiers, `LENGTH OF`, SEARCH / SET / SORT / MERGE / USE / EXEC skipped; a name subscripted elsewhere in the same statement is not "missing" |
+| `procedure-structure` | `EMPTY_PARAGRAPH` | info | a paragraph with no statements, except the last one |
+| | `DUPLICATE_PARAGRAPH` | error if PERFORMed / GO TO'd, else warning | same name twice in one section (or outside sections) |
+| `corresponding` | `NO_CORRESPONDING_ITEMS` | warning | MOVE / ADD / SUBTRACT CORRESPONDING groups with no common subordinate names (FILLER, REDEFINES, OCCURS, 66/88 excluded) |
+| `arithmetic-operand` | `NONNUMERIC_ARITHMETIC_OPERAND` / `_RECEIVER` | error | an alphanumeric or group operand; an alphanumeric receiver, or a numeric-edited one that is not a GIVING / COMPUTE target. `01 X CONSTANT AS n` is not a group |
+
+Two parser fixes came with these rules: `CobolProgram.omitted_copy_lines`
+(set on every unit by `parser.py`) and `TokenType.GO` in
+`STATEMENT_TOKEN_TYPES`, so the last `AFTER ... UNTIL` of a PERFORM VARYING
+no longer swallows a following `GO TO` (NIST NC231A lost its GO TO
+CHECK-ENTRIES).
+
+Measured 2026-11-06 (warnings and errors; info in brackets): CardDemo 8
+[0] -- a duplicate `0000-MAIN-EXIT` paragraph in `COACTVWC`, three REDEFINES
+larger than their target in `COADM01C` / `COMEN01C` / `CORPT00C` (there
+`JOB-LINES OCCURS 1000` redefines 1,360 bytes), three VALUEs in `COBTUPDT`'s
+FILE SECTION, a numeric map field compared with `'*'`; NIST + shamrice (486
+files) 20 [307 empty paragraphs], among them the NIST templates' unreplaced
+`XXXXX` names and IX tests whose `RECORD CONTAINS 240` no longer matches the
+record.
 
 ## Cross-program rule (`call-check`)
 

@@ -84,12 +84,16 @@ program-scoped: `--program NAME` picks one (default: the outermost).
 | What does this JCL run, on what data? | `jcl JOB.jcl --bindings` |
 | What does `CALL "CEEDAYS"` need? | `le-info CEEDAYS` |
 
-`lint` runs sixteen rules over **one** parse — prefer it to running `dead-code`,
+`lint` runs twenty-six rules over **one** parse — prefer it to running `dead-code`,
 `unused-variables`, `move-type-check`, `io-sequence`, `linkage-check`,
 `recursion-check`, `complexity`, `dclgen-check` and `sql-cics-check`
 separately. Its seven bug-pattern rules have no subcommand of their own:
 `truncation`, `subscript-range`, `next-sentence`, `perform-range`,
-`file-status`, `uninitialized` and `obsolete-verb`. `lint --callee-path DIR`
+`file-status`, `uninitialized` and `obsolete-verb`; nor do its ten checks for
+what IBM's compiler rejects or warns about: `undefined-name`, `value-clause`,
+`data-layout`, `comparison`, `search-table`, `divide-by-zero`,
+`subscript-usage`, `procedure-structure`, `corresponding` and
+`arithmetic-operand`. `lint --callee-path DIR`
 adds `call-check` (each CALL against the callee's USING). `scan` runs
 analyzers over many files **in one process**, with per-file fault isolation —
 prefer it to looping the CLI over a directory. It takes file paths, a

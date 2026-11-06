@@ -36,6 +36,15 @@ def _condition_literal(token: Any) -> str:
     return str(token.value)
 
 
+def _literal_kind(token: Any) -> str:
+    """``ConditionNameItem.value_kinds`` entry for a VALUE operand token."""
+    if token.type == TokenType.STRING_LITERAL:
+        return "string"
+    if token.type == TokenType.FIGURATIVE_CONSTANT:
+        return "figurative"
+    return "numeric"
+
+
 def _skip_newlines(token_stream: ITokenStream) -> None:
     """Consume any NEWLINE tokens at the current position."""
     while not token_stream.is_empty():
@@ -161,12 +170,13 @@ class SpecialEntryParser:
                 operand = token_stream.peek()
                 if operand is not None and operand.type == TokenType.STRING_LITERAL:
                     item.add_value(
-                        "ALL "
+                        kind="all",
+                        value="ALL "
                         + (
                             operand.raw_value
                             if operand.raw_value
                             else quote_literal(operand.value)
-                        )
+                        ),
                     )
                     token_stream.consume()
                 elif (
@@ -174,7 +184,7 @@ class SpecialEntryParser:
                     and operand.type == TokenType.FIGURATIVE_CONSTANT
                     and operand.value.upper() != "ALL"
                 ):
-                    item.add_value(f"ALL {operand.value}")
+                    item.add_value(f"ALL {operand.value}", "all")
                     token_stream.consume()
                 else:
                     item.add_value(t.value)
@@ -184,7 +194,7 @@ class SpecialEntryParser:
                 TokenType.FIGURATIVE_CONSTANT,
                 TokenType.LEVEL_NUMBER,
             ):
-                item.add_value(_condition_literal(t))
+                item.add_value(_condition_literal(t), _literal_kind(t))
                 token_stream.consume()
             elif t.type in (TokenType.MINUS, TokenType.PLUS):
                 sign_value = t.value
@@ -193,7 +203,7 @@ class SpecialEntryParser:
                     TokenType.NUMERIC_LITERAL,
                     TokenType.LEVEL_NUMBER,
                 ):
-                    item.add_value(f"{sign_value}{next_token.value}")
+                    item.add_value(f"{sign_value}{next_token.value}", "numeric")
                     token_stream.consume()
                     token_stream.consume()
                 else:
@@ -227,7 +237,10 @@ class SpecialEntryParser:
                         and (end_token.value or "").upper() != "ALL"
                     )
                 ):
-                    item.add_value(f"THROUGH:{_condition_literal(end_token)}")
+                    item.add_value(
+                        f"THROUGH:{_condition_literal(end_token)}",
+                        _literal_kind(end_token),
+                    )
                     token_stream.consume()
                 elif end_token and end_token.type in (TokenType.MINUS, TokenType.PLUS):
                     # A signed range end (``VALUE -9 THRU -1``): the sign is
@@ -239,7 +252,9 @@ class SpecialEntryParser:
                         TokenType.NUMERIC_LITERAL,
                         TokenType.LEVEL_NUMBER,
                     ):
-                        item.add_value(f"THROUGH:{end_token.value}{after_sign.value}")
+                        item.add_value(
+                            f"THROUGH:{end_token.value}{after_sign.value}", "numeric"
+                        )
                         token_stream.consume()
                         token_stream.consume()
             else:

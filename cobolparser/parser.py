@@ -366,6 +366,7 @@ class CobolParser:
             if program is not None:
                 for unit in program.program_units():
                     unit.serialization_config = self.serialization_config
+                    unit.omitted_copy_lines = tuple(self._omitted_copy_lines)
                 self._warn_dropped_debug_lines(program)
 
             logger.info(

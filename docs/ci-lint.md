@@ -119,6 +119,13 @@ Seven rules look for common coding bugs: `truncation`, `subscript-range`,
 `next-sentence`, `perform-range`, `file-status`, `uninitialized` and
 `obsolete-verb`. They run by default; select one with `--rule truncation`.
 
+Ten more report what IBM's compiler would reject (`error`) or warn about
+(`warning`), so a CI gate catches it before the mainframe compile:
+`undefined-name`, `value-clause`, `data-layout`, `comparison`, `search-table`,
+`divide-by-zero`, `subscript-usage`, `procedure-structure`, `corresponding`
+and `arithmetic-operand`. `undefined-name` stays quiet, with a caveat, for a
+program whose COPY members were not all found.
+
 `call-check` compares each static CALL with the program it calls (argument
 count and byte lengths). It runs only when lint can find the callees: pass
 `--callee-path DIR` (repeatable) or set `project.callee_path` in `cobol.yml`.
