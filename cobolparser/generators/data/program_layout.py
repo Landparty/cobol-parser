@@ -197,6 +197,9 @@ class ProgramLayoutIndex:
         #: CALL line -> the RETURN-CODE field a branch after it tests
         #: (:meth:`call_return_code`).
         self._call_return_codes: dict[int, ResolvedField] = {}
+        #: EXEC SQL line -> the SQLCODE field a branch after it tests
+        #: (:meth:`sql_code`).
+        self._sql_codes: dict[int, ResolvedField] = {}
 
     def call_return_code(self, line: int) -> ResolvedField:
         """The RETURN-CODE the CALL on *line* leaves, as a field (#831).
@@ -231,6 +234,43 @@ class ProgramLayoutIndex:
     def call_return_code_at(self, line: int | None) -> ResolvedField | None:
         """The RETURN-CODE field of the CALL on *line*, if a branch tests it."""
         return self._call_return_codes.get(line) if line is not None else None
+
+    def sql_code(self, line: int, *, fetch: bool = False) -> ResolvedField:
+        """The SQLCODE the EXEC SQL on *line* leaves, as a field (#840).
+
+        SQLCODE belongs to the SQLCA the precompiler includes; after an SQL
+        statement it holds that statement's outcome, which its mock reports
+        (the SQL fixture's ``status``). Each statement gets its own field
+        (qualified name ``SQL@<line>.SQLCODE``, ``FETCH@<line>.SQLCODE`` for
+        a FETCH) so a scenario's witness, a negative SQLCODE for ``IF
+        SQLCODE < 0``, fails only the statement whose result the program
+        tests. The solver prefers real SQLCODEs for it
+        (:data:`~cobolparser.analysis.domains.SQLCODE_PREFERENCES`).
+        """
+        found = self._sql_codes.get(line)
+        if found is None:
+            spec = FieldSpec(
+                name="SQLCODE",
+                path=(f"{'FETCH' if fetch else 'SQL'}@{line}", "SQLCODE"),
+                column="SQLCODE",
+                level=1,
+                picture="S9(9)",
+                usage="BINARY",
+                category=FieldCategory.NUMERIC,
+                size=4,
+                integer_digits=9,
+                decimal_digits=0,
+                is_signed=True,
+                total_digits=9,
+            )
+            record = CobolDataItem("SQLCODE", 1, SourceLocation(line, 1))
+            found = ResolvedField(spec=spec, section="special", record=record)
+            self._sql_codes[line] = found
+        return found
+
+    def sql_code_at(self, line: int | None) -> ResolvedField | None:
+        """The SQLCODE field of the EXEC SQL on *line*, if a branch tests it."""
+        return self._sql_codes.get(line) if line is not None else None
 
     # -- construction ------------------------------------------------------
 

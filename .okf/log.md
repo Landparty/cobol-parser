@@ -25,6 +25,16 @@ entries, including both 2026-09-15 sections, were found there on
   `STATEMENT_TOKEN_TYPES`, so PERFORM VARYING ... AFTER ... UNTIL stops at a
   following `GO TO`.
 
+## 2026-11-06 -- hunt fixes #839, #840, #842
+
+- [analysis/flow.md](analysis/flow.md): entering a section through one of
+  its paragraphs no longer frees every later member to fall through (#842).
+- [analysis/fixtures-support.md](analysis/fixtures-support.md): EVALUATE on
+  a CALL's RETURN-CODE (#839); branches on SQLCODE drive the EXEC SQL
+  fixture's status with realistic codes and verify from it (#840).
+- [generators/fixtures.md](generators/fixtures.md): an SQL fixture's
+  `status["SQLCODE"]` carries the scenario's SQLCODE witness.
+
 ## 2026-11-06 -- lint batch 2: bug-pattern rules and call-check in lint
 
 - [analysis/lint.md](analysis/lint.md#bug-pattern-rules): seven bug-pattern

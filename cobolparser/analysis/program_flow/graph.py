@@ -177,17 +177,31 @@ def _sequential_procedures(
         in_range.update(ordered_procedures[start:last])
         covered.update(ordered_procedures[start : last + 1])
 
+    def reached_otherwise(name: str) -> bool:
+        kinds = incoming.get(name) or set()
+        return any(kind not in PERFORM_EDGE_TYPES for kind in kinds)
+
+    def unreached(name: str) -> bool:
+        return not incoming.get(name) and name not in covered
+
     free: set[str] = set(entry_points)
     for name in ordered_procedures:
         node = nodes.get(name)
-        kinds = incoming.get(name)
-        if kinds and any(kind not in PERFORM_EDGE_TYPES for kind in kinds):
+        first = _first_member(name, position, section_ends, ordered_procedures)
+        if reached_otherwise(name):
             free.add(name)
-        elif not kinds and name not in covered:
-            free.add(name)
+        elif unreached(name):
+            # A section header is only the start of its first paragraph: an
+            # unreferenced one is "reached" as that paragraph is (#842).
+            if first is None or unreached(first) or reached_otherwise(first):
+                free.add(name)
         elif node is not None and node.is_declarative:
             free.add(name)
-    for section in sections_entered | declarative_sections:
+    # A DECLARATIVES section runs from the runtime: all of it is free. An
+    # entered section (the entry point's, a GO TO's) is free only from where
+    # control enters it -- the entry point or the GO TO target, already free
+    # above -- chained below through members that do not stop (#842).
+    for section in declarative_sections:
         first_at = position.get(section)
         last_at = position.get(section_ends.get(section, section))
         if first_at is not None and last_at is not None:
@@ -199,6 +213,23 @@ def _sequential_procedures(
             falls_on.add(name)
             free.add(ordered_procedures[index + 1])
     return falls_on
+
+
+def _first_member(
+    name: str,
+    position: dict[str, int],
+    section_ends: dict[str, str],
+    ordered_procedures: list[str],
+) -> str | None:
+    """The first paragraph of section *name*, or None when *name* is not a
+    section or has no paragraph."""
+    last = section_ends.get(name)
+    if last is None or last == name:
+        return None
+    at = position[name] + 1
+    if at >= len(ordered_procedures) or position.get(last, -1) < at:
+        return None
+    return ordered_procedures[at]
 
 
 def compute_convergence_nodes(

@@ -89,6 +89,15 @@ RULES: tuple[str, ...] = (
     "procedure-structure",
     "corresponding",
     "arithmetic-operand",
+    # Checks found in other COBOL linters (code_patterns.py).
+    "constant-condition",
+    "duplicate-branch",
+    "self-assignment",
+    "stop-run-in-subprogram",
+    "string-pointer",
+    "loop-variable",
+    "evaluate-other",
+    "nesting-depth",
 )
 
 #: Rule id of the fixed-format layout check (:func:`add_line_length_findings`).
@@ -259,6 +268,10 @@ class LintReport:
     # report is quieter than the program, not wade through what was hidden.
     suppressed: int = 0
     baselined: int = 0
+    # Findings a ``new`` scope dropped because they are not on the lines the
+    # change added or edited (``lint --new-code-since``). ``None`` when no
+    # new-code period was given, so the summary says nothing about it.
+    outside_new_code: int | None = None
 
     @property
     def error_count(self) -> int:
@@ -290,20 +303,23 @@ class LintReport:
         return worst
 
     def to_dict(self) -> dict[str, Any]:
+        summary: dict[str, Any] = {
+            "total": len(self.findings),
+            "error": self.error_count,
+            "warning": self.warning_count,
+            "info": self.info_count,
+            "by_rule": self.counts_by_rule(),
+            "suppressed": self.suppressed,
+            "baselined": self.baselined,
+        }
+        if self.outside_new_code is not None:
+            summary["outside_new_code"] = self.outside_new_code
         return {
             "findings": [f.to_dict() for f in self.findings],
             "rules_run": list(self.rules_run),
             "failed_rules": list(self.failed_rules),
             "caveats": list(self.caveats),
-            "summary": {
-                "total": len(self.findings),
-                "error": self.error_count,
-                "warning": self.warning_count,
-                "info": self.info_count,
-                "by_rule": self.counts_by_rule(),
-                "suppressed": self.suppressed,
-                "baselined": self.baselined,
-            },
+            "summary": summary,
         }
 
 
@@ -1394,12 +1410,16 @@ class LintAnalyzer:
         bug_context: list[Any] = []
 
         def bug_patterns(rule: str) -> list[LintFinding]:
-            # One shared context per unit: the seven bug-pattern rules reuse
-            # one data index, xref and CFG instead of building seven.
+            # One shared context per unit: the bug- and code-pattern rules reuse
+            # one data index, xref and CFG instead of building one each.
             from .bug_patterns import _Context
 
             if not bug_context:
                 bug_context.append(_Context(ast, self._flow(ast, flow_report)))
+            if rule in CODE_PATTERN_RULES:
+                found = run_code_pattern(bug_context[0], rule)
+            else:
+                found = bug_context[0].run(rule)
             return [
                 LintFinding(
                     rule=f.rule,
@@ -1409,12 +1429,13 @@ class LintAnalyzer:
                     symbol=f.symbol,
                     kind=f.kind,
                 )
-                for f in bug_context[0].run(rule)
+                for f in found
             ]
 
         from .bug_patterns import BUG_PATTERN_RULES
+        from .code_patterns import CODE_PATTERN_RULES, run_code_pattern
 
-        for bug_rule in BUG_PATTERN_RULES:
+        for bug_rule in BUG_PATTERN_RULES + CODE_PATTERN_RULES:
             collectors[bug_rule] = functools.partial(bug_patterns, bug_rule)
 
         compiler: list[Any] = []

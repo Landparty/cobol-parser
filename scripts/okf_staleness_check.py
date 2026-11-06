@@ -217,6 +217,7 @@ OKF_MAP = [
     ("cobolparser/analysis/lint.py", [".okf/analysis/lint.md"]),
     ("cobolparser/analysis/bug_patterns.py", [".okf/analysis/lint.md"]),
     ("cobolparser/analysis/compiler_checks.py", [".okf/analysis/lint.md"]),
+    ("cobolparser/analysis/code_patterns.py", [".okf/analysis/lint.md"]),
     ("cobolparser/analysis/sarif.py", [".okf/analysis/lint.md"]),
     ("cobolparser/analysis/field_lineage.py", [".okf/analysis/lineage.md"]),
     ("cobolparser/analysis/field_widening.py", [".okf/analysis/lineage.md"]),

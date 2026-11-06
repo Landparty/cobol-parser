@@ -87,6 +87,7 @@ _BINDINGS: dict[str, Callable[[ProjectConfig], Any]] = {
     "severity_overrides": lambda c: dict(c.lint.severity) or None,
     "exclude": lambda c: list(c.lint.exclude) or None,
     "baseline": lambda c: c.lint.baseline,
+    "scopes": lambda c: list(c.lint.scope) or None,
 }
 
 

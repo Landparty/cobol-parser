@@ -84,6 +84,7 @@ def test_lint_rule_list_matches_the_analyzer():
         27: "twenty-seven",
         28: "twenty-eight",
     }
-    assert f"`lint` runs {words[len(RULES)]} rules" in text
+    # Any other count is written in digits.
+    assert f"`lint` runs {words.get(len(RULES), str(len(RULES)))} rules" in text
     for rule in RULES:
         assert f"`{rule}`" in text

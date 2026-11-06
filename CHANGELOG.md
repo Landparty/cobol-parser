@@ -19,6 +19,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `subscript-usage` (subscript count, missing subscript, reference
   modification out of range), `procedure-structure` (duplicate and empty
   paragraphs), `corresponding` and `arithmetic-operand`.
+
+* **Eight lint rules from other COBOL linters.** After a survey of
+  SonarQube's COBOL rules, IBM Developer for z/OS code review and open-source
+  COBOL linters (ideas only, no code): `constant-condition` (`IF A = A`,
+  `A = 'X' AND A = 'Y'`), `duplicate-branch` (a WHEN or ELSE IF that repeats
+  an earlier test and never runs), `self-assignment` (`MOVE X TO X`),
+  `stop-run-in-subprogram`, `string-pointer` (a STRING/UNSTRING pointer set
+  to 0, or too small for its field), `loop-variable` (a PERFORM VARYING body
+  that changes its control variable), and at info `evaluate-other` and
+  `nesting-depth`. In CardDemo's VSAM/MQ extension they find
+  `MOVE WS-CICS-RESP2-CD TO WS-CICS-RESP2-CD` where the edited `-D` field
+  was meant; the base CardDemo programs get no false warning.
+
+* **A GitHub Action, and a new-code gate like Sonar's.** This repository is
+  now a composite action (`uses: landparty/cobol-parser@<tag>`): pick the
+  rules, and judge each one on new code only or on the whole codebase. It
+  annotates the pull request, writes a job summary listing every finding,
+  and can write SARIF. Underneath, `lint --new-code-since REF` keeps only
+  the findings on lines added or edited since REF's merge base,
+  `--scope [RULE=]new|all` (and `lint.scope` in `cobol.yml`) sets which
+  rules that applies to, and `--summary-file FILE` appends a Markdown
+  summary. See `docs/github-action.md`.
 * **Lint finds the classic bugs it used to miss.** Seven new rules, on by
   default: `truncation` (a MOVE, ADD, SUBTRACT or COMPUTE that cuts digits
   or characters), `subscript-range` (a literal subscript past its OCCURS),
@@ -229,6 +251,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 * **PERFORM VARYING ... AFTER ... UNTIL no longer swallows a following GO
   TO.** The last AFTER condition read `GO TO X` as part of itself, so the GO
   TO was missing from the AST and the flow graph.
+
+* **`gen-fixtures` drives branches on SQLCODE.** `IF SQLCODE < 0`,
+  `EVALUATE WS-RC` after `MOVE SQLCODE TO WS-RC`, and the like now constrain
+  the EXEC SQL statement before them: each scenario's SQL fixture status
+  carries a realistic code (100, -911, -805, ...) and the scenario verifies
+  (#840). An `EVALUATE` on a CALL's RETURN-CODE is driven the way an `IF`
+  already was (#839).
+* **`program-flow`: a section entered by PERFORM of one paragraph no longer
+  falls through its other paragraphs.** `PERFORM 1000-READ` in `IO-SEC`
+  left every later paragraph of `IO-SEC` reachable; now only the performed
+  range runs on (#842).
 * **`program-flow` no longer falls through out of a PERFORM-only
   paragraph.** A paragraph control only reaches by PERFORM returns to its
   performer when it ends, so the priming-read pattern (`PERFORM 1000-READ`,
@@ -455,6 +488,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `docs/project-config.md` names every subcommand each key fills (the `lint:`
   section's `min_severity` and `fail_on` also reach `call-check` and
   `widen-check`). A tracked 1.4 MB `coverage.json` is removed and ignored.
+
+## [3.5.0](https://github.com/Landparty/cobol-parser/compare/v3.4.0...v3.5.0) (2026-11-06)
+
+
+### Features
+
+* **lint:** bug-pattern rules and call-check via --callee-path ([8357934](https://github.com/Landparty/cobol-parser/commit/83579342445cf884daeec6f5891d3260bcce37fd))
+* **lint:** bug-pattern rules and call-check via --callee-path ([fde0b8b](https://github.com/Landparty/cobol-parser/commit/fde0b8bbf87d9547b41023c2bfa5739453e5ccfc))
+* **lint:** suppression, baseline, per-rule config, less noise, parallel runs ([c899637](https://github.com/Landparty/cobol-parser/commit/c89963739525ba8ceecbce757ec02bd86dfec7f1))
+* **lint:** suppression, baseline, per-rule config, less noise, parallel runs ([24be453](https://github.com/Landparty/cobol-parser/commit/24be453b5967ac42e3e335de8e8b5a23ba3eedb8))
+
+
+### Bug Fixes
+
+* drive SQLCODE and EVALUATE RETURN-CODE branches; section entry frees no fall-through ([263b10f](https://github.com/Landparty/cobol-parser/commit/263b10f669d2dcca07ebca7fafb9e3ad3ec271b1))
+* drive SQLCODE and EVALUATE RETURN-CODE branches; section entry frees no fall-through ([77abea2](https://github.com/Landparty/cobol-parser/commit/77abea2bbbaffe8768201c789a6a72ef59002f23)), closes [#839](https://github.com/Landparty/cobol-parser/issues/839) [#840](https://github.com/Landparty/cobol-parser/issues/840) [#842](https://github.com/Landparty/cobol-parser/issues/842)
 
 ## [3.4.0](https://github.com/Landparty/cobol-parser/compare/v3.3.2...v3.4.0) (2026-11-06)
 

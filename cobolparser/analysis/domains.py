@@ -194,6 +194,28 @@ class EnumDomain:
 Domain = NumericDomain | TextDomain | EnumDomain
 
 
+#: The SQLCODEs tried first, in order, for the synthetic SQLCODE an EXEC SQL
+#: leaves (``SQL@<line>.SQLCODE``, #840), so a witness reads like a real
+#: outcome -- 0, 100 not found, -911 deadlock -- instead of an interval
+#: midpoint. A FETCH's tries 100 before 0: a success witness on a looped
+#: FETCH would not end the loop that reads it, and its rows already stand
+#: for success.
+SQLCODE_PREFERENCES = {
+    "SQL": ("0", "100", "-911", "-805", "-803", "-811", "-904", "-180"),
+    "FETCH": ("100", "-911", "-904", "-180", "0"),
+}
+
+
+def _preferred_values(spec: FieldSpec) -> tuple[str, ...]:
+    """Values to try before the picture domain's own pick (#840)."""
+    if spec.name != "SQLCODE" or len(spec.path) != 2:
+        return ()
+    kind, _, line = str(spec.path[0]).partition("@")
+    if not line.isdigit():
+        return ()
+    return SQLCODE_PREFERENCES.get(kind, ())
+
+
 def solve(
     spec: FieldSpec, constraints: list[FieldConstraint]
 ) -> Witness | Unsatisfiable:
@@ -240,6 +262,14 @@ def solve(
                     domain = pinned
                     witness = pinned.pick()
                     break
+
+    if witness is None and constraints:
+        for candidate in _preferred_values(spec):
+            pinned = _pinned_picture_domain(spec, candidate, constraints)
+            if pinned is not None:
+                domain = pinned
+                witness = pinned.pick()
+                break
 
     if witness is None:
         domain = _picture_domain(spec)

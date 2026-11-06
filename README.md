@@ -164,6 +164,7 @@ cobol-parser lint --glob 'src/**/*.cbl' --rule dead-code --rule move-type-check
 cobol-parser lint src/ORDRPT.cbl src/ORDEDIT.cbl --rule truncation --rule file-status --format text
 cobol-parser lint src/ORDPOST.cbl --callee-path src --format text   # also checks each CALL against its callee
 cobol-parser lint --changed-since origin/main --format github --fail-on error
+cobol-parser lint --new-code-since origin/main --scope call-check=all --format github --fail-on error
 cobol-parser lint src/*.cbl --format sarif -o lint.sarif
 cobol-parser lint --glob 'src/**/*.cbl' --write-baseline lint-baseline.json
 cobol-parser lint --glob 'src/**/*.cbl' --baseline lint-baseline.json --fail-on warning
@@ -221,6 +222,20 @@ mainframe compile does (an `error` is what the compiler rejects):
 | `corresponding` | MOVE CORRESPONDING between groups with no names in common |
 | `arithmetic-operand` | ADD, COMPUTE ... on a PIC X or group item |
 
+Eight more rules check what other COBOL linters (SonarQube, IBM Developer for
+z/OS code review) check:
+
+| Rule | Finds |
+|---|---|
+| `constant-condition` | A condition that is always true or false: `IF WS-A = WS-A`, `WS-A = 'X' AND WS-A = 'Y'` |
+| `duplicate-branch` | An EVALUATE WHEN or an ELSE IF that repeats an earlier test, so its statements never run |
+| `self-assignment` | `MOVE X TO X` |
+| `stop-run-in-subprogram` | STOP RUN in a CALLed program (PROCEDURE DIVISION USING, or nested), which ends the whole run unit |
+| `string-pointer` | A STRING/UNSTRING pointer set to 0 just before, or whose PICTURE cannot reach the field's length + 1 |
+| `loop-variable` | A PERFORM VARYING body that changes its own control variable |
+| `evaluate-other` | EVALUATE without WHEN OTHER (info) |
+| `nesting-depth` | IF/EVALUATE/PERFORM nested more than 5 deep (info) |
+
 With `--callee-path DIR` (or `callee_path` in `cobol.yml`), the `call-check`
 rule also compares every CALL with the program it calls (argument count,
 passing mode, byte length, usage), so a caller passing 8 bytes to a 10-byte
@@ -240,9 +255,14 @@ file (`--strict-copybooks` restores the failure).
 It takes many files at once (`FILE...`, `--glob`, `--files-from`),
 `--changed-since REF` lints only the programs a git change touched (and those
 that `COPY` a changed copybook), and `--format github` annotates the pull
-request. `lint`, `scan` and `call-check` write SARIF 2.1.0 with
-`--format sarif`, which GitHub code scanning and IDE problem panes read
-directly. CI recipe and pre-commit hooks: [docs/ci-lint.md](docs/ci-lint.md).
+request. `--new-code-since REF` keeps only the findings on lines a change
+added or edited, like a Sonar new-code gate, and `--scope RULE=all` judges
+chosen rules on the whole codebase instead. `lint`, `scan` and `call-check`
+write SARIF 2.1.0 with `--format sarif`, which GitHub code scanning and IDE
+problem panes read directly. CI recipe and pre-commit hooks:
+[docs/ci-lint.md](docs/ci-lint.md). This repository is also a GitHub Action
+(`uses: landparty/cobol-parser@main`, or a release tag) that runs the gate in a few lines:
+[docs/github-action.md](docs/github-action.md).
 
 `scan` runs `health` and `redundancy` by default; `--analyzer` picks others
 (`dead-code`, `complexity`, `lint`, ...). With `--cache-dir`, a file whose
@@ -732,6 +752,7 @@ through the whole stack in the test suite; the matrix is in
 | Using the MCP server | [docs/mcp-server.md](docs/mcp-server.md) |
 | The `cobol.yml` project config | [docs/project-config.md](docs/project-config.md) |
 | Linting COBOL in CI | [docs/ci-lint.md](docs/ci-lint.md) |
+| The GitHub Action (new code or whole codebase, per rule) | [docs/github-action.md](docs/github-action.md) |
 | The `gen-fixtures` bundle format | [docs/fixture-bundle-schema.md](docs/fixture-bundle-schema.md) |
 | Every subcommand and flag | [.okf/cli.md](.okf/cli.md) |
 | How the library works, area by area | [.okf/index.md](.okf/index.md) |
