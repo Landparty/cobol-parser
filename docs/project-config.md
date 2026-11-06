@@ -166,6 +166,7 @@ the same name on `gen-data`, `decode` and `compare`; `rows` fills `--rows` on
 | `severity` | mapping of a rule id, or `rule/KIND`, to `error` \| `warning` \| `info` |
 | `exclude` | list of globs of files `lint` leaves out (relative to this file; `*` also crosses folders) |
 | `baseline` | path of a `lint --write-baseline` file (relative to this file) |
+| `scope` | `new` \| `all`, or a mapping of `default` and rule ids (or `rule/KIND`) to `new` \| `all`: which rules `lint --new-code-since` judges on new code only and which on the whole codebase ([github-action.md](github-action.md)) |
 
 ```yaml
 lint:
@@ -176,6 +177,9 @@ lint:
     io-sequence/FILE_LEFT_OPEN: error     # one kind of finding
   exclude: ["legacy/*"]
   baseline: lint-baseline.json
+  scope:                                  # with --new-code-since REF
+    default: new                          # findings on changed lines only
+    call-check: all                       # this rule everywhere
 ```
 
 Like every key, these fill a flag by name wherever a subcommand has it.
