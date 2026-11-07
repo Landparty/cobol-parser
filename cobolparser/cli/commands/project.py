@@ -213,6 +213,12 @@ def _config_to_dict(config: ProjectConfig) -> dict[str, Any]:
                 "scope": list(config.lint.scope),
             }
         ),
+        "limits": prune(
+            {
+                "timeout_seconds": config.limits.timeout_seconds,
+                "max_file_bytes": config.limits.max_file_bytes,
+            }
+        ),
         "tools": dict(config.tools),
         # Present only when some path entry is not a directory (#550).
         **(

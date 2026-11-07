@@ -16,6 +16,7 @@ from .._common import (
     _add_define_args,
     _add_dialect_arg,
     _add_error_recovery_arg,
+    _add_limit_args,
     _add_min_clone_statements_arg,
     _add_output_arg,
     _add_source_format_args,
@@ -24,6 +25,7 @@ from .._common import (
     _fail,
     _get_error_recovery,
     _json_out,
+    _limit_kwargs,
     _parse_or_fail,
     _source_format_kwargs,
     _text_out,
@@ -115,6 +117,7 @@ def _build_scan_parser(subparsers: argparse._SubParsersAction) -> None:
         metavar="N",
         help="Number of worker processes (default: CPU count)",
     )
+    _add_limit_args(p)
     p.add_argument(
         "--encoding",
         default=None,
@@ -194,6 +197,7 @@ def _cmd_scan(args: argparse.Namespace) -> None:
         debug_lines=bool(source_format.get("debug_lines", False)),
         defined_symbols=_defined_symbol_pairs(args),
         cache_dir=args.cache_dir,
+        **_limit_kwargs(args),
     )
 
     try:

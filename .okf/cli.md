@@ -135,7 +135,7 @@ Verified against `python -m cobolparser <cmd> --help` on 2026-10-15. Order is
 | Subcommand | Positionals | Own flags (default) | Shared flags | Output |
 |---|---|---|---|---|
 | `parse` | `file [path]` | `--errors`, `--stats`, `--find-type NODE_TYPE` | A without `--program`; +prof | AST JSON; exit 2 on a recovered-but-errored parse |
-| `batch` | `[files ...]` | `--glob PATTERN`..., `--workers N` (CPU count), `--encoding` (detected), `--errors`, `--stats` | `--compact`, `--dialect`, `--error-recovery`, `-o`, dl; +prof | JSON list, one entry per file |
+| `batch` | `[files ...]` | `--glob PATTERN`..., `--workers N` (CPU count), `--timeout SECONDS` (none), `--max-file-bytes N` (none), `--encoding` (detected), `--errors`, `--stats` | `--compact`, `--dialect`, `--error-recovery`, `-o`, dl; +prof | JSON list, one entry per file |
 | `tokenize` | `file` | — | `--compact`, `--source-format`/`--free-form`, dl, `--dialect`, `--encoding`, `-o` | `{source_file, tokens}` |
 | `preprocess` | `file` | `--strip-directives` | `--source-format`/`--free-form`, dl, `--define`, `--encoding` (no `--compact`, no `-o`) | free-form source text |
 | `expand` | `file` | `--keep-comments`, `--source-map`, `--max-depth N` (100) | `--copybook-path`, `--compact`, `--define`, `--encoding`, `-o`, dl | expansion JSON |
@@ -157,7 +157,7 @@ Verified against `python -m cobolparser <cmd> --help` on 2026-10-15. Order is
 | `ims-dli` | `file` | — | A (no profiling) | `IMSSegmentAnalyzer` |
 | `dclgen-check` | `file` | — | A; +prof | `DclgenChecker` |
 | `redundancy` | `file` | `--min-clone-statements N` (3) | A; +prof | `RedundancyAnalyzer` |
-| `scan` | `[files ...]` | `--glob`..., `--files-from FILE`, `--analyzer NAME`... (`health,redundancy`), `--clones`, `--min-clone-members N` (2), `--min-clone-statements N` (3), `--workers N` (CPU count), `--encoding` (detected), `--cache-dir DIR` (off), `--format {json,sarif}` (json; sarif runs `lint`) | A without `--program` | `scan_version` report, or a SARIF log of every file's lint findings |
+| `scan` | `[files ...]` | `--glob`..., `--files-from FILE`, `--analyzer NAME`... (`health,redundancy`), `--clones`, `--min-clone-members N` (2), `--min-clone-statements N` (3), `--workers N` (CPU count), `--timeout SECONDS` (none), `--max-file-bytes N` (none), `--encoding` (detected), `--cache-dir DIR` (off), `--format {json,sarif}` (json; sarif runs `lint`) | A without `--program` | `scan_version` report, or a SARIF log of every file's lint findings |
 | `lint` | `[FILE ...]` | `--glob PATTERN`..., `--files-from FILE`, `--changed-since REF`, `--extension EXT`... (`.cbl .cob .cobol`), `--rule RULE`... (all, incl. `line-length`; `call-check` only with `--callee-path`), `--callee-path DIR`... (off; config `callee_path`), `--disable RULE`..., `--severity RULE[/KIND]=LEVEL`..., `--min-severity {error,warning,info}` (warning for text/github, info for json/sarif), `--fail-on {error,warning,info,never}` (never), `--format {json,text,sarif,github}` (json), `--exclude PATTERN`..., `--baseline FILE`, `--write-baseline FILE`, `--strict-copybooks`, `--workers N` (CPU count), `--new-code-since REF`, `--scope [RULE=]new\|all`... (new; config `lint.scope`), `--summary-file FILE` | A (`--program` default: every unit); +prof (one file only) | findings (or a SARIF 2.1.0 log, or GitHub workflow commands); several files: `{files, failures, summary}`; exit 3 on `--fail-on`, 1 when a file could not be linted |
 | `data-items` | `file` | — | A; +prof | `compute_program_data_items()` |
 | `program-signature` | `file` | — | A (`--program` default: every unit); +prof | `{"signatures": [...]}` |
@@ -245,10 +245,11 @@ stated" stays distinct from "equals the default"):
 
 | Section | Keys → `ProjectConfig` field |
 |---|---|
-| top level | `version`, `project`, `data`, `lint`, `mockymock`, `analyzer` (anything else is an error) |
+| top level | `version`, `project`, `data`, `lint`, `limits`, `mockymock`, `analyzer` (anything else is an error) |
 | `project:` | `copybook_path`, `callee_path`, `proc_path` (lists, resolved against the file's directory), `source_format` (`auto\|fixed\|free`), `debug_lines` (bool), `dialect` (`ibm-enterprise`), `error_recovery` (`collect-all\|fail-fast`), `seed`, `extensions`, `define` (normalized to `SYMBOL=VALUE`) |
 | `data:` → `DataDefaults` | `charset`, `endian`, `record_format`, `record_separator`, `rows` |
 | `lint:` → `LintDefaults` | `rules`, `min_severity`, `fail_on`, `disable`, `severity` (`rule` or `rule/KIND` → level), `exclude` (globs, resolved against the file's folder), `baseline` (path, likewise), `scope` (`new`/`all` or `{default, rule: new\|all}`, stored as `--scope` values) |
+| `limits:` → `LimitDefaults` | `timeout_seconds` (number > 0), `max_file_bytes` (int > 0); fill `batch`/`scan`'s `--timeout` / `--max-file-bytes` (see [batch.md](batch.md)) |
 | `mockymock:` / `analyzer:` | validated only as mappings, carried verbatim on `ProjectConfig.tools`; `tool_section(name)` returns the mapping or `{}` |
 
 * **Discovery** — `cobol.yml` then `cobol.yaml` in the cwd and each parent,

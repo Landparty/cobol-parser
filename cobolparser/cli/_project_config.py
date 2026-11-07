@@ -88,6 +88,8 @@ _BINDINGS: dict[str, Callable[[ProjectConfig], Any]] = {
     "exclude": lambda c: list(c.lint.exclude) or None,
     "baseline": lambda c: c.lint.baseline,
     "scopes": lambda c: list(c.lint.scope) or None,
+    "timeout_seconds": lambda c: c.limits.timeout_seconds,
+    "max_file_bytes": lambda c: c.limits.max_file_bytes,
 }
 
 

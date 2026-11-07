@@ -7,7 +7,7 @@ Three tools read the same file:
 
 | Tool | Reads |
 |------|-------|
-| `cobol-parser` CLI | `version`, `project:`, `data:`, `lint:` (`limits:` is read by the library API only, so far) |
+| `cobol-parser` CLI | `version`, `project:`, `data:`, `lint:`, `limits:` |
 | `mockymock` CLI | `project.copybook_path`, `project.seed`, `mockymock:` |
 | COBOL Analyzer (VS Code) | `project.copybook_path`, and passes the file to the CLI it spawns |
 
@@ -206,7 +206,8 @@ limits:
 They are loaded into `ProjectConfig.limits` and are the values the library's
 `parse_files`, `parse_files_with_copybooks` (`timeout_seconds=`,
 `max_file_bytes=`) and `ScanOptions` take. The `batch` and `scan`
-subcommands do not read them yet.
+subcommands read them as the defaults of `--timeout SECONDS` and
+`--max-file-bytes N`; a flag on the command line wins.
 
 ### `mockymock:` and `analyzer:`
 

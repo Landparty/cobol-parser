@@ -18,6 +18,7 @@ from .._common import (
     _add_dialect_arg,
     _add_encoding_arg,
     _add_error_recovery_arg,
+    _add_limit_args,
     _add_output_arg,
     _add_profiling_args,
     _add_source_format_args,
@@ -26,6 +27,7 @@ from .._common import (
     _get_error_recovery,
     _identification,
     _json_out,
+    _limit_kwargs,
     _parse_defines,
     _profiling_requested,
     _read_source,
@@ -207,6 +209,7 @@ def _build_batch_parser(
         metavar="N",
         help="Number of worker processes (default: CPU count)",
     )
+    _add_limit_args(p)
     p.add_argument(
         "--encoding",
         default=None,
@@ -290,9 +293,11 @@ def _cmd_batch(args: argparse.Namespace) -> None:
     if args.workers is not None and args.workers < 1:
         _fail("--workers must be >= 1")
 
+    limits = _limit_kwargs(args)
     results = parse_files(
         unique_files,
         workers=args.workers,
+        **limits,
         error_recovery=error_recovery,
         dialect=dialect,
         encoding=args.encoding,

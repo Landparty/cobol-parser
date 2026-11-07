@@ -186,6 +186,47 @@ def _add_output_arg(parser: argparse.ArgumentParser) -> None:
     )
 
 
+def _add_limit_args(parser: argparse.ArgumentParser) -> None:
+    """``--timeout`` / ``--max-file-bytes``: per-file caps for multi-file runs.
+
+    Both default to no limit; ``cobol.yml``'s ``limits:`` section fills them.
+    """
+    parser.add_argument(
+        "--timeout",
+        dest="timeout_seconds",
+        type=float,
+        default=None,
+        metavar="SECONDS",
+        help=(
+            "Stop a file still being processed after SECONDS (its worker "
+            "process is terminated) and report it as a failure; the other "
+            "files carry on (default: no limit)"
+        ),
+    )
+    parser.add_argument(
+        "--max-file-bytes",
+        dest="max_file_bytes",
+        type=int,
+        default=None,
+        metavar="N",
+        help=(
+            "Skip, and report as a failure, any program file larger than N "
+            "bytes on disk (default: no limit)"
+        ),
+    )
+
+
+def _limit_kwargs(args: argparse.Namespace) -> dict[str, Any]:
+    """The validated ``timeout_seconds`` / ``max_file_bytes`` for a run."""
+    timeout = getattr(args, "timeout_seconds", None)
+    max_bytes = getattr(args, "max_file_bytes", None)
+    if timeout is not None and timeout <= 0:
+        _fail("--timeout must be greater than 0")
+    if max_bytes is not None and max_bytes < 1:
+        _fail("--max-file-bytes must be >= 1")
+    return {"timeout_seconds": timeout, "max_file_bytes": max_bytes}
+
+
 _DEFAULT_PROFILE_TOP_N = 20
 
 
