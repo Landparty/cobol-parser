@@ -1,14 +1,14 @@
 ---
 type: Module
 title: Static Analysis
-description: Routing page for cobolparser/analysis/ (35 public modules + the program_flow/ package + 6 private helpers) and dialects/le_signatures.py -- calling conventions shared by every analyzer, which .okf/analysis/*.md file covers which analyzer, the module map and the public imports.
+description: Routing page for cobolparser/analysis/ (36 public modules + the program_flow/ package + 6 private helpers) and dialects/le_signatures.py -- calling conventions shared by every analyzer, which .okf/analysis/*.md file covers which analyzer, the module map and the public imports.
 tags: [analysis, routing, dead-code, program-flow, lint, xref, field-lineage, business-rules, fixtures, codebase-graph, sql-cics-lint, le-signatures]
 timestamp: 2026-10-15T00:00:00Z
 ---
 
 # Static Analysis
 
-`cobolparser/analysis/` holds every static analyzer: 35 public modules, the
+`cobolparser/analysis/` holds every static analyzer: 36 public modules, the
 `program_flow/` package (the control-flow graph, 8 modules) and 6 private
 helpers (`_procedures.py`, `_names.py`, `_files.py`, `_cics.py`,
 `_sql_whenever.py`, `_sql_flow.py`) the analyzers share so they cannot
@@ -47,7 +47,7 @@ Report origins after copybook expansion: [analysis/lint.md](analysis/lint.md).
 
 | Task / question | Classes | Load |
 |---|---|---|
-| Control flow, reachability, dead paragraphs, loops, complexity, clones, debt score | `ProgramFlowAnalyzer`, `DeadCodeAnalyzer`, `RecursionRiskAnalyzer`, `ComplexityAnalyzer`, `RedundancyAnalyzer`, `TechnicalDebtAnalyzer` | [analysis/flow.md](analysis/flow.md) |
+| Control flow, reachability, dead paragraphs, loops, complexity, clones, debt score, decisions no input can change | `ProgramFlowAnalyzer`, `DeadCodeAnalyzer`, `InputDependenceAnalyzer`, `RecursionRiskAnalyzer`, `ComplexityAnalyzer`, `RedundancyAnalyzer`, `TechnicalDebtAnalyzer` | [analysis/flow.md](analysis/flow.md) |
 | Data items, symbols, MOVEs, CALL/LINKAGE, file I/O order, CRUD, dynamic CALL values | `UnusedVariableAnalyzer`, `XrefAnalyzer`, `MoveTypeChecker`, `LinkageChecker`, `IOLogger`, `IOSequenceAnalyzer`, `CRUDMatrixGenerator`, `DynamicCallAnalyzer`, `IOCoverageReporter` | [analysis/data-use.md](analysis/data-use.md) |
 | Embedded SQL, DCLGEN, CICS, IMS DL/I, LE services and intrinsics | `HostVariableResolver`, `DclgenChecker`, `SqlCicsAnalyzer`, `IMSSegmentAnalyzer`, `LanguageEnvironmentAnalyzer`, `le_service_signature` | [analysis/sql-cics-ims.md](analysis/sql-cics-ims.md) |
 | One severity-graded finding list; bug-pattern rules; source-map origins | `LintAnalyzer`, `BugPatternAnalyzer`, `apply_source_map`, `stamp_report_origins` | [analysis/lint.md](analysis/lint.md) |
@@ -63,6 +63,7 @@ Report origins after copybook expansion: [analysis/lint.md](analysis/lint.md).
 |---|---|---|
 | `program_flow/` | `ProgramFlowAnalyzer`, `FlowEdgeType`, `LEADING_SENTENCES_NODE` | [flow](analysis/flow.md) |
 | `dead_code.py` | `DeadCodeAnalyzer`, `DeadCodeReport`, `DeadCodeItem` | [flow](analysis/flow.md) |
+| `input_dependence.py` | `InputDependenceAnalyzer`, `InputDependenceReport`, `Decision`, `UnreachableResult` | [flow](analysis/flow.md#inputdependenceanalyzer) |
 | `recursion_risk.py` | `RecursionRiskAnalyzer` | [flow](analysis/flow.md) |
 | `complexity.py` | `ComplexityAnalyzer`, `ComplexityThresholds` | [flow](analysis/flow.md) |
 | `redundancy.py` | `RedundancyAnalyzer` (clone groups, paragraph fingerprints) | [flow](analysis/flow.md) |
@@ -125,6 +126,7 @@ from cobolparser.analysis import IMSSegmentAnalyzer, HostVariableResolver
 # The rest import from their own module
 from cobolparser.analysis.program_flow import FlowEdgeType, LEADING_SENTENCES_NODE
 from cobolparser.analysis.xref import XrefAnalyzer
+from cobolparser.analysis.input_dependence import InputDependenceAnalyzer
 from cobolparser.analysis.program_signature import ProgramSignatureExtractor, extract_signatures
 from cobolparser.analysis.call_interface import CallInterfaceChecker
 from cobolparser.analysis.codebase import CodebaseGraphBuilder, CopybookImpactAnalyzer
