@@ -31,8 +31,9 @@ be mistaken for a complete one.
 from __future__ import annotations
 
 import re
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, ClassVar
 
 from .._literals import QUOTED_LITERAL_RE
 from ..dialects.ibm_enterprise import IBMEnterpriseCobol
@@ -566,6 +567,18 @@ def _contained_node_ids(ast: CobolProgram) -> set[int]:
         for contained in ast.contained_programs
         for node in contained.traverse_depth_first()
     }
+
+
+#: (value, role, exact) triples, as ``XrefAnalyzer._role_assignments`` yields.
+_Roles = list[tuple[Any, str, bool]]
+#: A per-statement-type role mapper: ``(analyzer, statement) -> _Roles``.
+_RoleHandler = Callable[["XrefAnalyzer", Any], _Roles]
+
+
+def _present_values(entry: dict[str, Any], keys: tuple[str, ...], role: str) -> _Roles:
+    """``(entry[key], role, False)`` for each of *keys* with a truthy value
+    -- inexact, for clause values that may equally be literals."""
+    return [(entry[key], role, False) for key in keys if entry.get(key)]
 
 
 class XrefAnalyzer:
@@ -1530,179 +1543,231 @@ class XrefAnalyzer:
         pairs.extend(self._exec_statement_roles(stmt))
         return pairs
 
-    def _data_statement_roles(
-        self, stmt: CobolStatement
-    ) -> list[tuple[Any, str, bool]]:
-        pairs: list[tuple[Any, str, bool]] = []
-        if isinstance(stmt, MoveStatement):
-            if stmt.source:
-                pairs.append((stmt.source, ROLE_READ, True))
-            pairs += [(t, ROLE_WRITE, True) for t in stmt.targets]
-        elif isinstance(stmt, DisplayStatement):
-            pairs += [(item, ROLE_READ, True) for item in stmt.display_items]
-        elif isinstance(stmt, ComputeStatement):
-            pairs += [(t, ROLE_WRITE, True) for t in stmt.targets]
-            if stmt.expression is not None:
-                pairs.append((stmt.expression, ROLE_READ, True))
-            if stmt.expression_tree is not None:
-                pairs.append((stmt.expression_tree, ROLE_READ, True))
-        elif isinstance(stmt, ArithmeticStatement):
-            # With GIVING, only the GIVING (and REMAINDER) items change: the
-            # TO/FROM operand of `SUBTRACT A FROM B GIVING C` is read, never
-            # written. Without GIVING, the TO/FROM/BY/INTO target is both
-            # read and written (`ADD A TO B` is B = B + A).
-            givings = [*stmt.givings, *([stmt.giving] if stmt.giving else [])]
-            targets = [*stmt.targets, *([stmt.target] if stmt.target else [])]
-            written: list[str] = list(givings) if givings else list(targets)
-            if isinstance(stmt, DivideStatement) and stmt.remainder:
-                written.append(stmt.remainder)
-            # The sending operands. `.operands` also holds target/GIVING
-            # names, appended only when absent, so it cannot tell `ADD A B
-            # GIVING B` from `ADD A GIVING B`: ADD/SUBTRACT record what was
-            # written before TO/FROM/GIVING, and MULTIPLY/DIVIDE always put
-            # their two operands first.
-            if stmt.source_operands is not None:
-                read: list[str] = [*stmt.source_operands, *targets]
-            elif isinstance(stmt, (MultiplyStatement, DivideStatement)):
-                if givings or not targets:
-                    read = list(stmt.operands[:2])
-                else:
-                    # `MULTIPLY n BY a b` is a = a * n; b = b * n: every
-                    # BY/INTO receiver is read, not just the first (#534).
-                    read = [*stmt.operands[:1], *targets]
-            else:
-                consumed = {name.upper() for name in written}
-                read = [op for op in stmt.operands if op.upper() not in consumed]
-            pairs += [(name, ROLE_WRITE, True) for name in written]
-            pairs += [(name, ROLE_READ, True) for name in read]
-        elif isinstance(stmt, SetStatement):
-            pairs += [(t, ROLE_WRITE, True) for t in stmt.targets]
-            if stmt.value:
-                pairs.append((stmt.value, ROLE_READ, False))
-            for group in stmt.groups:
-                pairs += [(t, ROLE_WRITE, True) for t in group.get("targets") or []]
-                if group.get("value"):
-                    pairs.append((group["value"], ROLE_READ, False))
-        elif isinstance(stmt, AllocateStatement):
-            # ALLOCATE gives a based item storage (its address is set, its
-            # bytes are not read or written -- INITIALIZED aside) and writes
-            # the RETURNING pointer; the CHARACTERS size is read (#570).
-            if stmt.data_item:
-                pairs.append((stmt.data_item, ROLE_REFERENCE, True))
-            if stmt.size_expr:
-                pairs.append((stmt.size_expr, ROLE_READ, True))
-            if stmt.returning_target:
-                pairs.append((stmt.returning_target, ROLE_WRITE, True))
-        elif isinstance(stmt, ContinueStatement):
-            # ``CONTINUE AFTER expr SECONDS`` reads its delay operands (#578).
-            if stmt.delay_expression_tree is not None:
-                pairs.append((stmt.delay_expression_tree, ROLE_READ, True))
-            elif stmt.delay_expression:
-                pairs.append((_RawText(stmt.delay_expression), ROLE_READ, False))
-        elif isinstance(stmt, FreeStatement):
-            # FREE releases the storage and sets each pointer to NULL.
-            pairs += [(name, ROLE_WRITE, True) for name in stmt.pointer_names]
-        elif isinstance(stmt, InitializeStatement):
-            pairs += [(t, ROLE_WRITE, True) for t in stmt.targets]
-            # A REPLACING ``BY`` value arrives with its string-literal quotes
-            # already stripped, so a literal's contents cannot be told apart
-            # from an identifier -- inexact, and never an undefined symbol.
-            pairs += [
-                (clause.get("by_value"), ROLE_READ, False)
-                for clause in stmt.replacing_clauses
-            ]
-        elif isinstance(stmt, StringStatement):
-            if stmt.into_target:
-                pairs.append((stmt.into_target, ROLE_WRITE, True))
-            if stmt.pointer_variable:
-                # WITH POINTER starts at the pointer's current value and
-                # advances it: read and written (#269).
-                pairs.append((stmt.pointer_variable, ROLE_READ, True))
-                pairs.append((stmt.pointer_variable, ROLE_WRITE, True))
-            # ``DELIMITED BY`` holds either a data name, a (quoted) literal,
-            # or the keyword SIZE -- inexact either way.
-            pairs += [(d, ROLE_READ, False) for d in stmt.delimiters]
-            consumed = {
-                value.upper()
-                for value in (stmt.into_target, stmt.pointer_variable)
-                if value
-            }
-            # A literal operand arrives quoted (``'VERY LONG TEXT'`` as
-            # ``"VERY LONG TEXT"``); operands stay inexact so a figurative
-            # constant or special register is never reported undefined.
-            pairs += [
-                (operand, ROLE_READ, False)
-                for operand in stmt.operands
-                if operand.upper() not in consumed
-            ]
-        elif isinstance(stmt, UnstringStatement):
-            if stmt.source_operand:
-                pairs.append((stmt.source_operand, ROLE_READ, True))
-            pairs += [(d, ROLE_READ, False) for d in stmt.delimiters]
-            for target in stmt.into_targets:
-                if target.get("target"):
-                    pairs.append((target["target"], ROLE_WRITE, True))
-                if target.get("count_var"):
-                    pairs.append((target["count_var"], ROLE_WRITE, True))
-                if target.get("delimiter_var"):
-                    pairs.append((target["delimiter_var"], ROLE_WRITE, True))
-            # POINTER starts at its current value and is advanced; TALLYING
-            # IN is incremented, never reset: both read and written (#269).
-            for value in (stmt.pointer_variable, stmt.tallying_variable):
-                if value:
-                    pairs.append((value, ROLE_READ, True))
-                    pairs.append((value, ROLE_WRITE, True))
-        elif isinstance(stmt, InspectStatement):
-            if stmt.target:
-                # The inspected item is always read; REPLACING / CONVERTING
-                # rewrite it in place, so it is written too (#269).
-                pairs.append((stmt.target, ROLE_READ, True))
-                inspected = (stmt.inspect_type or "").upper()
-                # ``TALLYING ... REPLACING`` is recorded as TALLYING_REPLACING.
-                if inspected in ("REPLACING", "CONVERTING", "TALLYING_REPLACING"):
-                    pairs.append((stmt.target, ROLE_WRITE, True))
-            for clause in stmt.tallying_clauses:
-                if clause.get("counter"):
-                    # TALLYING adds to the counter's current value: it is
-                    # read as well as written (#269).
-                    pairs.append((clause["counter"], ROLE_READ, True))
-                    pairs.append((clause["counter"], ROLE_WRITE, True))
-                # Everything else in an INSPECT clause is a value that may
-                # equally be a (quoted) literal or a figurative -- inexact.
-                for key in ("value", "before", "after"):
-                    if clause.get(key):
-                        pairs.append((clause[key], ROLE_READ, False))
-            for clause in stmt.replacing_clauses:
-                for key in ("from_value", "to_value", "before", "after"):
-                    if clause.get(key):
-                        pairs.append((clause[key], ROLE_READ, False))
-            if stmt.converting_from:
-                pairs.append((stmt.converting_from, ROLE_READ, False))
-            for value in (
-                stmt.converting_to,
-                stmt.converting_before,
-                stmt.converting_after,
-            ):
-                if value:
-                    pairs.append((value, ROLE_READ, False))
-        elif isinstance(stmt, XmlJsonStatement):
-            if stmt.primary_operand:
-                role = ROLE_WRITE if stmt.action == "GENERATE" else ROLE_READ
-                pairs.append((stmt.primary_operand, role, True))
-            if stmt.from_item:
-                pairs.append((stmt.from_item, ROLE_READ, True))
-            # COUNT IN and JSON PARSE's INTO receive a value; every other
-            # clause subject (NAME OF / TYPE OF / SUPPRESS / CONVERTING /
-            # NAMESPACE ...) is read.
-            for receiver in (stmt.count_in, stmt.into_item):
-                if receiver:
-                    pairs.append((receiver, ROLE_WRITE, True))
-            pairs += [(name, ROLE_READ, True) for name in stmt.clause_items]
-            if stmt.processing_procedure:
-                pairs.append((stmt.processing_procedure, ROLE_PERFORM, True))
-            if stmt.processing_procedure_thru:
-                pairs.append((stmt.processing_procedure_thru, ROLE_PERFORM, True))
+    def _data_statement_roles(self, stmt: CobolStatement) -> _Roles:
+        """Roles for the data-manipulation verbs: the first
+        ``_DATA_ROLE_HANDLERS`` entry whose class *stmt* is an instance of
+        (so a subclass row must precede its base's)."""
+        for klass, handler in self._DATA_ROLE_HANDLERS:
+            if isinstance(stmt, klass):
+                return handler(self, stmt)
+        return []
+
+    def _move_roles(self, stmt: MoveStatement) -> _Roles:
+        pairs: _Roles = []
+        if stmt.source:
+            pairs.append((stmt.source, ROLE_READ, True))
+        pairs += [(t, ROLE_WRITE, True) for t in stmt.targets]
         return pairs
+
+    def _display_roles(self, stmt: DisplayStatement) -> _Roles:
+        return [(item, ROLE_READ, True) for item in stmt.display_items]
+
+    def _compute_roles(self, stmt: ComputeStatement) -> _Roles:
+        pairs: _Roles = [(t, ROLE_WRITE, True) for t in stmt.targets]
+        if stmt.expression is not None:
+            pairs.append((stmt.expression, ROLE_READ, True))
+        if stmt.expression_tree is not None:
+            pairs.append((stmt.expression_tree, ROLE_READ, True))
+        return pairs
+
+    def _arithmetic_roles(self, stmt: ArithmeticStatement) -> _Roles:
+        # With GIVING, only the GIVING (and REMAINDER) items change: the
+        # TO/FROM operand of `SUBTRACT A FROM B GIVING C` is read, never
+        # written. Without GIVING, the TO/FROM/BY/INTO target is both
+        # read and written (`ADD A TO B` is B = B + A).
+        givings = [*stmt.givings, *([stmt.giving] if stmt.giving else [])]
+        targets = [*stmt.targets, *([stmt.target] if stmt.target else [])]
+        written: list[str] = list(givings) if givings else list(targets)
+        if isinstance(stmt, DivideStatement) and stmt.remainder:
+            written.append(stmt.remainder)
+        read = self._arithmetic_read_operands(stmt, givings, targets, written)
+        pairs: _Roles = [(name, ROLE_WRITE, True) for name in written]
+        pairs += [(name, ROLE_READ, True) for name in read]
+        return pairs
+
+    @staticmethod
+    def _arithmetic_read_operands(
+        stmt: ArithmeticStatement,
+        givings: list[str],
+        targets: list[str],
+        written: list[str],
+    ) -> list[str]:
+        """The sending operands of an arithmetic statement."""
+        # The sending operands. `.operands` also holds target/GIVING
+        # names, appended only when absent, so it cannot tell `ADD A B
+        # GIVING B` from `ADD A GIVING B`: ADD/SUBTRACT record what was
+        # written before TO/FROM/GIVING, and MULTIPLY/DIVIDE always put
+        # their two operands first.
+        if stmt.source_operands is not None:
+            return [*stmt.source_operands, *targets]
+        if isinstance(stmt, (MultiplyStatement, DivideStatement)):
+            if givings or not targets:
+                return list(stmt.operands[:2])
+            # `MULTIPLY n BY a b` is a = a * n; b = b * n: every
+            # BY/INTO receiver is read, not just the first (#534).
+            return [*stmt.operands[:1], *targets]
+        consumed = {name.upper() for name in written}
+        return [op for op in stmt.operands if op.upper() not in consumed]
+
+    def _set_roles(self, stmt: SetStatement) -> _Roles:
+        pairs: _Roles = [(t, ROLE_WRITE, True) for t in stmt.targets]
+        if stmt.value:
+            pairs.append((stmt.value, ROLE_READ, False))
+        for group in stmt.groups:
+            pairs += [(t, ROLE_WRITE, True) for t in group.get("targets") or []]
+            if group.get("value"):
+                pairs.append((group["value"], ROLE_READ, False))
+        return pairs
+
+    def _allocate_roles(self, stmt: AllocateStatement) -> _Roles:
+        # ALLOCATE gives a based item storage (its address is set, its
+        # bytes are not read or written -- INITIALIZED aside) and writes
+        # the RETURNING pointer; the CHARACTERS size is read (#570).
+        pairs: _Roles = []
+        if stmt.data_item:
+            pairs.append((stmt.data_item, ROLE_REFERENCE, True))
+        if stmt.size_expr:
+            pairs.append((stmt.size_expr, ROLE_READ, True))
+        if stmt.returning_target:
+            pairs.append((stmt.returning_target, ROLE_WRITE, True))
+        return pairs
+
+    def _continue_roles(self, stmt: ContinueStatement) -> _Roles:
+        # ``CONTINUE AFTER expr SECONDS`` reads its delay operands (#578).
+        if stmt.delay_expression_tree is not None:
+            return [(stmt.delay_expression_tree, ROLE_READ, True)]
+        if stmt.delay_expression:
+            return [(_RawText(stmt.delay_expression), ROLE_READ, False)]
+        return []
+
+    def _free_roles(self, stmt: FreeStatement) -> _Roles:
+        # FREE releases the storage and sets each pointer to NULL.
+        return [(name, ROLE_WRITE, True) for name in stmt.pointer_names]
+
+    def _initialize_roles(self, stmt: InitializeStatement) -> _Roles:
+        pairs: _Roles = [(t, ROLE_WRITE, True) for t in stmt.targets]
+        # A REPLACING ``BY`` value arrives with its string-literal quotes
+        # already stripped, so a literal's contents cannot be told apart
+        # from an identifier -- inexact, and never an undefined symbol.
+        pairs += [
+            (clause.get("by_value"), ROLE_READ, False)
+            for clause in stmt.replacing_clauses
+        ]
+        return pairs
+
+    def _string_roles(self, stmt: StringStatement) -> _Roles:
+        pairs: _Roles = []
+        if stmt.into_target:
+            pairs.append((stmt.into_target, ROLE_WRITE, True))
+        if stmt.pointer_variable:
+            # WITH POINTER starts at the pointer's current value and
+            # advances it: read and written (#269).
+            pairs.append((stmt.pointer_variable, ROLE_READ, True))
+            pairs.append((stmt.pointer_variable, ROLE_WRITE, True))
+        # ``DELIMITED BY`` holds either a data name, a (quoted) literal,
+        # or the keyword SIZE -- inexact either way.
+        pairs += [(d, ROLE_READ, False) for d in stmt.delimiters]
+        consumed = {
+            value.upper()
+            for value in (stmt.into_target, stmt.pointer_variable)
+            if value
+        }
+        # A literal operand arrives quoted (``'VERY LONG TEXT'`` as
+        # ``"VERY LONG TEXT"``); operands stay inexact so a figurative
+        # constant or special register is never reported undefined.
+        pairs += [
+            (operand, ROLE_READ, False)
+            for operand in stmt.operands
+            if operand.upper() not in consumed
+        ]
+        return pairs
+
+    def _unstring_roles(self, stmt: UnstringStatement) -> _Roles:
+        pairs: _Roles = []
+        if stmt.source_operand:
+            pairs.append((stmt.source_operand, ROLE_READ, True))
+        pairs += [(d, ROLE_READ, False) for d in stmt.delimiters]
+        for target in stmt.into_targets:
+            for key in ("target", "count_var", "delimiter_var"):
+                if target.get(key):
+                    pairs.append((target[key], ROLE_WRITE, True))
+        # POINTER starts at its current value and is advanced; TALLYING
+        # IN is incremented, never reset: both read and written (#269).
+        for value in (stmt.pointer_variable, stmt.tallying_variable):
+            if value:
+                pairs.append((value, ROLE_READ, True))
+                pairs.append((value, ROLE_WRITE, True))
+        return pairs
+
+    def _inspect_roles(self, stmt: InspectStatement) -> _Roles:
+        pairs: _Roles = []
+        if stmt.target:
+            # The inspected item is always read; REPLACING / CONVERTING
+            # rewrite it in place, so it is written too (#269).
+            pairs.append((stmt.target, ROLE_READ, True))
+            inspected = (stmt.inspect_type or "").upper()
+            # ``TALLYING ... REPLACING`` is recorded as TALLYING_REPLACING.
+            if inspected in ("REPLACING", "CONVERTING", "TALLYING_REPLACING"):
+                pairs.append((stmt.target, ROLE_WRITE, True))
+        for clause in stmt.tallying_clauses:
+            if clause.get("counter"):
+                # TALLYING adds to the counter's current value: it is
+                # read as well as written (#269).
+                pairs.append((clause["counter"], ROLE_READ, True))
+                pairs.append((clause["counter"], ROLE_WRITE, True))
+            # Everything else in an INSPECT clause is a value that may
+            # equally be a (quoted) literal or a figurative -- inexact.
+            pairs += _present_values(clause, ("value", "before", "after"), ROLE_READ)
+        for clause in stmt.replacing_clauses:
+            pairs += _present_values(
+                clause, ("from_value", "to_value", "before", "after"), ROLE_READ
+            )
+        for value in (
+            stmt.converting_from,
+            stmt.converting_to,
+            stmt.converting_before,
+            stmt.converting_after,
+        ):
+            if value:
+                pairs.append((value, ROLE_READ, False))
+        return pairs
+
+    def _xml_json_roles(self, stmt: XmlJsonStatement) -> _Roles:
+        pairs: _Roles = []
+        if stmt.primary_operand:
+            role = ROLE_WRITE if stmt.action == "GENERATE" else ROLE_READ
+            pairs.append((stmt.primary_operand, role, True))
+        if stmt.from_item:
+            pairs.append((stmt.from_item, ROLE_READ, True))
+        # COUNT IN and JSON PARSE's INTO receive a value; every other
+        # clause subject (NAME OF / TYPE OF / SUPPRESS / CONVERTING /
+        # NAMESPACE ...) is read.
+        for receiver in (stmt.count_in, stmt.into_item):
+            if receiver:
+                pairs.append((receiver, ROLE_WRITE, True))
+        pairs += [(name, ROLE_READ, True) for name in stmt.clause_items]
+        for procedure in (stmt.processing_procedure, stmt.processing_procedure_thru):
+            if procedure:
+                pairs.append((procedure, ROLE_PERFORM, True))
+        return pairs
+
+    # First match wins, in this order (ComputeStatement before its
+    # ArithmeticStatement relatives, as the isinstance chain it replaced).
+    _DATA_ROLE_HANDLERS: ClassVar[tuple[tuple[type, _RoleHandler], ...]] = (
+        (MoveStatement, _move_roles),
+        (DisplayStatement, _display_roles),
+        (ComputeStatement, _compute_roles),
+        (ArithmeticStatement, _arithmetic_roles),
+        (SetStatement, _set_roles),
+        (AllocateStatement, _allocate_roles),
+        (ContinueStatement, _continue_roles),
+        (FreeStatement, _free_roles),
+        (InitializeStatement, _initialize_roles),
+        (StringStatement, _string_roles),
+        (UnstringStatement, _unstring_roles),
+        (InspectStatement, _inspect_roles),
+        (XmlJsonStatement, _xml_json_roles),
+    )
 
     def _control_statement_roles(
         self, stmt: CobolStatement
