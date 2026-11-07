@@ -1390,24 +1390,36 @@ class XrefAnalyzer:
                 (name, role, False) for name in sorted(_extract_identifiers(value.text))
             ]
         if isinstance(value, CobolExpression):
-            triples = [
-                (name, role, True) for name in sorted(_walk_expression_operands(value))
-            ]
-            # ``X IS [NOT] HEX-CHARS``: the class-name sits in the operator,
-            # which the operand walk deliberately skips (#539); a declared
-            # SPECIAL-NAMES class is referenced there (#519).
-            triples += [
-                (name, role, True)
-                for name in sorted(_class_test_names(value))
-                if (entry := self._data.get(name)) is not None
-                and entry.kind == KIND_CLASS_NAME
-            ]
-            return triples
+            return self._expression_names(value, role)
         if not isinstance(value, str):
             # Clause values read out of a dict (a PERFORM AFTER's
             # ``until_condition``, ...) may be an expression *or* raw operand
             # text; ``_names_from_value`` is exactly that dispatch.
             return [(name, role, True) for name in sorted(_names_from_value(value))]
+        return self._operand_text_names(value, role)
+
+    def _expression_names(
+        self, value: CobolExpression, role: str
+    ) -> list[tuple[str, str, bool]]:
+        """``_names_for`` of a ``CobolExpression``: its operands, walked
+        structurally, plus any declared class-name in a class test."""
+        triples = [
+            (name, role, True) for name in sorted(_walk_expression_operands(value))
+        ]
+        # ``X IS [NOT] HEX-CHARS``: the class-name sits in the operator,
+        # which the operand walk deliberately skips (#539); a declared
+        # SPECIAL-NAMES class is referenced there (#519).
+        triples += [
+            (name, role, True)
+            for name in sorted(_class_test_names(value))
+            if (entry := self._data.get(name)) is not None
+            and entry.kind == KIND_CLASS_NAME
+        ]
+        return triples
+
+    def _operand_text_names(self, value: str, role: str) -> list[tuple[str, str, bool]]:
+        """``_names_for`` of operand text: the operand (keeping *role*), its
+        reference-modifier names and its subscripts."""
         if _FUNCTION_RE.search(value):
             self._caveat(
                 "an intrinsic FUNCTION reference joins the function name and its "
