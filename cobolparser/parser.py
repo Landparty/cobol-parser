@@ -159,7 +159,9 @@ class CobolParser:
     - StatementRegistry for statement parsing
     - TokenStream for lookahead-enabled token navigation
 
-    Supports multiple dialects, error recovery modes, and memory management.
+    Supports multiple dialects, error recovery modes, and a recorded-error cap
+    (``MemoryConfiguration.max_error_count``; its memory fields are not
+    enforced).
     """
 
     def __init__(
@@ -338,6 +340,9 @@ class CobolParser:
         )
 
         self._begin_parse()
+        # A stream left over from an earlier parse() must not lend its
+        # position to an error raised before this parse tokenizes.
+        self.stream = None
         self.decimal_point_is_comma = False
         self.currency_signs = {}
         self.source_is_fixed_format = False
@@ -403,9 +408,7 @@ class CobolParser:
                 e,
                 exc_info=True,
             )
-            err = ParseError(f"Parser error: {e}", line_number=1, column=1)
-            err.__cause__ = e
-            self.add_error(err)
+            self.add_error(self._unexpected_error("Parser error", e))
             return self._create_result(None)
 
     def _preprocess_source(self, source: str, filename: str) -> tuple[str, bool] | None:
@@ -595,16 +598,9 @@ class CobolParser:
         self.stream.omitted_source_lines = tuple(self._omitted_copy_lines)
         return True
 
-    # The @overload stubs below are for static type checkers only and must
-    # never be compiled: a whole-module Cython build (the retired closed-source
-    # release build compiled this file) evaluates
-    # each stub's `param: T = ...` default against its annotation at class-
-    # body execution time (CPython never does this), and under the release
-    # build's optimization flags that mismatch doesn't raise a clean error --
-    # it corrupts the compiled method table, and the real `parse()`/
-    # `parse_cobol()` crash with a native access violation on the very next
-    # call. Gating on TYPE_CHECKING keeps the overloads visible to mypy/IDEs
-    # while making them runtime-invisible, so Cython never sees them at all.
+    # The @overload stubs below are for static type checkers only; gating them
+    # on TYPE_CHECKING keeps them visible to mypy/IDEs and out of the runtime
+    # class body.
     if TYPE_CHECKING:
 
         @overload
@@ -744,7 +740,9 @@ class CobolParser:
                         exc_info=True,
                     )
                     if not isinstance(e, ParseError):
-                        self.add_error(ParseError(str(e), line_number=1, column=1))
+                        self.add_error(
+                            self._unexpected_error("Division parsing error", e)
+                        )
                     elif e not in self.errors:
                         self.add_error(e)
                     if self.error_recovery == ErrorRecoveryMode.FAIL_FAST:
@@ -757,9 +755,7 @@ class CobolParser:
             if self.error_recovery == ErrorRecoveryMode.FAIL_FAST:
                 return primary_program if divisions_parsed else None
         except Exception as e:
-            self.add_error(
-                ParseError(f"Division parsing error: {str(e)}", line_number=1, column=1)
-            )
+            self.add_error(self._unexpected_error("Division parsing error", e))
             if self.error_recovery == ErrorRecoveryMode.FAIL_FAST:
                 return primary_program if divisions_parsed else None
 
@@ -1022,6 +1018,40 @@ class CobolParser:
         token = self.stream.peek()
         if token and token.value == ".":
             self.stream.consume()
+
+    def _unexpected_error(self, prefix: str, exc: Exception) -> ParseError:
+        """A ParseError recording an unexpected (non-ParseError) exception.
+
+        The message keeps the exception's type name (``RuntimeError: ...``)
+        and the error is chained to *exc* through ``__cause__``. The location
+        is the exception's own when it carries one (a ``line_number`` /
+        ``column`` pair or a ``location`` with ``line`` / ``column``),
+        otherwise the token the stream is positioned at; ``line 1, column 1``
+        only when neither is available.
+        """
+        line, column = self._exception_position(exc)
+        err = ParseError(
+            f"{prefix}: {type(exc).__name__}: {exc}", line_number=line, column=column
+        )
+        err.__cause__ = exc
+        return err
+
+    def _exception_position(self, exc: Exception) -> tuple[int, int]:
+        """(line, column) for :meth:`_unexpected_error`; see there."""
+        line = getattr(exc, "line_number", None)
+        column = getattr(exc, "column", None)
+        location = getattr(exc, "location", None)
+        if not isinstance(line, int) and location is not None:
+            line = getattr(location, "line", None)
+            column = getattr(location, "column", None)
+        if isinstance(line, int) and line > 0:
+            return line, column if isinstance(column, int) and column > 0 else 1
+        try:
+            current = self.get_current_location()
+        except Exception:
+            # The stream itself may be what failed; fall back to the start.
+            return 1, 1
+        return current.line, current.column
 
     def get_current_location(self) -> SourceLocation:
         """Get current source location."""
