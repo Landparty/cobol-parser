@@ -14,6 +14,35 @@ deliberate. Anything else appended to the bottom is a mistake: five
 entries, including both 2026-09-15 sections, were found there on
 2026-09-15 and moved back up.
 
+## 2026-11-06 -- tech-debt pass: Cython removed, CLI/MCP split, one walker
+
+- [lexer.md](lexer.md), [preprocessing.md](preprocessing.md),
+  [parser/divisions.md](parser/divisions.md), [tests.md](tests.md),
+  [index.md](index.md): the Cython accelerators (`_lexer_fast`,
+  `_preprocess_fast`, `_data_fast`, `_accel.py`, `setup.py`) are gone; one
+  `CobolLexer`, one `normalize_fixed_format`, one data-item clause loop.
+  Dead lexer API, `TokenType.ALL`, `TokenStream.transaction()` and
+  `CobolFileDescription` removed ([ast-models.md](ast-models.md)).
+- [parser/orchestration.md](parser/orchestration.md): unexpected exceptions
+  keep type, location and cause (`_unexpected_error`, `_exception_position`).
+- [cli.md](cli.md): `cli/parse.py` is an entry point over `cli/commands/`
+  and `cli/_common.py`; the `ANALYZERS` registry; `batch` / `scan` gain
+  `--timeout` / `--max-file-bytes`; `limits:` in `cobol.yml`.
+- [batch.md](batch.md): per-file resource limits (`_file_limits.py`).
+- [mcp.md](mcp.md): `mcp/tools.py` + `jcl_tools.py` are the `mcp/tools/`
+  package.
+- [ast-models.md](ast-models.md), [analysis.md](analysis.md) and the
+  analysis topic files: the canonical nested-body list
+  (`NESTED_BODY_ATTRS`, `iter_clause_bodies`, `walk_statements`) and
+  `_names.py` as the one name normalizer.
+- [parser/divisions.md](parser/divisions.md),
+  [parser/statements-control.md](parser/statements-control.md),
+  [analysis/data-use.md](analysis/data-use.md): clause / phrase / xref-role
+  dispatch tables replacing the highest-complexity functions.
+- [generators/record-data.md](generators/record-data.md),
+  [generators/decode-compare.md](generators/decode-compare.md): IBM editing
+  examples pinned; all-`*` zero fills CR/DB.
+
 ## 2026-11-06 -- lint batch 3: compiler-check rules
 
 - [analysis/lint.md](analysis/lint.md#compiler-check-rules): ten rules from

@@ -60,7 +60,11 @@ from typing import TYPE_CHECKING, Any
 
 from ..models.program import CobolProgram
 from ..models.sql_statements import ExecSQLStatement
-from ..models.statements.base import ConditionalExpression, LogicalExpression
+from ..models.statements.base import (
+    ConditionalExpression,
+    LogicalExpression,
+    iter_clause_bodies,
+)
 from ..models.statements.call import CallStatement
 from ..models.statements.control import (
     EvaluateStatement,
@@ -83,7 +87,6 @@ from .boundary_inventory import (
     _condition_field_names,
 )
 from .const_fold import (
-    _HANDLER_BODY_ATTRS,
     _MAX_WALK_STEPS,
     _SECTION_KEY,
     _entry_paragraph,
@@ -401,11 +404,9 @@ class _Walk:
         else:
             self.push_handlers(stmt)
             if isinstance(stmt, (EvaluateStatement, SearchStatement)):
-                handlers = [getattr(stmt, attr, None) for attr in _HANDLER_BODY_ATTRS]
                 bodies = [
-                    body
-                    for body in _nested_statement_lists(stmt)
-                    if not any(body is handler for handler in handlers)
+                    body.statements
+                    for body in iter_clause_bodies(stmt, include_handlers=False)
                 ]
                 self.push_region(bodies, exempt=False)
 
@@ -549,10 +550,10 @@ class _Walk:
         )
         normal: list[list[Any]] = []
         exempt: list[list[Any]] = []
-        for attr in _HANDLER_BODY_ATTRS:
-            body = getattr(stmt, attr, None)
-            if isinstance(body, list) and body:
-                (exempt if attr in exempt_attrs else normal).append(body)
+        for body in iter_clause_bodies(stmt):
+            if body.kind == "handler":
+                target = exempt if body.attr in exempt_attrs else normal
+                target.append(body.statements)
         self.push_region(normal, exempt=False)
         self.push_region(exempt, exempt=True)
 

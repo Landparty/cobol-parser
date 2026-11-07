@@ -1,8 +1,8 @@
 ---
 type: Module
 title: Lexer
-description: Tokenizes COBOL source into Token objects (CobolLexer, tokenize_cobol), the TokenType enum, literal helpers (_literals.py), line splitting (_lines.py), and the opt-in Cython fast path (_lexer_fast.pyx, gated by _accel.py / COBOLPARSER_ACCEL=1).
-tags: [lexer, tokenizer, cython, token-type]
+description: Tokenizes COBOL source into Token objects (CobolLexer, tokenize_cobol), the TokenType enum, literal helpers (_literals.py) and line splitting (_lines.py). Pure Python.
+tags: [lexer, tokenizer, token-type]
 timestamp: 2026-10-15T00:00:00Z
 ---
 
@@ -18,14 +18,11 @@ runs the same normalize-then-lex pipeline.
 Entry points: `CobolLexer(source, filename, dialect, free_form).tokenize()`,
 `tokenize_cobol(source, ...)`, and the private `_tokenize_source()` the CLI
 uses. Supporting modules: `_literals.py` (re-emitting / reading back literal
-text), `_lines.py` (`split_source_lines`), `_accel.py` (the accelerator
-switch), `_lexer_fast.pyx` (Cython subclass).
+text), `_lines.py` (`split_source_lines`).
 
-**Pure Python is the default backend.** `CobolLexer` is `_CobolLexerPure`
-unless `COBOLPARSER_ACCEL=1` is set at import time *and* the compiled
-`cobolparser._lexer_fast` imports; see [Cython acceleration](#cython-acceleration).
-Any lexing change must be made in both `lexer.py` and `_lexer_fast.pyx` when
-it touches one of the overridden methods (table below).
+The lexer is one pure-Python class. (Opt-in Cython accelerators existed until
+2026-11; they were removed because a ~1.34x measured speedup did not justify
+a second implementation of every hot path.)
 
 To get started: read [Public API](#public-api), then [TokenType enum](#tokentype-enum);
 the later sections are per-feature behaviour notes, each pinned by a
@@ -36,7 +33,7 @@ regression test.
 * [Public API](#public-api)
 * [TokenType enum](#tokentype-enum)
 * [Fixed-format column layout](#fixed-format-column-layout)
-* [Cython acceleration](#cython-acceleration)
+* [Line-start quote whitespace](#line-start-quote-whitespace)
 * [Literal round trip (`_literals.py`)](#literal-round-trip-_literalspy)
 * [DECIMAL-POINT IS COMMA](#decimal-point-is-comma)
 * [Errors](#errors)
@@ -79,8 +76,7 @@ delimiter a `STRING_LITERAL` was written with, `'` or `"`; excluded from
 equality and repr; None for a continued multi-line literal or a merged `&`
 literal). `STRING_LITERAL` `value`s arrive **decoded** (delimiters stripped,
 doubled delimiter collapsed). `quote` exists for embedded SQL, where `"X"` is
-a delimited identifier rather than a string (#597); the Cython
-`_try_single_line_string` sets it too.
+a delimited identifier rather than a string (#597).
 
 Module-level helpers also used outside the lexer:
 `mask_comment_entries(source)` (blanks IDENTIFICATION comment-entry text,
@@ -89,7 +85,7 @@ same length/line breaks -- used by the COPY/REPLACE text scanners) and
 
 ## TokenType enum
 
-`TokenType(IntEnum)` — 244 members (`len(TokenType)`;
+`TokenType(IntEnum)` — 245 members (`len(TokenType)`;
 `COMMENT_ENTRY` is last). Using `IntEnum` rather than plain `Enum`
 makes hot-path membership tests and `hash()` lookups significantly cheaper.
 
@@ -124,132 +120,13 @@ The lexer works on free-form text. `normalize_fixed_format` (see
 [preprocessing.md](preprocessing.md)) handles column extraction and continuation
 line merging before tokenization.
 
-## Cython acceleration
+## Line-start quote whitespace
 
-**Pure Python is the default backend.** The accelerators
-are an opt-in, chosen by one environment variable, `COBOLPARSER_ACCEL=1`
-(`1`/`true`/`yes`/`on`, case-insensitive), read at both ends:
-
-* **build time** — `setup.py` compiles the three extensions only when it is
-  set, so a stock `pip install .` builds nothing and needs no compiler.
-  `COBOLPARSER_SKIP_EXT=1` (the old opt-out) is still honoured and wins.
-* **import time** — `cobolparser/_accel.py`'s `accelerators_enabled()` gates
-  each fast-path import site (`lexer.py`, `preprocess/__init__.py`,
-  `parsers/divisions/data_clauses.py`). An installed `.so` is ignored without
-  the variable, so a stale or mismatched binary cannot change what a default
-  install does. It reads `os.environ` on every call (not cached), so a test can
-  flip the variable and `importlib.reload` a module that owns a fast path.
-  `_accel.py` has zero internal imports; `setup.py` reads the variable itself.
-
-The PyPI wheels still ship compiled (`[tool.cibuildwheel] environment`), so
-wheel users only need the variable at run time.
-
-```bash
-# Build in-place (development); pre-generated .c files are checked in, so
-# only a C compiler is needed (Cython, via the [fast] extra, re-cythonizes)
-COBOLPARSER_ACCEL=1 python setup.py build_ext --inplace
-
-# Run with them (the suite too: this is how the fast paths get exercised)
-COBOLPARSER_ACCEL=1 python -m pytest tests/ --no-cov
-```
-
-Three optional extension modules live alongside the pure-Python sources:
-
-| Module | Overrides (pure-Python file) | Accelerated symbols |
-|--------|------------------------------|---------------------|
-| `cobolparser/_lexer_fast.pyx` | `cobolparser/lexer.py` (`_CobolLexerPure`) | `check_division_header`, `read_word_from_text`, `tokenize_program_text`, `_try_single_line_string`, `read_number_from_text`, `tokenize` |
-| `cobolparser/_preprocess_fast.pyx` | `cobolparser/preprocess/__init__.py` | `normalize_fixed_format` |
-| `cobolparser/_data_fast.pyx` | `cobolparser/parsers/divisions/data_clauses.py` | `parse_data_item_clauses_fast` (the `.pyx` also defines `parse_picture_clause_fast`, which nothing imports) |
-
-`_lexer_fast.CobolLexer` subclasses `_CobolLexerPure` and inherits
-everything else (`KEYWORDS`, `FIGURATIVE_CONSTANTS`, `_post_tokenize` and its
-passes, the warning accessors), so a change to those reaches both paths with
-no `.pyx`/`.c` regeneration. A change to an overridden method has no shared
-helper to lean on: make it in both files and regenerate the checked-in `.c`.
-
-### Activation
-
-Each host module swaps the fast symbol in only under the
-switch, and stays pure silently when the extension is absent:
-
-```python
-# lexer.py (bottom of file)
-CobolLexer = _CobolLexerPure
-if accelerators_enabled():
-    try:
-        from cobolparser._lexer_fast import CobolLexer
-    except ImportError:
-        pass
-```
-
-`preprocess/__init__.py` (`normalize_fixed_format`) does the same;
-`parsers/divisions/data_clauses.py` raises `ImportError` itself when the
-switch is off and then runs the signature probe below.
-
-### Typed locals must not narrow what the pure path accepts
-
-When C-typing a mirror, only type values whose range the pure path also
-bounds (loop indexes, positions) -- never a value read out of the source.
-`parse_data_item_clauses_fast` holds the OCCURS min/max counts in
-`cdef object`, not `cdef int`: a count past 2**31-1 would raise
-`OverflowError`, which escapes the `(TypeError, ValueError)` guards mirrored
-from the pure walker, and the division loop would recover by abandoning the
-whole DATA DIVISION where the pure path keeps the count.
-
-### Signature-drift guard (`_data_fast`)
-
-`ImportError` is not the only way the fast path can be wrong. The extension
-is compiled separately from its caller, so the binary can be *older* than the
-Python module that calls it — a stale in-place `.so`, a cached `build/` tree,
-or an installed wheel shadowing the source tree. `data_clauses.parse_data_item`
-calls `parse_data_item_clauses_fast` with `_DATA_FAST_ARG_COUNT` (20)
-positional arguments; an arity mismatch raises `TypeError` in the middle of
-every data-description entry, and the division loop then abandons the
-division, leaving a near-empty AST.
-
-`data_clauses._data_fast_usable()` probes the compiled helper once at
-import: with an empty token list the clause loop never runs, so the helper
-returns its `pos` argument without reading any other parameter (hence `None`
-placeholders for the rest). On mismatch the fast path is disabled
-(`_HAS_DATA_FAST = False`, helper set to `None`) and `logger.warning` names the
-rebuild. A *missing* extension stays silent — that is a normal pure-Python
-install, not a misconfiguration.
-
-**Why `logger.warning` and not `warnings.warn`:** this runs at module import,
-so under `-W error` / `PYTHONWARNINGS=error` / a downstream pytest
-`filterwarnings = error` a warning would turn a stale build into an
-`import cobolparser` failure — inverting the guard's own purpose. Pinned by
-`test_import_survives_warnings_as_errors`.
-
-Arity is the drift that actually happens (parameters get appended as the fast
-path grows); a same-arity extension with reordered parameters is not detected,
-and nothing cheap would. When adding a parameter to
-`parse_data_item_clauses_fast`, update `_DATA_FAST_ARG_COUNT` alongside the
-call site. `_DATA_FAST_ARG_COUNT` is a *third* copy of the arity (after the
-`.pyx` and the literal call), so two tests
-(`tests/regression/test_data_fast_signature_drift.py`) pin it from both sides: one against
-the compiled extension's real signature, one parsing `data_clauses.py`'s AST to
-count the literal call's arguments. Without the second, bumping the constant
-and the `.pyx` while missing the call site leaves the probe passing and the
-real call raising `TypeError`, unguarded and unreported.
-
-The guard protects against stale *builds*, not against a stale checked-in `.c`;
-keeping each `.c` in sync with its `.pyx` is a separate obligation.
-
-### Pure/Cython parity
-
-Decisions the two lexers both make must use the same character classes.
 `is_line_start_quote` (whether an unterminated string could continue a
-preceding VALUE clause) checks only `" \t"` before the quote in both lexers,
-never `str.strip()` / `isspace()`, which also accepts `\v`, `\f`, NBSP and so
+preceding VALUE clause) checks only `" \t"` before the quote, never
+`str.strip()` / `isspace()`, which also accepts `\v`, `\f`, NBSP and so
 classifies the same line differently. Pinned by
 `tests/regression/test_normalize_line_number_preservation.py::TestLexerLineStartQuoteWhitespaceParity`.
-
-### Performance
-
-Approximately **~3× lexer throughput** over pure Python
-(stated in `README.md`). Preprocessor and DATA DIVISION gains are comparable
-but are not separately benchmarked in the checked-in docs.
 
 ## Literal round trip (`_literals.py`)
 
@@ -292,8 +169,8 @@ COMMA`, over `_code_text()` -- the source with `*>` comments, fixed-format
 comment lines and literal text blanked, so a commented-out or quoted clause
 declares nothing;
 the result is `CobolLexer.decimal_point_is_comma` and `_decimal_char`
-(`","` or `"."`). Under it, in **both** `read_number_from_text`s (pure and
-`_lexer_fast.pyx`, which reads `self._decimal_char`):
+(`","` or `"."`). Under it, in `read_number_from_text` (which reads
+`self._decimal_char`):
 
 * a `,` between digits is the decimal point: `2,75` is one
   `NUMERIC_LITERAL` whose `value` is the canonical `2.75` (every consumer
@@ -310,8 +187,7 @@ modelled). `CobolParser` copies the flag onto itself
 (`decimal_point_is_comma`, reset per `parse()`), and the DATA DIVISION
 hands it to `PictureClause` (see [ast-models.md](ast-models.md)). The
 SPECIAL-NAMES parser emits no "not honored by the lexer" warning for the
-clause. Pinned by `tests/regression/test_decimal_point_is_comma.py`, which
-runs every lexer case against both lexers.
+clause. Pinned by `tests/regression/test_decimal_point_is_comma.py`.
 
 ## Errors
 
@@ -320,10 +196,9 @@ unrecognised characters or malformed string literals.
 
 ## Warnings (non-fatal diagnostics)
 
-`CobolLexer` (both the pure-Python `_CobolLexerPure` and the `_lexer_fast`
-Cython subclass) also collects a `self.warnings: list[str]`, reset at the
-top of each `tokenize()` call in both lexers (so repeated `tokenize()` calls
-never duplicate warnings), exposed via:
+`CobolLexer` also collects a `self.warnings: list[str]`, reset at the top of
+each `tokenize()` call (so repeated `tokenize()` calls never duplicate
+warnings), exposed via:
 
 ```python
 lexer = CobolLexer(text, free_form=True)
@@ -333,8 +208,7 @@ lexer.get_warnings()   # -> list[str]
 ```
 
 Pinned by
-`tests/regression/test_audit_2026_08_12_core.py::TestPB5LexerWarningsReset`,
-which exercises both paths.
+`tests/regression/test_audit_2026_08_12_core.py::TestPB5LexerWarningsReset`.
 
 `CobolParser.parse()` forwards every lexer warning into `ParseResult.warnings`
 (prefixed `"Lexer warning: "`) after the `lexer.has_errors()` check.
@@ -368,9 +242,8 @@ Producers:
 the `VALUE` of `USAGE POINTER` / `PROCEDURE-POINTER` / `FUNCTION-POINTER`
 items and the operand of `SET ptr TO NULL` / `IF ptr = NULL`; lexed as
 `IDENTIFIER` they would be indistinguishable from a data-name reference. The
-set is one class attribute that `read_word_from_text` and `read_identifier`
-both consult via `self.`, so `_lexer_fast` (which does not redefine it) needs
-no regeneration when it changes. `analysis/move_type_checker.py`,
+set is one class attribute that `read_word_from_text` consults via `self.`.
+`analysis/move_type_checker.py`,
 `analysis/constraints.py` and `generators/data/values.py` carry their own
 `NULL`/`NULLS` lists that must agree with it. Pinned by
 `tests/regression/test_null_pointer_value_clause.py` and
@@ -396,30 +269,26 @@ so entries are not re-added for "completeness":
   `parsers/statements/_conditions.py`'s docstring). Pinned by
   `tests/regression/test_dead_keyword_removal.py`.
 * **No multi-word keys.** `KEYWORDS` is only ever consulted with a *single*
-  word (`read_word_from_text`/`read_identifier` build one word at a time), so
+  word (`read_word_from_text` builds one word at a time), so
   a key containing a space (`"KEY IS"`, `"WITH LOCK"`, `"NO REWIND"`,
   `"NO ADVANCING"`) can never match. The single-word aliases (`"REWIND"`,
   `"ADVANCING"`, ...) remain; the parsers recognize the phrases word by word.
 
-`_lexer_fast.pyx` consults the inherited `self.KEYWORDS` dict, so a change to
-it applies to both lexers with no regeneration.
-
 ## Free-form `*>` inline comments
 
 `*>` outside a literal ends the line's code: the rest of the line becomes one
-`COMMENT` token (both lexers). `normalize_fixed_format` strips only *whole*
+`COMMENT` token. `normalize_fixed_format` strips only *whole*
 comment lines, so without this the comment's words lex as code (`*` as
 `MULTIPLY_OP`, `>` as `GREATER`, and `*> start at 2` yields a bogus
 `IOStartStatement`; cf. `examples/cobol/shamrice/unstring.cbl:243`).
 
-`tokenize_program_text` (pure and `_lexer_fast.pyx`) checks `char == "*" and
+`tokenize_program_text` checks `char == "*" and
 text[pos+1] == ">"` immediately before the single-character-token dispatch (so
 `*` isn't read as `MULTIPLY_OP` first). The check runs after the
 string-literal branch, so `*>` inside a quoted literal (`"A *> B"`) is literal
 text; `**` (exponentiation) is unaffected. Statement parsers skip `COMMENT`
 tokens via `skip_whitespace()` (`parsers/statements/_utils.py`). Pinned by
-`tests/regression/test_inline_comment_stripping.py`, including a pure/Cython
-parity check.
+`tests/regression/test_inline_comment_stripping.py`.
 
 ## Tokenize pipeline (`_tokenize_source`)
 
@@ -433,8 +302,7 @@ helper in `lexer.py` (its fixed-or-free verdict comes from
 token (count, values, line numbers). Comment lines are not lost:
 `_fixed_format_comment_tokens()` captures them during normalization and
 `_merge_comment_tokens()` re-emits them as `COMMENT` tokens at their
-original line numbers. These helpers are module-level, with no
-`_lexer_fast.pyx` / `_preprocess_fast.pyx` mirror. Pinned by
+original line numbers. These helpers are module-level. Pinned by
 `tests/regression/test_open_findings_m6_regression.py`.
 
 * **Normalization warnings.** `_tokenize_source` passes `warnings=` to its
@@ -471,8 +339,7 @@ A digit-led word with a letter anywhere in its hyphen-joined segments
 (`43E00-PROD`, `22310-01-TRAITE`, `25COUNT`) is an `IDENTIFIER`, not a
 number.
 
-`tokenize_program_text`'s digit branch (identical logic in `lexer.py` and
-`_lexer_fast.pyx`, no shared helper) decides identifier-vs-numeric-literal for
+`tokenize_program_text`'s digit branch decides identifier-vs-numeric-literal for
 a token starting with a digit. A one-segment lookahead is not enough:
 `43E00-PROD`'s first segment looks like scientific notation, and
 `22310-01-TRAITE`'s second segment is all digits. So the lookahead skips past
@@ -497,8 +364,7 @@ result by
 
 A procedure name may be digits alone (`1000-0`, `0100-0200`). The digit
 branch above still reads `1000-0` as `1000` `-` `0` (no letter), so the
-`_post_tokenize` pass `_merge_numeric_procedure_names()` (shared by both
-lexers) joins digit runs glued by hyphens, with no gap between the tokens,
+`_post_tokenize` pass `_merge_numeric_procedure_names()` joins digit runs glued by hyphens, with no gap between the tokens,
 into one `IDENTIFIER` when nothing but a period, comma, semicolon or line
 end abuts the last run. `1000-0.5` and anything inside `EXEC ... END-EXEC`
 (SQL `10-5` is arithmetic) are left alone. Before 2026-10-29 the paragraph
@@ -514,9 +380,8 @@ know (`STRAY_CHAR`: `¦`, `§`, `?`, `{`, box-drawing `│`, a codepage-mangled
 glyph, a control byte) are kept as tokens inside `EXEC ... END-EXEC` and
 dropped elsewhere, with a warning.
 
-`CobolLexer._drop_stray_chars()` runs at the end of `tokenize()` (both the
-pure-Python and `_lexer_fast.pyx` implementations call it — the fast path
-inherits the pure-Python method; one linear scan, no C mirror). Outside an
+`CobolLexer._drop_stray_chars()` runs at the end of `tokenize()` (one linear
+scan). Outside an
 EXEC token span:
 
 - a `#` / `@` declared as a SPECIAL-NAMES currency symbol is retyped
@@ -583,13 +448,12 @@ token's line number by one. See [preprocessing.md](preprocessing.md).
 
 ## `&` literal concatenation
 
-`&` is never a token (both lexers skip it as a separator), but
-`tokenize()` -- pure-Python and `_lexer_fast.pyx` alike -- ends with
+`&` is never a token (the lexer skips it as a separator), but
+`tokenize()` ends with
 `CobolLexer._post_tokenize()`, which runs `_merge_concatenated_literals()`,
 `_merge_template_placeholders()`, `_drop_stray_chars()`, `_retype_operator_currency_symbols()` (see
 [Declared currency symbols](#declared-currency-symbols)), then
-`_retype_legacy_verb_data_names()`, and rewrites `self.tokens` in place (the
-Cython path returns the same list). The last pass (#525) retypes the legacy
+`_retype_legacy_verb_data_names()`, and rewrites `self.tokens` in place. The last pass (#525) retypes the legacy
 verbs CHAIN / NOTE / EXHIBIT / EXAMINE / TRANSFORM to IDENTIFIER, everywhere
 in the source, when the program declares the word as a data name: it directly
 follows a level number that starts an entry (line start or after a period)
@@ -616,8 +480,7 @@ whose `raw_value` is every part's source joined with ` & `
 so a caller reading a prefix off it must treat it as a concatenation), which the record-image
 generator reads back as bytes plus characters. The
 merged token keeps the first literal's location; NEWLINEs between the
-parts follow it. Fast path: no `&` in any line -> no work. The checked-in
-`_lexer_fast.c` is generated with Cython 3.3.0. Pinned by
+parts follow it. Fast path: no `&` in any line -> no work. Pinned by
 `tests/regression/test_literal_concatenation.py`.
 
 **`*>` comments between the parts (#389).** A floating
@@ -636,8 +499,7 @@ up to the next Area A entry. Lexed as program text, `AUTHOR. JOHN O'BRIEN.`
 would raise a spurious "Unterminated string literal" warning (the apostrophe)
 and `DATE-WRITTEN. 01/02/99.` would split into `01 / 02 / 99`. So
 `_comment_entry_starts(source, lines)` (module-level, pure Python, called
-once per `tokenize()` on the free-form path by **both** lexers -- the
-Cython `tokenize` mirrors the dispatch) maps each IDENTIFICATION DIVISION
+once per `tokenize()` on the free-form path) maps each IDENTIFICATION DIVISION
 line holding comment-entry text to the offset where it starts;
 `_comment_entry_line_tokens()` lexes the paragraph name normally and emits
 the rest of the line as one `COMMENT_ENTRY` token, verbatim. Area rules
@@ -648,8 +510,7 @@ included -- up to the next Area A line; one indented deeper claims only its
 own line. The whole scan is skipped unless one multiline regex search finds
 a comment-entry paragraph name at a line start. The fixed-format
 (`free_form=False`) path does not do this; the parser always lexes normalized
-free-form text. `tests/regression/test_comment_entry_verbatim.py` (includes
-a pure/Cython parity check).
+free-form text. `tests/regression/test_comment_entry_verbatim.py`.
 
 ## Declared currency symbols
 
@@ -657,7 +518,7 @@ a pure/Cython parity check).
 makes the symbol a PICTURE editing character like `$`. `__init__`
 collects the declared symbols (`declared_currency_signs(source)`, one regex
 scan; digits, spaces and the letters A B C D E G N P R S U V X Z are never
-symbols) and keeps the non-letters in `self._currency_symbols`; in `tokenize_program_text` (both lexers) a
+symbols) and keeps the non-letters in `self._currency_symbols`; in `tokenize_program_text` a
 character that would otherwise be a dropped stray character is emitted
 as a `CURRENCY` token when it is declared. Characters that already lex as
 something (`& ! | < > :`, letters) are not rerouted. Without the declaration,

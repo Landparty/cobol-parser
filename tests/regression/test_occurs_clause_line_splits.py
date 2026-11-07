@@ -2,9 +2,8 @@
 a real mainframe corpus retry ("Unparsed token 'TIMES'/'INDEX' ... clause
 not fully supported").
 
-Four independent gaps, all in the OCCURS clause walk (pure-Python
-``data_clauses._parse_occurs_clause`` and its Cython mirror in
-``_data_fast.pyx`` -- both fixed identically):
+Four independent gaps, all in the OCCURS clause walk
+(``data_clauses._parse_occurs_clause``):
 
 1. **Count on the line after OCCURS.** A long data name routinely pushes
    ``OCCURS`` to the end of its 72-column line, with ``40 TIMES INDEXED BY

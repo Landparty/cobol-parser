@@ -299,27 +299,6 @@ class TestM8TabHandling:
         assert tabbed == untabbed
 
 
-def test_fast_and_pure_normalize_fixed_format_agree_on_m4_m5_m8_cases():
-    """Parity check: the Cython fast path must match the pure-Python
-    implementation on every new behavior introduced by M4/M5/M8 (mirrors
-    the existing test_fast_preprocess_is_active precedent)."""
-    from cobolparser.preprocess import _normalize_fixed_format_pure
-
-    cases = [
-        [
-            " " * 6 + " " + "       DISPLAY 'BEFORE'.",
-            " " * 6 + "D" + "       DISPLAY 'DEBUG-ONLY'.",
-        ],
-        [
-            " " * 6 + " " + '       VALUE "ABC   ',
-            " " * 6 + "-" + '           "DEF".',
-        ],
-        ["\t" + "       DISPLAY 'OK'."],
-    ]
-    for lines in cases:
-        assert normalize_fixed_format(lines) == _normalize_fixed_format_pure(lines)
-
-
 class TestM1DisplayFigurativeConstants:
     """M1 -- DISPLAY SPACE / DISPLAY SPACES (and other figurative
     constants) were not accepted as display items.

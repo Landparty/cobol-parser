@@ -13,8 +13,11 @@ import json
 from pathlib import Path
 
 from cobolparser.analysis.lint import RULES, LintAnalyzer
-from cobolparser.cli.parse import _build_parser, _cmd_sql_cics_check
+from cobolparser.cli.commands.analyze import ANALYZERS
+from cobolparser.cli.parse import _build_parser
 from cobolparser.parser import parse_cobol
+
+_cmd_sql_cics_check = ANALYZERS["sql-cics-check"].run
 
 UNCHECKED_SQL = """       IDENTIFICATION DIVISION.
        PROGRAM-ID. SQLPROG.
@@ -82,7 +85,7 @@ class TestSubcommand:
     def test_it_is_a_known_subcommand(self):
         parsed = _build_parser().parse_args(["sql-cics-check", "prog.cbl"])
 
-        assert parsed.func is _cmd_sql_cics_check
+        assert parsed.func == _cmd_sql_cics_check  # bound method
 
     def test_an_unchecked_sqlcode_and_a_bare_cics_read_are_both_flagged(
         self, tmp_path, capsys

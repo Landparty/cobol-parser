@@ -13,7 +13,7 @@ these names; that is pinned here too.
 import pytest
 
 from cobolparser import ErrorRecoveryMode, parse_cobol, parse_cobol_with_expansion
-from cobolparser.lexer import CobolLexer, _CobolLexerPure
+from cobolparser.lexer import CobolLexer
 
 TEMPLATE = (
     "       01  (9999-)MOD-DTTX0F.\n"
@@ -82,13 +82,6 @@ def test_pictures_subscripts_and_reference_modification_are_untouched(line, expe
     values = [t.value for t in CobolLexer(line).tokenize()]
     joined = " ".join(values)
     assert " ".join(expected) in joined
-
-
-def test_both_lexers_agree():
-    text = _wrap(TEMPLATE)
-    fast = [(t.type, t.value) for t in CobolLexer(text).tokenize()]
-    pure = [(t.type, t.value) for t in _CobolLexerPure(text).tokenize()]
-    assert fast == pure
 
 
 def test_copy_replacing_resolves_the_placeholders(tmp_path):

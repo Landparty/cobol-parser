@@ -13,9 +13,9 @@ import pytest
 
 from cobolparser.config import ProjectConfig
 from cobolparser.mcp import CobolTools, Workspace
-from cobolparser.mcp.jcl_tools import _sql_statements, _sql_tables
 from cobolparser.mcp.link_decks import parse_deck
-from cobolparser.mcp.tools import compare_sources
+from cobolparser.mcp.tools.brief import compare_sources
+from cobolparser.mcp.tools.jcl_datasets import _sql_statements, _sql_tables
 
 
 def write(root: Path, name: str, text: str) -> None:
@@ -305,7 +305,9 @@ class TestOtherForms:
         assert back["other_forms"]["programs"] == {"ONLINE": 1}
         assert back["other_forms"]["form"] == "EXEC DLI"
 
-    def test_counted_with_no_exec_dli_and_absent_for_a_plain_search(self, tmp_path: Path) -> None:
+    def test_counted_with_no_exec_dli_and_absent_for_a_plain_search(
+        self, tmp_path: Path
+    ) -> None:
         write(
             tmp_path,
             "cbl/BATCH.cbl",

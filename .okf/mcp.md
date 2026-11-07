@@ -1,7 +1,7 @@
 ---
 type: Module
 title: MCP Server
-description: cobolparser/mcp/ and `cobol-parser mcp` -- an MCP server (stdio) that lets AI agents question COBOL source; tools as plain functions (tools.py), the task prompts (prompts.py), the response envelope and caveat kinds (envelope.py), the workspace guard, cobol.yml and parse cache (workspace.py), the root-wide cross-program indexes (codebase_index.py), and the one SDK-importing module (server.py).
+description: cobolparser/mcp/ and `cobol-parser mcp` -- an MCP server (stdio) that lets AI agents question COBOL source; tools as plain functions (the tools/ package, one CobolTools mixin per area, plus the JCL tools), the task prompts (prompts.py), the response envelope and caveat kinds (envelope.py), the workspace guard, cobol.yml and parse cache (workspace.py), the root-wide cross-program indexes (codebase_index.py), and the one SDK-importing module (server.py).
 tags: [mcp, ai, agents, tools, stdio, caveats, source-map]
 timestamp: 2026-10-28T00:00:00Z
 ---
@@ -13,14 +13,26 @@ timestamp: 2026-10-28T00:00:00Z
 `cobol-parser mcp --root DIR` serves COBOL analysis tools to AI agents over
 the Model Context Protocol, on stdin/stdout. Design and later phases:
 `docs/plans/2026-10-15-mcp-server-design.md`; user guide:
-`docs/mcp-server.md`. Start with `CobolTools` in `cobolparser/mcp/tools.py`.
+`docs/mcp-server.md`. Start with `CobolTools` in `cobolparser/mcp/tools/__init__.py`.
 
 | Module | Holds | Imports the SDK |
 |---|---|---|
 | `cobolparser/mcp/envelope.py` | `Response` (caveats + truncation), `Caveat`, `CAVEAT_KINDS`, `ToolError`, `MCP_SURFACE_VERSION`, limits | no |
 | `cobolparser/mcp/workspace.py` | `Workspace` (path guard, `cobol.yml`, LRU parse cache), `ParsedProgram` (unit selection, `locate()`), `stdout_to_stderr()` | no |
-| `cobolparser/mcp/tools.py` | `CobolTools`: `codebase_overview`, `program_brief`, `explain_symbol`, `callers_of`, `impact_of_change`, `where_from`, `record_layout`, `lint`, `read_source`, `business_rules`, `diff_programs`, `decode_record`, `gen_fixtures`, and `jcl_job` / `jobs_running` / `dataset_users` delegating to `jcl_tools.py` | no |
-| `cobolparser/mcp/jcl_tools.py` | the JCL tools (`jcl_job`, `jobs_running`, `dataset_users`), the `jcl` index (`jcl_index`, `JclIndex`, `JclFile`), `_Locator` (job file vs procedure member), `INSTALL_HINT`; reads JCL through `cobolparser.jcl`, so the `[jcl]` extra | no |
+| `cobolparser/mcp/tools/__init__.py` | `CobolTools`: one mixin per area below (each extends `BaseTools`), plus `read_procedure` / `find_statements` / `slice` / `check_claims` and `jcl_job` / `jobs_running` / `dataset_users` delegating to their modules | no |
+| `cobolparser/mcp/tools/common.py` | `BaseTools` (`workspace`, `_relative()`, `_other_language_path()`) and the helpers several tools share: `_attempt()`, `_notes()`, `_listed()`, `_carry_parse_caveats()`, `_carry_index_caveats()`, `_coverage()`, `_declared_elsewhere()`, `_reachability()`, `_flow()`, `_file_facts()`, `_own_statements()`, `_worth_showing()` | no |
+| `cobolparser/mcp/tools/structure.py` | `StructureTools`: `read_source` (`MAX_SOURCE_LINES`, `_source_lines()`), `explain_symbol`, `record_layout`; the data-item walk (`_walk_data_items()`) and layout helpers (`_layout_index()`, `_layout_for()`, `_renames_records()`) | no |
+| `cobolparser/mcp/tools/brief.py` | `BriefTools`: `program_brief` (`BRIEF_*` caps, `_calls()`, `compare_sources()`, `_unreachable_reasons()`) | no |
+| `cobolparser/mcp/tools/callers.py` | `CallersTools`: `callers_of`, program-level `_program_callers()` | no |
+| `cobolparser/mcp/tools/impact.py` | `ImpactTools`: `impact_of_change` (member mode `_copybook_impact()`), `where_from` (`_lineage()`, `_hit()`, `_trail_ends()`) | no |
+| `cobolparser/mcp/tools/overview.py` | `OverviewTools`: `codebase_overview` (`OVERVIEW_TOP`, `OVERVIEW_CLONE_MEMBERS`) | no |
+| `cobolparser/mcp/tools/analysis.py` | `AnalysisTools`: `lint` (`_run_lint()`, also `program_brief`'s), `business_rules`, `diff_programs` | no |
+| `cobolparser/mcp/tools/data.py` | `DataTools`: `decode_record` (`DEFAULT_DECODE_RECORDS`, `MAX_DECODE_BYTES`), `gen_fixtures` (`DEFAULT_FIXTURE_ROWS`, `MAX_FIXTURE_ROWS`) | no |
+| `cobolparser/mcp/tools/jcl_index.py` | the `jcl` index (`jcl_index`, `JclIndex`, `JclFile`, `Libraries`), `jcl_available()` / `require_jcl()`, `INSTALL_HINT`, `_Locator` (job file vs procedure member), and which steps run a program (`run_by()`, `programs_run_by_jcl()`, `step_dds()`, `program_dds()`); reads JCL through `cobolparser.jcl`, so the `[jcl]` extra | no |
+| `cobolparser/mcp/tools/jcl_common.py` | what the JCL tools share: `_dd_row()`, `_step_row()`, `explain_condition()`, `run_order()`, the index caveats (`_carry_index()`), control members, utility dataset uses (`_utility_uses()`, `_idcams_named()`), `_ProgramUses` | no |
+| `cobolparser/mcp/tools/jcl_job.py` | `jcl_job`; SORT control cards over record layouts (`_Layouts`, `_sort_layout()`) | no |
+| `cobolparser/mcp/tools/jcl_programs.py` | `jobs_running` (`_job_flow()`, `_follow_calls()`) | no |
+| `cobolparser/mcp/tools/jcl_datasets.py` | `dataset_users` (DB2 utility SQL, `_sql_programs()`, `_jobs_by_effect()`) | no |
 | `cobolparser/mcp/languages.py` | PL/I and assembler sources read through the sibling parsers (`[pl1]` / `[hlasm]` extras): `LANGUAGE_SUFFIXES`, `SourceFacts`, `read_facts()`, the `languages` index (`languages_index`, `LanguagesIndex`, `source_files`), `facts_for()`, `parser_available()`, `install_hint()`, `LIMITS` | no |
 | `cobolparser/mcp/claims.py` | `check_claims()`, `CLAIM_KINDS`, `MAX_CLAIMS` (25), one checker per kind (`_CHECKERS`) | no |
 | `cobolparser/mcp/sort_layout.py` | DFSORT control statements over a byte map: `parse_sort_control()` (`SortControl`: SORT / MERGE keys incl. `FORMAT=`, INCLUDE / OMIT tests, INREC / OUTREC `FIELDS=` / `BUILD=` as `Segment`s; an edit mask, a `p` with no length, OVERLAY / IFTHEN -> `not_mapped`; INCLUDE / OMIT tests are read quote-aware (`_tests()`), a field-to-field comparison (`p1,m1,f1,EQ,p2,m2,f2`) kept as a `(p2, m2)` value, an unreadable condition -> `not_mapped`; OUTFIL parameters (`_outfil()`) -> `not_mapped` and `outfil_reformat`, so `read_back()` gives `not mapped` rows for a reformatted output, #795), `map_sort()` (`sort_keys`, `record_tests`, `inrec_layout` / `outrec_layout` with lengths, `input_not_copied`; keys read through INREC, tests not: INCLUDE runs first), `read_back()`, `fields_at()` | no |

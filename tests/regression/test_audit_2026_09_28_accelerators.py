@@ -1,40 +1,20 @@
 """Regression tests for the 2026-09-28 accelerator / fixed-format audit.
 
-Each class covers one finding and runs against both implementations it
-touches: the pure-Python normalizer and whichever one the package exposes
-(the Cython ``_preprocess_fast`` when compiled), and the DATA DIVISION clause
-loop with and without the Cython ``_data_fast`` helper.
+Each class covers one finding, in the fixed-format normalizer or the DATA
+DIVISION clause loop. (The audit compared the since-removed Cython
+accelerators against the pure-Python code; the findings it pinned still
+apply to the pure-Python implementation.)
 """
 
 from __future__ import annotations
 
-import json
-
 import pytest
 
-import cobolparser.parsers.divisions.data_clauses as data_clauses
 from cobolparser import parse_cobol, parse_cobol_with_expansion
-from cobolparser.preprocess import _normalize_fixed_format_pure, normalize_fixed_format
+from cobolparser.preprocess import normalize_fixed_format
 from cobolparser.preprocess.copy_statement_parser import normalize_continuation_lines
 
-NORMALIZERS = [
-    pytest.param(_normalize_fixed_format_pure, id="pure"),
-    pytest.param(normalize_fixed_format, id="package"),
-]
-
-# ``fast`` only differs from ``pure`` when the extension is compiled; it is
-# still run otherwise (both then take the pure-Python loop).
-DATA_PATHS = [pytest.param(True, id="fast"), pytest.param(False, id="pure")]
-
-
-@pytest.fixture
-def data_path(request, monkeypatch):
-    monkeypatch.setattr(
-        data_clauses,
-        "_HAS_DATA_FAST",
-        bool(request.param and data_clauses._fast_data_item_clauses is not None),
-    )
-    return request.param
+NORMALIZERS = [pytest.param(normalize_fixed_format, id="normalize")]
 
 
 def _prog(*ws: str) -> str:
@@ -61,12 +41,12 @@ def _to_72(record: str) -> str:
 
 
 # ---------------------------------------------------------------------------
-# 1. _data_fast: an OCCURS count past INT_MAX raised OverflowError
+# 1. An OCCURS count past INT_MAX raised OverflowError
 # ---------------------------------------------------------------------------
 
 
 class TestOccursCountBeyondCInt:
-    """The compiled clause loop held OCCURS counts in C ``int``s. ``int()`` of
+    """A compiled clause loop held OCCURS counts in C ``int``s. ``int()`` of
     a count past 2**31-1 then raised ``OverflowError`` -- not one of the
     ``TypeError``/``ValueError`` the loop guards against -- and the division
     loop recovered by abandoning the whole DATA DIVISION: every item gone,
@@ -80,8 +60,7 @@ class TestOccursCountBeyondCInt:
         "       01 WS-N PIC 9(10).",
     )
 
-    @pytest.mark.parametrize("data_path", DATA_PATHS, indirect=True)
-    def test_large_counts_keep_the_division(self, data_path):
+    def test_large_counts_keep_the_division(self):
         result = parse_cobol(self.SRC)
         assert result.errors == []
         items = _items(result)
@@ -89,17 +68,6 @@ class TestOccursCountBeyondCInt:
         assert items["WS-E"]["occurs_clause"]["max_times"] == 3000000000
         assert items["WS-F"]["occurs_clause"]["min_times"] == 1
         assert items["WS-F"]["occurs_clause"]["max_times"] == 2147483648
-
-    def test_fast_and_pure_agree(self, monkeypatch):
-        dumps = []
-        for fast in (True, False):
-            monkeypatch.setattr(
-                data_clauses,
-                "_HAS_DATA_FAST",
-                fast and data_clauses._fast_data_item_clauses is not None,
-            )
-            dumps.append(json.dumps(parse_cobol(self.SRC).ast.to_dict(), default=str))
-        assert dumps[0] == dumps[1]
 
 
 # ---------------------------------------------------------------------------
@@ -210,8 +178,7 @@ class TestFloatingCommentInDataEntry:
     "unparsed token" -- or, for ``OCCURS *> ...`` / ``10 TIMES``, read as a
     phantom data item with level number 10. Both clause loops did it."""
 
-    @pytest.mark.parametrize("data_path", DATA_PATHS, indirect=True)
-    def test_indexed_by_after_a_comment(self, data_path):
+    def test_indexed_by_after_a_comment(self):
         result = parse_cobol(
             _prog(
                 "       01 WS-T.",
@@ -224,8 +191,7 @@ class TestFloatingCommentInDataEntry:
         assert occurs["max_times"] == 10
         assert occurs["index_names"] == ["IX"]
 
-    @pytest.mark.parametrize("data_path", DATA_PATHS, indirect=True)
-    def test_occurs_count_after_a_comment_is_not_a_level_number(self, data_path):
+    def test_occurs_count_after_a_comment_is_not_a_level_number(self):
         result = parse_cobol(
             _prog(
                 "       01 WS-T.",
@@ -240,8 +206,7 @@ class TestFloatingCommentInDataEntry:
         occurs = items["WS-E"]["occurs_clause"]
         assert (occurs["max_times"], occurs["depending_on"]) == (10, "WS-N")
 
-    @pytest.mark.parametrize("data_path", DATA_PATHS, indirect=True)
-    def test_picture_and_value_operands_after_a_comment(self, data_path):
+    def test_picture_and_value_operands_after_a_comment(self):
         result = parse_cobol(
             _prog(
                 "       01 WS-A PIC *> customer name",

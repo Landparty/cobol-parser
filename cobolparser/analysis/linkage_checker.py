@@ -51,6 +51,7 @@ from ..models.statements import (
     SetStatement,
 )
 from ._cics import cics_identifier_options
+from ._names import bare_item_name
 
 #: LINKAGE items the CICS command-level translator itself passes on the
 #: PROCEDURE DIVISION USING it generates; a source that declares them is a
@@ -60,16 +61,6 @@ _CICS_TRANSLATOR_ITEMS: frozenset[str] = frozenset({"DFHEIBLK", "DFHCOMMAREA"})
 #: ``ADDRESS OF item`` as it appears in a CICS option (``SET(ADDRESS OF
 #: WS-REC)``) -- the item is being based, which is a reference to it.
 _ADDRESS_OF_RE = re.compile(r"^\s*ADDRESS\s+OF\s+([A-Za-z0-9-]+)", re.IGNORECASE)
-
-
-def _bare_name(operand: str) -> str:
-    """The data name of *operand* without a subscript or OF/IN qualifier."""
-    text = operand.strip()
-    for stop in ("(", " OF ", " IN "):
-        cut = text.upper().find(stop)
-        if cut >= 0:
-            text = text[:cut]
-    return text.strip()
 
 
 #: ``ADDRESS OF`` / ``LENGTH OF`` in front of a CALL argument: the item
@@ -401,15 +392,15 @@ class LinkageChecker:
             elif isinstance(node, CallStatement):
                 self._validate_call(node)
             elif isinstance(node, AllocateStatement) and node.data_item:
-                self._mark_referenced(_bare_name(node.data_item))
+                self._mark_referenced(bare_item_name(node.data_item))
             elif isinstance(node, SetStatement) and node.targets_are_address_of:
                 for target in node.targets:
-                    self._mark_referenced(_bare_name(target))
+                    self._mark_referenced(bare_item_name(target))
             elif getattr(node, "node_type", None) == "EXEC_CICS":
                 for value in cics_identifier_options(node).values():
                     based = _ADDRESS_OF_RE.match(value)
                     if based:
-                        self._mark_referenced(_bare_name(based.group(1)))
+                        self._mark_referenced(bare_item_name(based.group(1)))
 
         # 4. Warn on unreferenced LINKAGE items
         self._check_unreferenced_linkage()

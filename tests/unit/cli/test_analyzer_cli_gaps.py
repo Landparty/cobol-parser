@@ -165,7 +165,9 @@ class TestUnusedVariablesCopybookCLI:
         # The unexpanded provenance parse goes through the module-level
         # ``parse_cobol`` import; the main (expanded) parse goes through
         # ``parse_cobol_with_expansion``, so only the provenance pass fails.
-        with patch("cobolparser.cli.parse.parse_cobol", return_value=_FailedResult()):
+        with patch(
+            "cobolparser.cli.commands.analyze.parse_cobol", return_value=_FailedResult()
+        ):
             _run_main(
                 [
                     "unused-variables",

@@ -45,7 +45,11 @@ from typing import Any
 
 from ..models.ast_base import SourceLocation
 from ..models.program import CobolDivision, CobolParagraph, CobolProgram
-from ..models.statements.base import CobolStatement, LogicalExpression
+from ..models.statements.base import (
+    HANDLER_CLAUSE_PAIRS,
+    CobolStatement,
+    LogicalExpression,
+)
 from ..models.statements.control import (
     EvaluateStatement,
     GoStatement,
@@ -58,29 +62,13 @@ from .program_flow import ProgramFlowAnalyzer, ProgramFlowReport
 from .program_flow.edges import GOTO_EDGE_TYPES, PERFORM_EDGE_TYPES
 from .program_flow.scanner import LEADING_SENTENCES_NODE, leading_sentences
 
-# Clause-list attributes that hold nested statements executed only when the
-# clause's condition (an exception, an EOF, an overflow) actually fires or
-# does not -- grouped in (positive, NOT-) pairs, because the two are the two
-# outcomes of one test: a pair with either side present is one decision
-# point, however many of its bodies are written (#553). A local
-# re-derivation of the same attribute set ``program_flow/scanner.py``'s
-# ``_CLAUSE_BODY_ATTRS`` and ``constraints.py``'s ``_NESTED_STATEMENT_ATTRS``
-# already establish (this module's own convention per the OKF: re-derived per
-# module rather than imported, so a change to one walker's needs never
-# silently changes another's). Includes ``on_exception``/``not_on_exception``/
-# ``on_overflow`` (CALL's exception handlers), which are the one clause shape
-# *not* wired into ``.children`` by the AST models -- everything else here is
-# already reachable via the generic child walk below, but checking the full
-# set directly (rather than only the CALL-specific gap) is cheap and matches
-# established precedent.
-_CLAUSE_PAIRS: tuple[tuple[str, str], ...] = (
-    ("at_end_clause", "not_at_end_clause"),
-    ("invalid_key_clause", "not_invalid_key_clause"),
-    ("at_eop_clause", "not_at_eop_clause"),
-    ("on_size_error", "not_on_size_error"),
-    ("on_overflow", "not_on_overflow"),
-    ("on_exception", "not_on_exception"),
-)
+# Handler clause bodies (AT END, INVALID KEY, ON SIZE ERROR, ...) come in
+# (positive, NOT-) pairs: the two outcomes of one test, so a pair with either
+# side present is one decision point, however many of its bodies are written
+# (#553). The pairs are the statement models' canonical
+# ``HANDLER_CLAUSE_PAIRS``. The bodies are walked from the pairs as well as
+# through ``.children`` (the visited set keeps that from double counting), so
+# a body that is not wired as a child is still scored.
 
 _LOOP_PERFORM_TYPES = frozenset({"TIMES", "UNTIL", "VARYING"})
 
@@ -432,7 +420,7 @@ class ComplexityAnalyzer:
                 counts["bool_ops"] += 1
 
             if isinstance(node, CobolStatement):
-                for pair in _CLAUSE_PAIRS:
+                for pair in HANDLER_CLAUSE_PAIRS:
                     clauses = [getattr(node, attr, None) for attr in pair]
                     if not any(clauses):
                         continue

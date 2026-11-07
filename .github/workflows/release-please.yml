@@ -4,7 +4,7 @@ on:
   push:
     branches:
       - main
-  # Manual dry run of the wheel-build + publish path. PyPI filenames are
+  # Manual dry run of the build + publish path. PyPI filenames are
   # burned permanently on first upload, so `target: testpypi` exists to
   # rehearse the whole pipeline against test.pypi.org before the first real
   # publish. Two caveats, both deliberately out of scope here:
@@ -51,59 +51,13 @@ jobs:
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
 
-  # Build binary wheels for Linux, macOS, Windows. cibuildwheel compiles the
-  # three optional Cython accelerators (_lexer_fast, _preprocess_fast,
-  # _data_fast) under COBOLPARSER_ACCEL=1 ([tool.cibuildwheel] environment);
-  # everything else ships as ordinary .py source. Installed wheels still run
-  # pure Python unless COBOLPARSER_ACCEL=1 is set at run time. The sdist job
-  # below covers every other platform.
-  build-binary-wheels:
+  # Build the sdist and the one pure-Python wheel (py3-none-any): the package
+  # has no compiled code, so a single wheel serves every platform.
+  build-dist:
     needs: release-please
     if: ${{ needs.release-please.outputs.releases_created == 'true' || github.event_name == 'workflow_dispatch' }}
-    # Only reads the repo to build wheels; it needs none of the workflow-level
-    # write scopes that the release-please job requires.
-    permissions:
-      contents: read
-    strategy:
-      fail-fast: false
-      matrix:
-        # Only the most common target per OS: manylinux x86_64 (not aarch64
-        # -- no known ARM-Linux consumer, and it'd need slow QEMU emulation),
-        # macOS arm64 (not x86_64 -- Intel Macs are a shrinking minority),
-        # Windows AMD64. See [tool.cibuildwheel.*] in pyproject.toml.
-        #
-        # CIBW_ARCHS overrides the per-platform `archs` in pyproject.toml's
-        # [tool.cibuildwheel.*] sections (which still govern local
-        # `cibuildwheel` runs).
-        include:
-          - os: ubuntu-latest
-            archs: x86_64
-            artifact: linux-x86_64
-          - os: macos-latest
-            archs: arm64
-            artifact: macos-arm64
-          - os: windows-latest
-            archs: AMD64
-            artifact: windows
-    runs-on: ${{ matrix.os }}
-    steps:
-      - uses: actions/checkout@v4
-      - uses: pypa/cibuildwheel@v2.21.3
-        env:
-          CIBW_ARCHS: ${{ matrix.archs }}
-      - uses: actions/upload-artifact@v4
-        with:
-          # Must be unique per matrix entry -- upload-artifact@v4 rejects
-          # duplicate names, and two entries now share ubuntu-latest.
-          name: dist-wheels-${{ matrix.artifact }}
-          path: wheelhouse/
-
-  # Source distribution: pure source plus the checked-in .c files. It builds
-  # pure Python by default; COBOLPARSER_ACCEL=1 compiles the accelerators
-  # (a C compiler is then needed).
-  build-sdist:
-    needs: release-please
-    if: ${{ needs.release-please.outputs.releases_created == 'true' || github.event_name == 'workflow_dispatch' }}
+    # Only reads the repo to build; it needs none of the workflow-level write
+    # scopes that the release-please job requires.
     permissions:
       contents: read
     runs-on: ubuntu-latest
@@ -112,26 +66,25 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.13"
-      - run: python -m pip install build && python -m build --sdist
+      - run: python -m pip install build && python -m build
       - uses: actions/upload-artifact@v4
         with:
-          name: dist-wheels-sdist
+          name: dist
           path: dist/
 
   # Attach the distributions to the GitHub Release for traceability /
   # manual download. Deliberately NOT run on workflow_dispatch: a manual
   # dispatch cuts no release, so there is no tag to upload to.
   publish:
-    needs: [release-please, build-binary-wheels, build-sdist]
+    needs: [release-please, build-dist]
     if: ${{ needs.release-please.outputs.releases_created == 'true' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with:
-          pattern: dist-wheels-*
+          name: dist
           path: dist/
-          merge-multiple: true
       - name: Resolve the release tag from the manifest
         id: tag
         # The merge commit that triggered this run already bumped the manifest
@@ -152,7 +105,7 @@ jobs:
   # on test.pypi.org, with environment "pypi" (the name used below); without
   # it the publish step fails with `invalid-publisher`.
   publish-pypi:
-    needs: [release-please, build-binary-wheels, build-sdist]
+    needs: [release-please, build-dist]
     if: ${{ needs.release-please.outputs.releases_created == 'true' || github.event_name == 'workflow_dispatch' }}
     runs-on: ubuntu-latest
     # NOTE: the environment stays "pypi" even for a testpypi dry run -- the
@@ -167,9 +120,8 @@ jobs:
     steps:
       - uses: actions/download-artifact@v4
         with:
-          pattern: dist-wheels-*
+          name: dist
           path: dist/
-          merge-multiple: true
       - uses: pypa/gh-action-pypi-publish@release/v1
         with:
           packages-dir: dist/

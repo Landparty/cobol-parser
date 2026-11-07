@@ -116,8 +116,9 @@ from ..models.statements import (
     PerformStatement,
     StringStatement,
 )
-from ..models.statements.base import CobolStatement
+from ..models.statements.base import NESTED_BODY_ATTRS, CobolStatement
 from ..parsers.statements.ibm_exec_statements import ExecCicsStatement
+from ._names import bare_item_name
 
 #: Severity ordering, shared with :mod:`.lint` so an EXEC finding grades on
 #: the same scale as every other rule.
@@ -277,28 +278,11 @@ _FIGURATIVE_CONSTANTS = frozenset(
     }
 )
 
-#: Attributes that hold nested statements without being AST children. Same
-#: list ``CobolProgram.get_all_statements`` walks -- an SQL statement inside
-#: an ``AT END`` clause is still an SQL statement.
-_NESTED_STATEMENT_ATTRS: tuple[str, ...] = (
-    "then_statements",
-    "else_statements",
-    "when_clauses",
-    "default_when",
-    "statements",
-    "inline_statements",
-    "at_end_clause",
-    "not_at_end_clause",
-    "invalid_key_clause",
-    "not_invalid_key_clause",
-    "at_eop_clause",
-    "on_exception",
-    "not_on_exception",
-    "on_overflow",
-    "not_on_overflow",
-    "on_size_error",
-    "not_on_size_error",
-)
+#: Attributes that hold nested statements without being AST children: the
+#: statement models' canonical ``NESTED_BODY_ATTRS`` (an SQL statement inside
+#: an ``AT END`` clause is still an SQL statement), plus a WHEN arm's own
+#: ``statements``.
+_NESTED_STATEMENT_ATTRS: tuple[str, ...] = (*NESTED_BODY_ATTRS, "statements")
 
 
 # ---------------------------------------------------------------------------
@@ -1403,16 +1387,12 @@ def _declared_data_names(ast: CobolProgram) -> set[str]:
 
 
 def _normalize_name(raw: str) -> str:
-    """Reduce a reference to the bare item name it addresses.
-
-    Strips a host-variable colon, a subscript or reference modification, and
-    any ``OF``/``IN`` qualification, so ``:WS-STMT(1:80)`` and
-    ``WS-STMT OF WS-REC`` both reduce to ``WS-STMT``.
+    """Reduce a reference to the bare item name it addresses: a host-variable
+    colon dropped, then ``_names.bare_item_name`` (subscript, reference
+    modification and ``OF``/``IN`` qualification stripped, upper-cased), so
+    ``:WS-STMT(1:80)`` and ``WS-STMT OF WS-REC`` both reduce to ``WS-STMT``.
     """
-    text = raw.strip().lstrip(":")
-    text = text.split("(", 1)[0]
-    parts = re.split(r"\s+(?:OF|IN)\s+", text, flags=re.IGNORECASE)
-    return parts[0].strip().upper()
+    return bare_item_name(raw.strip().lstrip(":"))
 
 
 def _is_literal(source: str) -> bool:

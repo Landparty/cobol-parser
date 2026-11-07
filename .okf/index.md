@@ -18,7 +18,7 @@ generators) are folders with a short routing page in front.
 
 | Task | Load |
 |------|------|
-| Tokenization, `TokenType`, literal helpers, the Cython fast path | [lexer.md](lexer.md) |
+| Tokenization, `TokenType`, literal helpers | [lexer.md](lexer.md) |
 | Fixed-format normalization, directives, conditional compilation, copybook expansion, `REPLACE`, source maps | [preprocessing.md](preprocessing.md) |
 | `CobolParser`, `parse_cobol`, `ParseResult`, error recovery, `core/` (token stream, registry, AST factory), config classes, profiling | [parser/orchestration.md](parser/orchestration.md) |
 | IDENTIFICATION / ENVIRONMENT / DATA / PROCEDURE division parsing, data clauses, FD/SD/RD | [parser/divisions.md](parser/divisions.md) |
@@ -83,7 +83,7 @@ it with `git config core.hooksPath .githooks`) and by the test suite:
   paths must exist; links and anchors must resolve; the CLI table in
   `cli.md` must match argparse; and counts the code can answer (there are
   <!-- okf:gen analysis-module-count -->40<!-- /okf:gen --> analysis
-  modules, <!-- okf:gen tokentype-count -->246<!-- /okf:gen --> `TokenType`
+  modules, <!-- okf:gen tokentype-count -->245<!-- /okf:gen --> `TokenType`
   members, <!-- okf:gen cli-subcommand-count -->41<!-- /okf:gen -->
   subcommands) are written as `<!-- okf:gen NAME -->` spans that must equal
   the generator's output. After a code change that moves one, run

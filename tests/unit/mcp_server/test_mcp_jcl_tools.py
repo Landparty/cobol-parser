@@ -11,11 +11,8 @@ import pytest
 
 from cobolparser.config.project import ProjectConfig
 from cobolparser.mcp import CobolTools, ToolError, Workspace
-from cobolparser.mcp.jcl_tools import (
-    INSTALL_HINT,
-    MAX_INSTREAM_LINES,
-    _jcllib_names,
-)
+from cobolparser.mcp.tools.jcl_common import MAX_INSTREAM_LINES
+from cobolparser.mcp.tools.jcl_index import INSTALL_HINT, _jcllib_names
 
 pytest.importorskip("jclparser")
 

@@ -1,7 +1,7 @@
 ---
 type: Module
 title: AST Models
-description: ASTNode hierarchy (cobolparser/models/) — CobolProgram and its program units, data items and byte sizing (_storage.py, _data_fast.pyx), SQL and statement nodes, to_dict()/to_json()/from_json() serialisation.
+description: ASTNode hierarchy (cobolparser/models/) — CobolProgram and its program units, data items and byte sizing (_storage.py), SQL and statement nodes, to_dict()/to_json()/from_json() serialisation.
 tags: [ast, models, cobol-program, data-items, statements]
 timestamp: 2026-10-15T00:00:00Z
 ---
@@ -19,12 +19,11 @@ tree, or [Data items](#data-items-modelsdata_itemspy) for byte layout.
 | Module | Holds |
 |--------|-------|
 | `models/ast_base.py` | `SourceLocation`, `ASTNode`, `ASTValidator`, `ValidationResult` |
-| `models/program.py` | `CobolProgram`, `CobolDivision`, `CobolSection`, `CobolParagraph`, `CobolFileDescription`, `LossyDeserializationWarning` |
+| `models/program.py` | `CobolProgram`, `CobolDivision`, `CobolSection`, `CobolParagraph`, `LossyDeserializationWarning` |
 | `models/data_items.py` | `CobolDataItem`, `PictureClause`, `OccursClause`, `ConditionNameItem` (88), `RenamesItem` (66) |
 | `models/sql_statements.py` | `ExecSQLStatement` and its subclasses, `parse_exec_sql()` |
 | `models/statements/*.py` | every PROCEDURE DIVISION statement node, by category |
 | `_storage.py` (package root) | `storage_size()` — the one authority on an item's byte width |
-| `_data_fast.pyx` (package root) | optional Cython mirror of the DATA DIVISION clause loop that builds these nodes |
 
 Getting started: `result = parse_cobol(src)`; walk `result.ast` with
 `program_units()` / `get_all_statements()` / `get_data_items()` /
@@ -50,6 +49,7 @@ hand use `ASTNodeFactory` (see below) or the node's constructor.
 * [`calculate_size()` and `_storage.py`](#calculate_size-and-_storagepy)
 * [SQL statement nodes](#sql-statement-nodes-modelssql_statementspy)
 * [Statement models](#statement-models-modelsstatements)
+  * [Nested statement bodies](#nested-statement-bodies)
   * [Stacked WHENs](#stacked-whens)
   * [Expression trees](#expression-trees)
   * [Statement field reference](#statement-field-reference)
@@ -140,12 +140,13 @@ class CobolParagraph(ASTNode):           # CobolParagraph(paragraph_name, locati
 `to_dict(config=None)` / `to_json(config_or_indent=None)` / `from_json()`.
 
 `get_all_statements()` walks contained programs too, and reaches handler
-bodies (INVALID KEY, ON EXCEPTION, ...); the result is cached on the program
-(invalidated by `add_division`).
+bodies (INVALID KEY, ON EXCEPTION, ...) through `.children` plus the
+canonical `NESTED_BODY_ATTRS` ([Nested statement bodies](#nested-statement-bodies));
+the result is cached on the program (invalidated by `add_division`).
 
-FD/SD entries are `CobolFileDescription(file_name, location, record_type="FD")`
-(`file_name`, `record_type` FD|SD, `data_records`, BLOCK/RECORD CONTAINS,
-`record_varying_depending_on`, LABEL/VALUE OF/LINAGE/CODE-SET clauses).
+FD/SD entries have no node class of their own: each level-01 record under an
+FD/SD carries `fd_file_name`, `fd_clauses` and `fd_record_type` metadata (see
+[parser/divisions.md](parser/divisions.md#fd--sd-entries)).
 
 ### Program-unit attributes
 
@@ -393,31 +394,14 @@ a level-88 `WHEN SET TO FALSE [IS] literal` phrase (a sign folded into a
 numeric literal as in `values`: `"-0"`; a figurative constant by name:
 `"SPACE"`), `None` when absent. Always present in `to_dict()`.
 
-**OCCURS parsing.** Both OCCURS clause walks that populate `OccursClause` —
-the pure-Python `data_clauses._parse_occurs_clause` and its Cython mirror in
-`_data_fast.pyx` — handle real-deck line splits (count/`TO`/`BY` starting a
+**OCCURS parsing.** The OCCURS clause walk that populates `OccursClause`
+(`data_clauses._parse_occurs_clause`) handles real-deck line splits (count/`TO`/`BY` starting a
 continuation line) and comma-separated `INDEXED BY` / `KEY` name lists.
-The count read is guarded (`_peek_count_token` /
-`_peek_count_pos`): a LEVEL_NUMBER reached only by crossing a line break counts
+The count read is guarded (`_peek_count_token`): a LEVEL_NUMBER reached only by crossing a line break counts
 only when the clause visibly continues after it, so a malformed `OCCURS` with
 no count cannot swallow the next item's own level number as a fabricated table
 size (an unguarded read fabricates a phantom data item while recording
 `max_times == 0`). See [parser.md](parser.md).
-
-**`_data_fast.pyx`.** `parse_picture_clause_fast()` /
-`parse_data_item_clauses_fast()` re-implement the DATA DIVISION clause
-dispatch loop in Cython, calling back into the parser's
-`_parse_picture_clause` / `_parse_value_clause` / `_parse_usage_clause`
-wrappers. Pure Python is the default: the extension is built only under
-`COBOLPARSER_ACCEL=1` and imported by `parsers/divisions/data_clauses.py` only
-when `cobolparser._accel.accelerators_enabled()` is true at import time. A
-compiled helper that does not match the current source is detected by
-`_data_fast_usable()` and disabled with a logged warning (never a
-`warnings.warn`, which `-W error` would turn into an import failure), so a
-stale binary costs speed, not correctness. Any change to an OCCURS / PICTURE /
-clause walk in `data_clauses.py` must be mirrored in `_data_fast.pyx` (and its
-checked-in `.c` regenerated). See [lexer.md](lexer.md) for the accelerator
-build.
 
 ### `PictureClause` sizing
 
@@ -458,8 +442,7 @@ offsets and record images are built from.
   (`PIC £££9.99`). The pattern is sized and validated through its `$`
   spelling, then `pattern` is restored as written; the set is also
   `metadata["currency_symbols"]` when non-empty. The DATA DIVISION passes it
-  through `DataItemClauseParser._picture_clause` (also handed to the
-  `_data_fast` helper in place of the class), from the non-`$` CURRENCY tokens
+  through `DataItemClauseParser._picture_clause`, from the non-`$` CURRENCY tokens
   `parse_picture_clause` saw; without them `£` is an invalid PICTURE character.
   **`currency_signs`** maps each of them to its declared currency string
   (`{"#": "EUR"}`, from `parser.currency_signs`), so the record-image editor
@@ -611,7 +594,7 @@ See [dialects.md](dialects.md) for the SQL details.
 
 | File | Node Classes |
 |------|-------------|
-| `base.py` | `CobolStatement`, `CobolExpression`, `ArithmeticExpression`, `ConditionalExpression`, `LogicalExpression`, `FunctionCall` |
+| `base.py` | `CobolStatement`, `CobolExpression`, `ArithmeticExpression`, `ConditionalExpression`, `LogicalExpression`, `FunctionCall`; `ClauseBody`, `iter_clause_bodies`, `walk_statements` and the nested-body attribute lists |
 | `arithmetic.py` | `ArithmeticStatement`, `AddStatement`, `SubtractStatement`, `MultiplyStatement`, `DivideStatement`, `ComputeStatement` |
 | `call.py` | `CallParameter`, `CallStatement`, `EntryStatement` |
 | `communication.py` | `SendStatement`, `ReceiveStatement`, `EnableStatement`, `DisableStatement`, `PurgeStatement` (private base `_EnableDisableStatement`) |
@@ -629,6 +612,40 @@ fields below are also added there). `ExecCicsStatement` / `ExecImsStatement`
 (`parsers/statements/ibm_exec_statements.py`) also extend `CobolStatement`
 (`statement_type` `"EXEC CICS"` / `"EXEC IMS"`, `node_type` `"EXEC_CICS"` /
 `"EXEC_IMS"`) so `get_all_statements()` returns them.
+
+### Nested statement bodies
+
+`models/statements/base.py` owns the **one** list of attributes that hold a
+nested statement body; no analyzer keeps its own (ten private copies had
+drifted -- RECEIVE's `NO DATA` / `WITH DATA`, `NOT AT END-OF-PAGE` and SEARCH
+WHEN bodies were each missed somewhere -- the same drift behind the old
+paragraph-swallow bugs; audit 2026-09-27 §3.5). Exported from
+`cobolparser.models.statements`:
+
+| Name | Holds |
+|------|-------|
+| `BRANCH_BODY_ATTRS` | `then_statements`, `else_statements` |
+| `LOOP_BODY_ATTRS` | `inline_statements` |
+| `HANDLER_CLAUSE_PAIRS` | (positive, negative) handler pairs: AT END, INVALID KEY, AT END-OF-PAGE, ON SIZE ERROR, ON OVERFLOW, ON EXCEPTION, NO DATA / WITH DATA |
+| `HANDLER_CLAUSE_ATTRS` / `HANDLER_CLAUSE_PHRASES` | the pairs flattened / attribute -> COBOL phrase (`"AT END-OF-PAGE"`) |
+| `WHEN_ARM_ATTRS` | `when_clauses`, `default_when` (EVALUATE `WhenClause` nodes, SEARCH `{"condition", "statements"}` dicts) |
+| `STATEMENT_LIST_ATTRS` / `NESTED_BODY_ATTRS` | every `list[CobolStatement]` attribute / those plus the WHEN arms |
+
+`iter_clause_bodies(stmt, *, include_handlers=True, include_loops=True,
+include_empty=False)` (also `CobolStatement.iter_clause_bodies()`) yields
+`ClauseBody(attr, kind, statements, position, clause)` in source order: IF
+arms, inline PERFORM, handlers, WHEN arms (`position` 1-based, `clause` the
+`WhenClause` / dict), WHEN OTHER. `kind` is `"branch"`, `"loop"` or
+`"handler"`. Empty lists are skipped unless `include_empty`; a None
+attribute never yields. `CobolStatement.iter_child_statements()` flattens
+one level; `walk_statements(statements, *, include_handlers=True,
+include_loops=True)` is the iterative depth-first walk (each node once).
+A walker that needs more context (constraints' arm chain, ast_diff's paths,
+complexity's pair counting) iterates `iter_clause_bodies` itself rather than
+copying the list. A new clause body is a one-line change here;
+`tests/unit/test_statement_bodies.py` fails until a statement node's
+statement-list attribute is listed (static annotation scan plus every
+statement the sample corpus parses into).
 
 The `communication.py` / `legacy.py` / `report_writer.py` modules plus
 `RaiseStatement`/`ResumeStatement` and `ValidateStatement` back the

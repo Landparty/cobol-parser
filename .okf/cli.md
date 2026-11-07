@@ -10,8 +10,9 @@ timestamp: 2026-10-15T00:00:00Z
 
 The `cobol-parser` command: <!-- okf:gen cli-subcommand-count -->41<!-- /okf:gen --> subcommands that parse, tokenize, preprocess,
 expand, analyze, generate/decode/compare record data for, and graph COBOL
-(plus one for JCL and one for the LE catalogue), all built with `argparse` in
-`cobolparser/cli/parse.py`, and the `cobol.yml` project config every
+(plus one for JCL and one for the LE catalogue), all built with `argparse`
+(top-level parser in `cobolparser/cli/parse.py`, subcommands in
+`cobolparser/cli/commands/`), and the `cobol.yml` project config every
 subcommand reads. Start with the [subcommand reference](#subcommand-reference)
 table (every flag and default), then [Exit codes](#exit-codes) and
 [Shared flags](#shared-flags); per-subcommand behaviour follows by family.
@@ -34,10 +35,31 @@ console script (`[project.scripts]` → `cobolparser.cli:main`, which
 cobolparser.cli.coverage` is a **separate** program (see
 [IO coverage tools](#io-coverage-tools-cobolparserclicoveragepy)).
 
-**Source:** `cli/parse.py` (per subcommand a `_build_<name>_parser()` and a
-`_cmd_<name>()`, assembled in `_build_parser()`), `cli/_project_config.py`
-(the `cobol.yml` → argv merge), `cli/coverage.py`, `cobolparser/config/`
-(`project.py` schema + discovery, `_yaml.py` reader).
+**Source:** `cli/parse.py` is the entry point only: `_SUBCOMMANDS`,
+`_build_parser()` (adds every subcommand, in the order the reference table
+below lists them) and `main()`. Each subcommand is a `_build_<name>_parser()`
+plus a `_cmd_<name>()` in one module of `cli/commands/`:
+
+| Module | Subcommands |
+|---|---|
+| `commands/source.py` | `parse` (and its AST `path` resolution), `batch`, `tokenize`, `preprocess`, `expand` |
+| `commands/data.py` | `gen-data`, `decode`, `compare`, `gen-fixtures` |
+| `commands/analyze.py` | the single-file analyzers: the `ANALYZERS` table (flag set **A**) plus `unused-variables`, `program-flow`, `redundancy`, `business-rules`, `le-info` |
+| `commands/lint.py` | `lint` (single/many files, baselines, GitHub/SARIF/summary output) |
+| `commands/lineage.py` | `lineage`, `field-impact`, `widen-check` |
+| `commands/codebase.py` | `scan`, `diff`, `codebase-graph`, `copybook-impact`, `call-check` |
+| `commands/jcl.py` | `jcl` |
+| `commands/project.py` | `config`, `mcp` |
+
+`cli/_common.py` holds what they share: the common flag helpers
+(`_add_copybook_args`, `_add_source_format_args`, ...), `_read_source`, the
+parse-then-guard path (`_do_parse` → `_parse_result_or_fail` /
+`_parse_or_fail`, `--program` selection), the output functions (`_json_out`,
+`_emit_report`, `_identification`, `_text_out`, `_verbatim_out`) and `_fail`.
+A command module imports from `_common`, never from another command module.
+Also `cli/_project_config.py` (the `cobol.yml` → argv merge),
+`cli/coverage.py`, `cobolparser/config/` (`project.py` schema + discovery,
+`_yaml.py` reader).
 
 `cobol-parser --help` prints the subcommands grouped by task (`cli/_help.py`
 `COMMAND_GROUPS`, rendered by `TopLevelParser.format_help()` instead of
@@ -45,11 +67,19 @@ argparse's flat `{parse,batch,...}` block), then a quick start, the exit
 codes and where defaults come from. Every registered subcommand must sit in
 exactly one group (`tests/unit/cli/test_cli_help_overview.py`), so a new one
 needs a line there too. `<name> --help` shows flags,
-defaults and runnable examples. **Adding a single-file analyzer:** call `_build_analyzer_parser(subparsers,
-name, help, func, profiling=..., examples=...)` in `_build_parser()` (the
-standard flag set **A**; `examples` is required and becomes the `--help`
-epilog — hand-built parsers set `epilog=` themselves) and emit through
-`_emit_report(..., ast=ast)` so the output is identified and origin-stamped.
+defaults and runnable examples. **Adding a single-file analyzer:** add an
+`AnalyzerCommand(help=..., examples=..., profiling=...)` entry to
+`ANALYZERS` in `cli/commands/analyze.py` and an `_add_analyzer(subparsers,
+"name")` line at its place in `_build_parser()`. Both build through
+`_build_analyzer_parser` (the standard flag set **A**; `examples` is required
+and becomes the `--help` epilog — hand-built parsers set `epilog=`
+themselves). An analyzer that only parses, runs one method and prints
+`report.to_dict()` needs no handler: `analyzer=("module", "Class",
+"method")` (module under `cobolparser.analysis`) does it (`dead-code`,
+`complexity`, `io-sequence`, `move-type-check`, `linkage-check`,
+`dclgen-check`, `sql-cics-check`). Anything more takes `handler=_cmd_<name>`,
+which emits through `_emit_report(..., ast=ast)` so the output is identified
+and origin-stamped.
 
 **`main()`:**
 
@@ -105,7 +135,7 @@ Verified against `python -m cobolparser <cmd> --help` on 2026-10-15. Order is
 | Subcommand | Positionals | Own flags (default) | Shared flags | Output |
 |---|---|---|---|---|
 | `parse` | `file [path]` | `--errors`, `--stats`, `--find-type NODE_TYPE` | A without `--program`; +prof | AST JSON; exit 2 on a recovered-but-errored parse |
-| `batch` | `[files ...]` | `--glob PATTERN`..., `--workers N` (CPU count), `--encoding` (detected), `--errors`, `--stats` | `--compact`, `--dialect`, `--error-recovery`, `-o`, dl; +prof | JSON list, one entry per file |
+| `batch` | `[files ...]` | `--glob PATTERN`..., `--workers N` (CPU count), `--timeout SECONDS` (none), `--max-file-bytes N` (none), `--encoding` (detected), `--errors`, `--stats` | `--compact`, `--dialect`, `--error-recovery`, `-o`, dl; +prof | JSON list, one entry per file |
 | `tokenize` | `file` | — | `--compact`, `--source-format`/`--free-form`, dl, `--dialect`, `--encoding`, `-o` | `{source_file, tokens}` |
 | `preprocess` | `file` | `--strip-directives` | `--source-format`/`--free-form`, dl, `--define`, `--encoding` (no `--compact`, no `-o`) | free-form source text |
 | `expand` | `file` | `--keep-comments`, `--source-map`, `--max-depth N` (100) | `--copybook-path`, `--compact`, `--define`, `--encoding`, `-o`, dl | expansion JSON |
@@ -127,7 +157,7 @@ Verified against `python -m cobolparser <cmd> --help` on 2026-10-15. Order is
 | `ims-dli` | `file` | — | A (no profiling) | `IMSSegmentAnalyzer` |
 | `dclgen-check` | `file` | — | A; +prof | `DclgenChecker` |
 | `redundancy` | `file` | `--min-clone-statements N` (3) | A; +prof | `RedundancyAnalyzer` |
-| `scan` | `[files ...]` | `--glob`..., `--files-from FILE`, `--analyzer NAME`... (`health,redundancy`), `--clones`, `--min-clone-members N` (2), `--min-clone-statements N` (3), `--workers N` (CPU count), `--encoding` (detected), `--cache-dir DIR` (off), `--format {json,sarif}` (json; sarif runs `lint`) | A without `--program` | `scan_version` report, or a SARIF log of every file's lint findings |
+| `scan` | `[files ...]` | `--glob`..., `--files-from FILE`, `--analyzer NAME`... (`health,redundancy`), `--clones`, `--min-clone-members N` (2), `--min-clone-statements N` (3), `--workers N` (CPU count), `--timeout SECONDS` (none), `--max-file-bytes N` (none), `--encoding` (detected), `--cache-dir DIR` (off), `--format {json,sarif}` (json; sarif runs `lint`) | A without `--program` | `scan_version` report, or a SARIF log of every file's lint findings |
 | `lint` | `[FILE ...]` | `--glob PATTERN`..., `--files-from FILE`, `--changed-since REF`, `--extension EXT`... (`.cbl .cob .cobol`), `--rule RULE`... (all, incl. `line-length`; `call-check` only with `--callee-path`), `--callee-path DIR`... (off; config `callee_path`), `--disable RULE`..., `--severity RULE[/KIND]=LEVEL`..., `--min-severity {error,warning,info}` (warning for text/github, info for json/sarif), `--fail-on {error,warning,info,never}` (never), `--format {json,text,sarif,github}` (json), `--exclude PATTERN`..., `--baseline FILE`, `--write-baseline FILE`, `--strict-copybooks`, `--workers N` (CPU count), `--new-code-since REF`, `--scope [RULE=]new\|all`... (new; config `lint.scope`), `--summary-file FILE` | A (`--program` default: every unit); +prof (one file only) | findings (or a SARIF 2.1.0 log, or GitHub workflow commands); several files: `{files, failures, summary}`; exit 3 on `--fail-on`, 1 when a file could not be linted |
 | `data-items` | `file` | — | A; +prof | `compute_program_data_items()` |
 | `program-signature` | `file` | — | A (`--program` default: every unit); +prof | `{"signatures": [...]}` |
@@ -170,7 +200,7 @@ nothing.
 
 ## Output identification
 
-Every output identifies its source (`_identification()` in `cli/parse.py`;
+Every output identifies its source (`_identification()` in `cli/_common.py`;
 pinned by `tests/unit/cli/test_output_identification.py`):
 
 * **JSON documents** start with `"source_file"` (the path as given). Parsing
@@ -215,10 +245,11 @@ stated" stays distinct from "equals the default"):
 
 | Section | Keys → `ProjectConfig` field |
 |---|---|
-| top level | `version`, `project`, `data`, `lint`, `mockymock`, `analyzer` (anything else is an error) |
+| top level | `version`, `project`, `data`, `lint`, `limits`, `mockymock`, `analyzer` (anything else is an error) |
 | `project:` | `copybook_path`, `callee_path`, `proc_path` (lists, resolved against the file's directory), `source_format` (`auto\|fixed\|free`), `debug_lines` (bool), `dialect` (`ibm-enterprise`), `error_recovery` (`collect-all\|fail-fast`), `seed`, `extensions`, `define` (normalized to `SYMBOL=VALUE`) |
 | `data:` → `DataDefaults` | `charset`, `endian`, `record_format`, `record_separator`, `rows` |
 | `lint:` → `LintDefaults` | `rules`, `min_severity`, `fail_on`, `disable`, `severity` (`rule` or `rule/KIND` → level), `exclude` (globs, resolved against the file's folder), `baseline` (path, likewise), `scope` (`new`/`all` or `{default, rule: new\|all}`, stored as `--scope` values) |
+| `limits:` → `LimitDefaults` | `timeout_seconds` (number > 0), `max_file_bytes` (int > 0); fill `batch`/`scan`'s `--timeout` / `--max-file-bytes` (see [batch.md](batch.md)) |
 | `mockymock:` / `analyzer:` | validated only as mappings, carried verbatim on `ProjectConfig.tools`; `tool_section(name)` returns the mapping or `{}` |
 
 * **Discovery** — `cobol.yml` then `cobol.yaml` in the cwd and each parent,

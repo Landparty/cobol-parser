@@ -5,8 +5,8 @@
    is considered to be a space").
 2. ``>>SOURCE FORMAT IS FREE`` inside a fixed-format file switches the
    lines after it to free format (no column slicing) until
-   ``>>SOURCE FORMAT IS FIXED`` switches back -- in the normalizer (pure
-   Python and the Cython mirror alike) and through copybook expansion.
+   ``>>SOURCE FORMAT IS FIXED`` switches back -- in the normalizer and
+   through copybook expansion.
 """
 
 from __future__ import annotations
@@ -18,7 +18,6 @@ import pytest
 from cobolparser import parse_cobol, parse_cobol_with_expansion
 from cobolparser._source_directive import source_format_directive
 from cobolparser.preprocess import (
-    _normalize_fixed_format_pure,
     expand_copybooks,
     normalize_fixed_format,
     preprocess_conditional_compilation,
@@ -67,7 +66,7 @@ class TestCopyReplacingSeparators:
 # --------------------------------------------------------------------------
 # 2. >>SOURCE FORMAT IS FREE / FIXED inside a fixed-format file.
 
-IMPLS = [normalize_fixed_format, _normalize_fixed_format_pure]
+IMPLS = [normalize_fixed_format]
 
 LONG = (
     'DISPLAY "a free-format line running well past column seventy-two, '
@@ -120,9 +119,6 @@ class TestSourceFormatSwitch:
     @pytest.mark.parametrize("impl", IMPLS)
     def test_line_count_is_preserved(self, impl):
         assert impl(MIXED).count("\n") == MIXED.count("\n")
-
-    def test_fast_and_pure_agree(self):
-        assert normalize_fixed_format(MIXED) == _normalize_fixed_format_pure(MIXED)
 
     @pytest.mark.parametrize("impl", IMPLS)
     def test_directive_in_the_indicator_column(self, impl):

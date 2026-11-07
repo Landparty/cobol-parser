@@ -183,6 +183,30 @@ def _peek_past_optional_subscript(stream: ITokenStream, offset: int) -> Any:
     return None
 
 
+def _is_times_word(token: Token | None) -> bool:
+    """True when *token* is the TIMES keyword (or TIMES/TIME lexed as an
+    IDENTIFIER) -- the lookahead that makes a preceding operand a count."""
+    if not token:
+        return False
+    return token.type == TokenType.TIMES or bool(
+        token.type == TokenType.IDENTIFIER
+        and token.value
+        and token.value.upper() in ("TIMES", "TIME")
+    )
+
+
+def _is_count_literal_token(token: Token) -> bool:
+    """A numeric token that may be an inline ``PERFORM n TIMES`` count:
+    NUMERIC_LITERAL, LEVEL_NUMBER, or an all-digit IDENTIFIER."""
+    return (
+        token.type == TokenType.NUMERIC_LITERAL
+        or token.type == TokenType.LEVEL_NUMBER
+        or bool(
+            token.type == TokenType.IDENTIFIER and token.value and token.value.isdigit()
+        )
+    )
+
+
 class PerformStatementParser(IStatementParser):
     """Parser for PERFORM statements using IStatementParser interface."""
 
@@ -221,317 +245,338 @@ class PerformStatementParser(IStatementParser):
             # End of stream
             return stmt
 
-        if not token:
+        if not token or token.type == TokenType.PERIOD:
             report_parse_error(
                 context,
                 "PERFORM statement requires a target paragraph or inline clause",
                 location,
             )
+            if token:
+                token_stream.consume()
             return stmt
 
-        if token.type == TokenType.PERIOD:
-            report_parse_error(
-                context,
-                "PERFORM statement requires a target paragraph or inline clause",
-                location,
-            )
-            token_stream.consume()
+        if self._parse_inline_form(token_stream, stmt, token):
             return stmt
+        token = token_stream.peek()
 
+        # Simple PERFORM procedure-name (an identifier, or an all-digit
+        # numeric paragraph name -- e.g. PERFORM 1000 THRU 1999)
+        if token and _is_procedure_name_token(token):
+            if self._parse_procedure_form(token_stream, stmt, token, context, location):
+                return stmt
+
+        self._consume_perform_end(token_stream)
+        return stmt
+
+    def _parse_inline_form(
+        self, token_stream: ITokenStream, stmt: PerformStatement, first: Token
+    ) -> bool:
+        """Parse the inline forms (VARYING, [WITH TEST] UNTIL, ``n TIMES``)
+        that start at *first*. True when one was parsed and *stmt* is
+        complete; False leaves the stream at a possible procedure name."""
         # Check for VARYING clause (inline PERFORM VARYING)
-        if token.type == TokenType.VARYING:
+        if first.type == TokenType.VARYING:
             self._parse_varying_clause(token_stream, stmt)
-            return stmt
+            return True
 
-        # Check for TEST clause (WITH TEST BEFORE/AFTER) -- WITH, TEST, and
-        # BEFORE/AFTER may each land on their own continuation line, so a
-        # skip_whitespace before every peek is required or the clause is
-        # silently left unconsumed (H3-style newline-intolerance bug).
-        if token.type in (TokenType.WITH, TokenType.TEST):
-            try:
-                if token.type == TokenType.WITH:
-                    token_stream.consume()  # Skip WITH (optional prefix)
-                    skip_whitespace(token_stream)
-                    token = token_stream.peek()
-                if token and token.type == TokenType.TEST:
-                    token_stream.consume()  # Skip TEST
-                    skip_whitespace(token_stream)
-                    token = token_stream.peek()
-                    if token and token.type in (TokenType.BEFORE, TokenType.AFTER):
-                        val = token.type.name  # "BEFORE" or "AFTER"
-                        stmt.set_test_timing(val)
-                        token_stream.consume()
-                        token = token_stream.peek()
-            except (TokenMismatch, UnexpectedEndOfInput):
-                pass
-            skip_whitespace(token_stream)
-            token = token_stream.peek()
+        # Check for TEST clause (WITH TEST BEFORE/AFTER)
+        token: Token | None = first
+        if first.type in (TokenType.WITH, TokenType.TEST):
+            token = self._parse_test_phrase(token_stream, stmt, first)
 
         # ``PERFORM WITH TEST AFTER VARYING ...`` -- the TEST phrase may
         # precede VARYING in the inline form; previously only UNTIL was
         # looked for after it and the VARYING clause fell out as unparsed.
         if token and token.type == TokenType.VARYING:
             self._parse_varying_clause(token_stream, stmt)
-            return stmt
+            return True
 
         # Check for UNTIL clause (inline PERFORM UNTIL)
         if token and token.type == TokenType.UNTIL:
             self._parse_until_clause(token_stream, stmt)
-            return stmt
+            return True
 
         # Check for TIMES clause (inline PERFORM n TIMES)
-        # Check for numeric literals: TokenType.NUMERIC_LITERAL, TokenType.LEVEL_NUMBER, or numeric IDENTIFIER
-        # The numeric token is only a TIMES count when TIMES/TIME actually
-        # follows -- checked via lookahead *before* consuming. COBOL also
-        # allows all-digit procedure names (PERFORM 1000 THRU 1999), so a
-        # numeric token with no TIMES after it must fall through to the
-        # procedure-name-target branch below instead of being consumed as a
-        # failed TIMES count and lost.
-        if token and (
+        if token and _is_count_literal_token(token):
+            if self._try_parse_inline_literal_times(token_stream, stmt, token):
+                return True
+            skip_whitespace(token_stream)
+        return False
+
+    def _parse_test_phrase(
+        self, token_stream: ITokenStream, stmt: PerformStatement, token: Token
+    ) -> Token | None:
+        """Consume ``[WITH] TEST BEFORE|AFTER`` starting at *token* (WITH or
+        TEST) into ``stmt.test_timing``; return the next meaningful token.
+
+        WITH, TEST, and BEFORE/AFTER may each land on their own continuation
+        line, so a skip_whitespace before every peek is required or the
+        clause is silently left unconsumed (H3-style newline-intolerance
+        bug).
+        """
+        current: Token | None = token
+        try:
+            if token.type == TokenType.WITH:
+                token_stream.consume()  # Skip WITH (optional prefix)
+                skip_whitespace(token_stream)
+                current = token_stream.peek()
+            if current and current.type == TokenType.TEST:
+                token_stream.consume()  # Skip TEST
+                skip_whitespace(token_stream)
+                current = token_stream.peek()
+                if current and current.type in (TokenType.BEFORE, TokenType.AFTER):
+                    val = current.type.name  # "BEFORE" or "AFTER"
+                    stmt.set_test_timing(val)
+                    token_stream.consume()
+        except (TokenMismatch, UnexpectedEndOfInput):
+            pass
+        skip_whitespace(token_stream)
+        return token_stream.peek()
+
+    def _try_parse_inline_literal_times(
+        self, token_stream: ITokenStream, stmt: PerformStatement, token: Token
+    ) -> bool:
+        """``PERFORM n TIMES <statements> END-PERFORM`` with a numeric count.
+
+        The numeric token is only a TIMES count when TIMES/TIME actually
+        follows -- checked via lookahead *before* consuming. COBOL also
+        allows all-digit procedure names (PERFORM 1000 THRU 1999), so a
+        numeric token with no TIMES after it must fall through to the
+        procedure-name-target branch instead of being consumed as a failed
+        TIMES count and lost. True when the inline form was parsed.
+        """
+        if not _is_times_word(peek_past_noise(token_stream, 1)[0]):
+            return False
+        try:
+            times_count = int(token.value)
+            token_stream.consume()  # the count
+            skip_whitespace(token_stream)
+            token_stream.consume()  # TIMES keyword
+            stmt.set_times_clause(times_count)
+            # Parse inline statements until END-PERFORM
+            self._parse_inline_statements(token_stream, stmt)
+            return True
+        except (ValueError, TokenMismatch, UnexpectedEndOfInput):
+            return False
+
+    def _parse_procedure_form(
+        self,
+        token_stream: ITokenStream,
+        stmt: PerformStatement,
+        token: Token,
+        context: Any,
+        location: SourceLocation,
+    ) -> bool:
+        """Parse the forms that start with a procedure name (or an
+        identifier TIMES count) at *token*. True when the inline
+        ``identifier TIMES`` form was parsed and *stmt* is complete; False
+        when the caller still consumes the terminating period/END-PERFORM.
+        """
+        # ``PERFORM counter-name TIMES`` -- an identifier count is as
+        # standard as a literal one; previously the identifier was taken
+        # as a paragraph name and TIMES fell out as an unparsed token.
+        lookahead = _peek_past_optional_subscript(token_stream, 1)
+        if token.type == TokenType.IDENTIFIER and _is_times_word(lookahead):
+            token_stream.consume()  # the count identifier
+            # ``PERFORM WS-CNT OF WS-CTL TIMES`` / ``PERFORM TBL-N (I)
+            # TIMES``: the count is the whole data reference.
+            count_name = consume_optional_qualifiers(token_stream, token.value or "")
+            skip_whitespace(token_stream)
+            token_stream.consume()  # TIMES keyword
+            stmt.set_times_clause(count_name)
+            self._parse_inline_statements(token_stream, stmt)
+            return True
+
+        stmt.set_target_paragraph(token.value)
+        try:
+            token_stream.consume()
+            token_stream.peek()
+        except (TokenMismatch, UnexpectedEndOfInput):
+            pass
+
+        skip_whitespace(token_stream)
+        current = token_stream.peek()
+
+        # ``PERFORM PAR-1A OF QUAL-SECTION-1`` -- a section-qualified
+        # paragraph name (NIST NC208A). The qualifier is recorded as
+        # metadata; the target keeps the bare paragraph name so
+        # flow-graph lookups by name are unchanged.
+        qualifier = consume_procedure_qualifier(token_stream)
+        if qualifier:
+            stmt.set_metadata("target_qualifier", qualifier)
+            current = token_stream.peek()
+
+        # Check for THRU clause (THROUGH is a standard COBOL synonym)
+        if (
+            current
+            and current.type == TokenType.IDENTIFIER
+            and current.value
+            and current.value.upper() in ("THRU", "THROUGH")
+        ):
+            current = self._parse_thru_phrase(token_stream, stmt, context, location)
+
+        self._parse_trailing_times(token_stream, stmt, current)
+
+        skip_whitespace(token_stream)
+        current = token_stream.peek()
+
+        # Check for WITH TEST clause after paragraph name (WITH TEST
+        # BEFORE/AFTER) -- see the newline-tolerance note in
+        # _parse_test_phrase.
+        if current and current.type in (TokenType.WITH, TokenType.TEST):
+            current = self._parse_test_phrase(token_stream, stmt, current)
+
+        self._parse_out_of_line_loop(token_stream, stmt, current)
+        return False
+
+    def _parse_thru_phrase(
+        self,
+        token_stream: ITokenStream,
+        stmt: PerformStatement,
+        context: Any,
+        location: SourceLocation,
+    ) -> Token | None:
+        """Consume ``THRU|THROUGH procedure-name [OF section]`` (the stream
+        is at THRU); return the next meaningful token."""
+        try:
+            token_stream.consume()  # Skip THRU/THROUGH
+            # The end name may sit on a continuation line
+            # (PERFORM name THRU\n    other-name), so newline and
+            # whitespace tokens must be skipped before peeking it.
+            skip_whitespace(token_stream)
+            token = token_stream.peek()
+            if token and _is_procedure_name_token(token):
+                stmt.set_thru_paragraph(token.value)
+                token_stream.consume()
+                # ``THRU P2 OF S1`` -- same qualifier form as the
+                # target; previously left as an unparsed OF.
+                thru_qualifier = consume_procedure_qualifier(token_stream)
+                if thru_qualifier:
+                    stmt.set_metadata("thru_qualifier", thru_qualifier)
+            else:
+                report_parse_error(
+                    context,
+                    "PERFORM THRU requires an ending paragraph name",
+                    location,
+                )
+        except (TokenMismatch, UnexpectedEndOfInput):
+            pass
+
+        skip_whitespace(token_stream)
+        return token_stream.peek()
+
+    def _parse_trailing_times(
+        self,
+        token_stream: ITokenStream,
+        stmt: PerformStatement,
+        token: Token | None,
+    ) -> None:
+        """Parse a TIMES clause after the target paragraph(s).
+
+        The count can be numeric or variable. The candidate token is only a
+        TIMES-clause value if it is actually followed by TIMES/TIME --
+        checked via lookahead *before* consuming, so a token that turns out
+        not to start a TIMES clause (e.g. a stray trailing identifier, or
+        the next statement's leading token) is left in the stream instead of
+        being silently discarded with no warning (H3).
+        """
+        if token and token.type == TokenType.IDENTIFIER:
+            self._parse_trailing_identifier_times(token_stream, stmt, token)
+        elif token and (
             token.type == TokenType.NUMERIC_LITERAL
             or token.type == TokenType.LEVEL_NUMBER
-            or (
-                token.type == TokenType.IDENTIFIER
-                and token.value
-                and token.value.isdigit()
-            )
         ):
-            lookahead = peek_past_noise(token_stream, 1)[0]
-            if lookahead and (
-                lookahead.type == TokenType.TIMES
-                or (
-                    lookahead.type == TokenType.IDENTIFIER
-                    and lookahead.value
-                    and lookahead.value.upper() in ("TIMES", "TIME")
-                )
-            ):
-                try:
-                    times_count = int(token.value)
-                    token_stream.consume()  # the count
-                    skip_whitespace(token_stream)
-                    token_stream.consume()  # TIMES keyword
-                    stmt.set_times_clause(times_count)
-                    # Parse inline statements until END-PERFORM
-                    self._parse_inline_statements(token_stream, stmt)
-                    return stmt
-                except (ValueError, TokenMismatch, UnexpectedEndOfInput):
-                    pass
+            self._parse_trailing_literal_times(token_stream, stmt, token)
 
+    def _parse_trailing_identifier_times(
+        self, token_stream: ITokenStream, stmt: PerformStatement, token: Token
+    ) -> None:
+        """``PERFORM P count TIMES`` with an identifier (or numeric
+        IDENTIFIER) count, or a stray trailing identifier."""
+        lookahead = _peek_past_optional_subscript(token_stream, 1)
+        if _is_times_word(lookahead):
+            times_value = token.value
+            token_stream.consume()
             skip_whitespace(token_stream)
-            token = token_stream.peek()
+            # ``PERFORM P TABLE5-NUM (INDEX5) TIMES`` (NIST NC121M):
+            # fold a subscript / qualifier chain into the count.
+            times_value = consume_optional_qualifiers(token_stream, times_value)
 
-        # Simple PERFORM procedure-name (an identifier, or an all-digit
-        # numeric paragraph name -- e.g. PERFORM 1000 THRU 1999)
-        if token and _is_procedure_name_token(token):
-            # ``PERFORM counter-name TIMES`` -- an identifier count is as
-            # standard as a literal one; previously the identifier was taken
-            # as a paragraph name and TIMES fell out as an unparsed token.
-            lookahead = _peek_past_optional_subscript(token_stream, 1)
-            if (
-                token.type == TokenType.IDENTIFIER
-                and lookahead
-                and (
-                    lookahead.type == TokenType.TIMES
-                    or (
-                        lookahead.type == TokenType.IDENTIFIER
-                        and lookahead.value
-                        and lookahead.value.upper() in ("TIMES", "TIME")
-                    )
-                )
-            ):
-                token_stream.consume()  # the count identifier
-                # ``PERFORM WS-CNT OF WS-CTL TIMES`` / ``PERFORM TBL-N (I)
-                # TIMES``: the count is the whole data reference.
-                count_name = consume_optional_qualifiers(
-                    token_stream, token.value or ""
-                )
-                skip_whitespace(token_stream)
-                token_stream.consume()  # TIMES keyword
-                stmt.set_times_clause(count_name)
-                self._parse_inline_statements(token_stream, stmt)
-                return stmt
-            paragraph = token.value
-            stmt.set_target_paragraph(paragraph)
+            # Can be numeric (int) or variable (string)
+            para_times_count: Any
             try:
-                token_stream.consume()
-                token = token_stream.peek()
-            except (TokenMismatch, UnexpectedEndOfInput):
-                token = None
+                para_times_count = int(times_value)
+            except ValueError:
+                para_times_count = times_value  # Keep as variable name string
 
-            skip_whitespace(token_stream)
-            token = token_stream.peek()
+            token_stream.consume()  # Skip TIMES keyword
+            stmt.set_times_clause(para_times_count)
+        elif not is_statement_boundary(token):
+            # Not a TIMES clause and not the start of a following
+            # statement -- a bare trailing identifier here (e.g. a
+            # typo) would otherwise be left for the caller to
+            # misread as a new paragraph header (IDENTIFIER
+            # immediately followed by PERIOD is indistinguishable
+            # from a paragraph declaration at that point).
+            _warn_stray_trailing_token(token_stream, token)
+            token_stream.consume()
 
-            # ``PERFORM PAR-1A OF QUAL-SECTION-1`` -- a section-qualified
-            # paragraph name (NIST NC208A). The qualifier is recorded as
-            # metadata; the target keeps the bare paragraph name so
-            # flow-graph lookups by name are unchanged.
-            qualifier = consume_procedure_qualifier(token_stream)
-            if qualifier:
-                stmt.set_metadata("target_qualifier", qualifier)
-                token = token_stream.peek()
+    def _parse_trailing_literal_times(
+        self, token_stream: ITokenStream, stmt: PerformStatement, token: Token
+    ) -> None:
+        """``PERFORM P n TIMES`` with a numeric-literal count, or a stray
+        trailing number."""
+        if not _is_times_word(peek_past_noise(token_stream, 1)[0]):
+            _warn_stray_trailing_token(token_stream, token)
+            token_stream.consume()
+            return
+        try:
+            num_times_count = int(token.value)
+        except (ValueError, TypeError):
+            return
+        token_stream.consume()
+        skip_whitespace(token_stream)
+        token_stream.consume()  # Skip TIMES keyword
+        stmt.set_times_clause(num_times_count)
 
-            # Check for THRU clause (THROUGH is a standard COBOL synonym)
-            if (
-                token
-                and token.type == TokenType.IDENTIFIER
-                and token.value
-                and token.value.upper() in ("THRU", "THROUGH")
-            ):
-                try:
-                    token_stream.consume()  # Skip THRU/THROUGH
-                    # The end name may sit on a continuation line
-                    # (PERFORM name THRU\n    other-name), so newline and
-                    # whitespace tokens must be skipped before peeking it.
-                    skip_whitespace(token_stream)
-                    token = token_stream.peek()
-                    if token and _is_procedure_name_token(token):
-                        stmt.set_thru_paragraph(token.value)
-                        token_stream.consume()
-                        # ``THRU P2 OF S1`` -- same qualifier form as the
-                        # target; previously left as an unparsed OF.
-                        thru_qualifier = consume_procedure_qualifier(token_stream)
-                        if thru_qualifier:
-                            stmt.set_metadata("thru_qualifier", thru_qualifier)
-                        token = token_stream.peek()
-                    else:
-                        report_parse_error(
-                            context,
-                            "PERFORM THRU requires an ending paragraph name",
-                            location,
-                        )
-                except (TokenMismatch, UnexpectedEndOfInput):
-                    pass
+    def _parse_out_of_line_loop(
+        self,
+        token_stream: ITokenStream,
+        stmt: PerformStatement,
+        token: Token | None,
+    ) -> None:
+        """Parse a VARYING or UNTIL phrase after the target paragraph(s)."""
+        # Check for VARYING clause after paragraph name -- the
+        # out-of-line form: PERFORM procedure-name-1 [THRU procedure-
+        # name-2] [WITH TEST ...] VARYING id FROM x BY y UNTIL cond
+        # [AFTER ...]. Previously unhandled here entirely: the VARYING
+        # token matched neither the TIMES/WITH TEST/UNTIL branches nor
+        # the trailing "period or END-PERFORM" check, so the whole
+        # clause was left unconsumed for the top-level "unparsed
+        # tokens" recovery to discard, and perform_type stayed the
+        # default "SIMPLE" -- indistinguishable from a genuine plain
+        # PERFORM to anything keyed off perform_type.
+        if token and token.type == TokenType.VARYING:
+            self._parse_out_of_line_varying_clause(token_stream, stmt)
+        # Check for UNTIL clause after paragraph name
+        elif token and token.type == TokenType.UNTIL:
+            try:
+                self._parse_until_condition_only(token_stream, stmt)
+            except ParseError as exc:
+                # A malformed UNTIL condition here must not abort the
+                # whole PERFORM; the error is already recorded via
+                # report_or_raise when applicable. Log at debug for
+                # diagnosability (H4 -- these catches previously had no
+                # trace at all).
+                logger.debug(
+                    "PERFORM UNTIL condition parse suppressed %r",
+                    exc,
+                    exc_info=True,
+                )
 
-                skip_whitespace(token_stream)
-                token = token_stream.peek()
-
-            # Check for TIMES clause after paragraph name (can be numeric or
-            # variable). The candidate token is only a TIMES-clause value if
-            # it is actually followed by TIMES/TIME -- checked via lookahead
-            # *before* consuming, so a token that turns out not to start a
-            # TIMES clause (e.g. a stray trailing identifier, or the next
-            # statement's leading token) is left in the stream instead of
-            # being silently discarded with no warning (H3).
-            if token and token.type == TokenType.IDENTIFIER:
-                lookahead = _peek_past_optional_subscript(token_stream, 1)
-                if lookahead and (
-                    lookahead.type == TokenType.TIMES
-                    or (
-                        lookahead.type == TokenType.IDENTIFIER
-                        and lookahead.value
-                        and lookahead.value.upper() in ("TIMES", "TIME")
-                    )
-                ):
-                    times_value = token.value
-                    token_stream.consume()
-                    skip_whitespace(token_stream)
-                    # ``PERFORM P TABLE5-NUM (INDEX5) TIMES`` (NIST NC121M):
-                    # fold a subscript / qualifier chain into the count.
-                    times_value = consume_optional_qualifiers(token_stream, times_value)
-
-                    # Can be numeric (int) or variable (string)
-                    para_times_count: Any
-                    try:
-                        para_times_count = int(times_value)
-                    except ValueError:
-                        para_times_count = times_value  # Keep as variable name string
-
-                    token_stream.consume()  # Skip TIMES keyword
-                    stmt.set_times_clause(para_times_count)
-                    token = token_stream.peek()
-                elif not is_statement_boundary(token):
-                    # Not a TIMES clause and not the start of a following
-                    # statement -- a bare trailing identifier here (e.g. a
-                    # typo) would otherwise be left for the caller to
-                    # misread as a new paragraph header (IDENTIFIER
-                    # immediately followed by PERIOD is indistinguishable
-                    # from a paragraph declaration at that point).
-                    _warn_stray_trailing_token(token_stream, token)
-                    token_stream.consume()
-                    token = token_stream.peek()
-            elif token and (
-                token.type == TokenType.NUMERIC_LITERAL
-                or token.type == TokenType.LEVEL_NUMBER
-            ):
-                lookahead = peek_past_noise(token_stream, 1)[0]
-                if lookahead and (
-                    lookahead.type == TokenType.TIMES
-                    or (
-                        lookahead.type == TokenType.IDENTIFIER
-                        and lookahead.value
-                        and lookahead.value.upper() in ("TIMES", "TIME")
-                    )
-                ):
-                    try:
-                        num_times_count = int(token.value)
-                    except (ValueError, TypeError):
-                        pass
-                    else:
-                        token_stream.consume()
-                        skip_whitespace(token_stream)
-                        token_stream.consume()  # Skip TIMES keyword
-                        stmt.set_times_clause(num_times_count)
-                        token = token_stream.peek()
-                else:
-                    _warn_stray_trailing_token(token_stream, token)
-                    token_stream.consume()
-                    token = token_stream.peek()
-
-            skip_whitespace(token_stream)
-            token = token_stream.peek()
-
-            # Check for WITH TEST clause after paragraph name (WITH TEST
-            # BEFORE/AFTER) -- see the newline-tolerance note above.
-            if token and token.type in (TokenType.WITH, TokenType.TEST):
-                try:
-                    if token.type == TokenType.WITH:
-                        token_stream.consume()  # Skip WITH (optional prefix)
-                        skip_whitespace(token_stream)
-                        token = token_stream.peek()
-                    if token and token.type == TokenType.TEST:
-                        token_stream.consume()  # Skip TEST
-                        skip_whitespace(token_stream)
-                        token = token_stream.peek()
-                        if token and token.type in (TokenType.BEFORE, TokenType.AFTER):
-                            val = token.type.name  # "BEFORE" or "AFTER"
-                            stmt.set_test_timing(val)
-                            token_stream.consume()
-                            token = token_stream.peek()
-                except (TokenMismatch, UnexpectedEndOfInput):
-                    pass
-
-                skip_whitespace(token_stream)
-                token = token_stream.peek()
-
-            # Check for VARYING clause after paragraph name -- the
-            # out-of-line form: PERFORM procedure-name-1 [THRU procedure-
-            # name-2] [WITH TEST ...] VARYING id FROM x BY y UNTIL cond
-            # [AFTER ...]. Previously unhandled here entirely: the VARYING
-            # token matched neither the TIMES/WITH TEST/UNTIL branches nor
-            # the trailing "period or END-PERFORM" check, so the whole
-            # clause was left unconsumed for the top-level "unparsed
-            # tokens" recovery to discard, and perform_type stayed the
-            # default "SIMPLE" -- indistinguishable from a genuine plain
-            # PERFORM to anything keyed off perform_type.
-            if token and token.type == TokenType.VARYING:
-                self._parse_out_of_line_varying_clause(token_stream, stmt)
-            # Check for UNTIL clause after paragraph name
-            elif token and token.type == TokenType.UNTIL:
-                try:
-                    self._parse_until_condition_only(token_stream, stmt)
-                except ParseError as exc:
-                    # A malformed UNTIL condition here must not abort the
-                    # whole PERFORM; the error is already recorded via
-                    # report_or_raise when applicable. Log at debug for
-                    # diagnosability (H4 -- these catches previously had no
-                    # trace at all).
-                    logger.debug(
-                        "PERFORM UNTIL condition parse suppressed %r",
-                        exc,
-                        exc_info=True,
-                    )
-
-        # Expect period or END-PERFORM
+    @staticmethod
+    def _consume_perform_end(token_stream: ITokenStream) -> None:
+        """Consume a terminating period or END-PERFORM, if present."""
         try:
             token = token_stream.peek()
             if token and token.type == TokenType.PERIOD:
@@ -545,8 +590,6 @@ class PerformStatementParser(IStatementParser):
                 token_stream.consume()
         except (TokenMismatch, UnexpectedEndOfInput):
             pass
-
-        return stmt
 
     def _parse_varying_clause(
         self, stream: ITokenStream, stmt: PerformStatement
@@ -645,27 +688,10 @@ class PerformStatementParser(IStatementParser):
         skip_whitespace(stream)
 
         # Check for WITH TEST clause (before UNTIL) -- see the
-        # newline-tolerance note in the top-level WITH TEST check above.
+        # newline-tolerance note in _parse_test_phrase.
         token = stream.peek()
         if token and token.type == TokenType.WITH:
-            try:
-                stream.consume()  # Skip WITH
-                skip_whitespace(stream)
-                token = stream.peek()
-                if token and token.type == TokenType.TEST:
-                    stream.consume()  # Skip TEST
-                    skip_whitespace(stream)
-                    token = stream.peek()
-                    if token and token.type in (TokenType.BEFORE, TokenType.AFTER):
-                        val = token.type.name  # "BEFORE" or "AFTER"
-                        stmt.set_test_timing(val)
-                        stream.consume()
-                        token = stream.peek()
-            except (TokenMismatch, UnexpectedEndOfInput):
-                pass
-
-            skip_whitespace(stream)
-            token = stream.peek()
+            self._parse_test_phrase(stream, stmt, token)
 
         # Parse UNTIL condition
         token = stream.peek()

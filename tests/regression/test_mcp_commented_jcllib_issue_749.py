@@ -15,8 +15,8 @@ import pytest
 
 pytest.importorskip("jclparser")
 
-from cobolparser.mcp.jcl_tools import _jcllib_names  # noqa: E402
 from cobolparser.mcp.tools import CobolTools  # noqa: E402
+from cobolparser.mcp.tools.jcl_index import _jcllib_names  # noqa: E402
 from cobolparser.mcp.workspace import Workspace  # noqa: E402
 
 

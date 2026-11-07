@@ -5,8 +5,7 @@ BY second, and its INDEXED BY loop took any IDENTIFIER as an index name. A
 table written ``INDEXED BY IX2 ASCENDING KEY IS K2`` (IBM accepts either
 order) got ``index_names == ['IX2', 'ASCENDING']``, no key, an "Unparsed
 token 'KEY'" warning, an xref data item named ASCENDING, and a key change
-that ``diff`` could not see. Fixed identically in the pure-Python walk and
-its Cython mirror in ``_data_fast.pyx``.
+that ``diff`` could not see. Fixed in the OCCURS clause walk.
 """
 
 from __future__ import annotations

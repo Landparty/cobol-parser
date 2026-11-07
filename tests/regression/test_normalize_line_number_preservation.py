@@ -10,11 +10,6 @@ lexer/parser error and warning location by however many such lines preceded
 it — a "clean" parse could report an error several lines away from where the
 actual problem was.
 
-Also pins that the Cython ``_preprocess_fast``/``_lexer_fast`` accelerated
-paths stay behaviorally identical to the pure-Python fallback for these
-cases (a divergence here means the compiled build silently behaves
-differently from the non-accelerated build).
-
 Issue #123 (2026-08-10): the 2026-07-08 fix above was incomplete. It made
 the "short physical line" and "comment physical line" branches always emit
 an empty placeholder, but ``flush_parts()`` -- which appends the *previous*
@@ -43,10 +38,9 @@ earlier in the file, but only in files with at least one `COPY` statement.
 """
 
 from cobolparser import parse_cobol
-from cobolparser.lexer import CobolLexer, _CobolLexerPure
+from cobolparser.lexer import CobolLexer, TokenType
 from cobolparser.plugins.core import ErrorRecoveryMode
 from cobolparser.preprocess import (
-    _normalize_fixed_format_pure,
     normalize_fixed_format,
     preprocess_conditional_compilation,
 )
@@ -85,12 +79,6 @@ class TestNormalizeFixedFormatPreservesLineNumbers:
         out_lines = out.split("\n")
         assert out_lines[2] == ""  # blank source line
         assert out_lines[3] == ""  # comment source line
-
-    def test_cython_and_pure_python_agree(self):
-        """The compiled fast-path must not diverge from the fallback."""
-        assert normalize_fixed_format(self.LINES) == _normalize_fixed_format_pure(
-            self.LINES
-        )
 
 
 class TestConditionalCompilationPreservesLineNumbers:
@@ -135,11 +123,10 @@ class TestConditionalCompilationPreservesLineNumbers:
 
 
 class TestLexerLineStartQuoteWhitespaceParity:
-    """Cython/pure-Python must agree on what counts as "whitespace only
-    before this quote" — the pure-Python check only treats " "/"\\t" as
-    whitespace, while an earlier Cython implementation used str.strip(),
-    a broader definition (e.g. "\\v", "\\f", NBSP) that could classify the
-    same line differently, silently diverging from the fallback path."""
+    """What counts as "whitespace only before this quote" on a continuation
+    line: only " "/"\\t". A broader definition (str.strip(): "\\v", "\\f",
+    NBSP) once classified the same line differently in a since-removed
+    compiled lexer."""
 
     # A form-feed (page-eject control byte, plausible EBCDIC/ASCII transcoding
     # leftover) precedes an open quote on a fixed-format continuation line.
@@ -150,18 +137,12 @@ class TestLexerLineStartQuoteWhitespaceParity:
         "           STOP RUN.\n"
     )
 
-    def test_fast_and_pure_lexers_agree(self):
-        fast_tokens = CobolLexer(self.SOURCE, free_form=False).tokenize()
-        pure_tokens = _CobolLexerPure(self.SOURCE, free_form=False).tokenize()
-
-        assert len(fast_tokens) == len(pure_tokens)
-        for i, (ft, pt) in enumerate(zip(fast_tokens, pure_tokens, strict=True)):
-            assert (
-                ft.type == pt.type
-            ), f"Token[{i}] type mismatch: {ft.type} vs {pt.type}"
-            assert (
-                ft.value == pt.value
-            ), f"Token[{i}] value mismatch: {ft.value!r} vs {pt.value!r}"
+    def test_form_feed_before_continuation_quote(self):
+        lexer = CobolLexer(self.SOURCE, free_form=False)
+        tokens = lexer.tokenize()
+        assert not lexer.errors
+        literals = [t.value for t in tokens if t.type == TokenType.STRING_LITERAL]
+        assert literals == ["ABCDEF"]
 
 
 class TestNormalizeFixedFormatPreservesFullWidthBlankLines:
@@ -201,11 +182,6 @@ class TestNormalizeFixedFormatPreservesFullWidthBlankLines:
         assert out_lines[5] == ""
         assert out_lines[6] == ""
         assert "DISPLAY WS-B" in out_lines[7]
-
-    def test_cython_and_pure_python_agree(self):
-        assert normalize_fixed_format(self.LINES) == _normalize_fixed_format_pure(
-            self.LINES
-        )
 
 
 class TestCopybookCommentDriftIssue123:

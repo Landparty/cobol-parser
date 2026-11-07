@@ -567,7 +567,7 @@ class CobolProgram(ASTNode):
         if self._cached_all_statements is not None:
             return self._cached_all_statements
 
-        from .statements import CobolStatement
+        from .statements import NESTED_BODY_ATTRS, CobolStatement
 
         statements = []
         visited = set()
@@ -603,28 +603,9 @@ class CobolProgram(ASTNode):
                 for stmt in node.statements:
                     traverse(stmt)
 
-            # 3. Recurse known attribute lists (handle orphans/non-children)
-            # COBOL statements often have conditional blocks in attributes
-            orphan_attrs = [
-                "at_end_clause",
-                "not_at_end_clause",
-                "invalid_key_clause",
-                "not_invalid_key_clause",
-                "at_eop_clause",
-                "on_exception",
-                "not_on_exception",
-                "on_overflow",
-                "not_on_overflow",
-                "on_size_error",
-                "not_on_size_error",
-                "when_clauses",
-                "default_when",
-                "then_statements",
-                "else_statements",
-                "inline_statements",
-            ]
-
-            for attr in orphan_attrs:
+            # 3. Recurse every nested-body attribute (handle orphans/non-children):
+            # the one canonical list, next to the statement node classes.
+            for attr in NESTED_BODY_ATTRS:
                 if hasattr(node, attr):
                     val = getattr(node, attr)
                     if val:
@@ -1368,209 +1349,6 @@ def _implied_usage(item: "CobolDataItem") -> str | None:
     return _implied_picture_usage(item.picture_clause)
 
 
-class CobolFileDescription(ASTNode):
-    """AST node for FD (File Description) and SD (Sort Description) in FILE SECTION.
-
-    Supports comprehensive FD/SD clause variations:
-    - BLOCK CONTAINS with fixed/dynamic record count
-    - RECORD CONTAINS with fixed and variable length specifications
-    - LABEL RECORDS specifications
-    - VALUE OF clauses
-    - DATA RECORDS declarations
-    - LINAGE with FOOTING and TOP/BOTTOM specifications
-    - CODE-SET for character encoding
-    - RECORDING MODE (F, V, U, S)
-    - EXTERNAL and GLOBAL attributes
-    - IBM Enterprise COBOL extensions
-    """
-
-    def __init__(
-        self, file_name: str, location: SourceLocation, record_type: str = "FD"
-    ):
-        super().__init__("FileDescription", location)
-        self.file_name = file_name
-        self.record_type = record_type  # FD or SD
-        self.data_records: list[CobolDataItem] = []
-
-        # BLOCK CONTAINS clause
-        self.block_contains: int | None = None
-        self.block_contains_min: int | None = None  # For range: min TO max
-        self.block_contains_max: int | None = None
-        self.block_contains_unit: str | None = None  # RECORDS or CHARACTERS
-
-        # RECORD CONTAINS clause
-        self.record_contains: int | None = None  # Fixed length
-        self.record_contains_min: int | None = None  # Variable: min TO max
-        self.record_contains_max: int | None = None
-        self.record_varying_depending_on: str | None = None
-
-        # LABEL RECORDS clause
-        self.label_records: str | None = None  # STANDARD, OMITTED, or data-name
-
-        # VALUE OF clause
-        self.value_of: list[dict[str, str]] = []  # [{system_name, value}]
-
-        # DATA RECORDS clause
-        self.data_record_names: list[str] = []
-
-        # LINAGE clause
-        self.linage_value: int | str | None = None  # Number or data-name
-        self.linage_footing: int | str | None = None
-        self.linage_top: int | str | None = None
-        self.linage_bottom: int | str | None = None
-
-        # CODE-SET clause
-        self.code_set: str | None = None
-        self.code_set_for_alphanumeric: str | None = None
-        self.code_set_for_national: str | None = None  # IBM extension
-
-        # RECORDING MODE clause
-        self.recording_mode: str | None = None  # F, V, U, S
-
-        # EXTERNAL/GLOBAL attributes
-        self.is_external: bool = False
-        self.is_global: bool = False
-
-        # REPORT IS clause (Report Writer)
-        self.report_names: list[str] = []
-
-    def set_block_contains(
-        self,
-        count: int | None = None,
-        min_count: int | None = None,
-        max_count: int | None = None,
-        unit: str | None = None,
-    ) -> None:
-        """Set the BLOCK CONTAINS clause."""
-        if min_count is not None and max_count is not None:
-            self.block_contains_min = min_count
-            self.block_contains_max = max_count
-        else:
-            self.block_contains = count
-        self.block_contains_unit = unit
-
-    def set_record_contains(
-        self,
-        count: int | None = None,
-        min_count: int | None = None,
-        max_count: int | None = None,
-        depending_on: str | None = None,
-    ) -> None:
-        """Set the RECORD CONTAINS clause."""
-        if min_count is not None and max_count is not None:
-            self.record_contains_min = min_count
-            self.record_contains_max = max_count
-        else:
-            self.record_contains = count
-        self.record_varying_depending_on = depending_on
-
-    def set_label_records(self, value: str) -> None:
-        """Set the LABEL RECORDS clause."""
-        self.label_records = value
-
-    def set_linage(
-        self,
-        value: int | str | None,
-        footing: int | str | None = None,
-        top: int | str | None = None,
-        bottom: int | str | None = None,
-    ) -> None:
-        """Set the LINAGE clause with optional footing and margins."""
-        self.linage_value = value
-        self.linage_footing = footing
-        self.linage_top = top
-        self.linage_bottom = bottom
-
-    def set_code_set(
-        self,
-        code_set: str,
-        for_alphanumeric: str | None = None,
-        for_national: str | None = None,
-    ) -> None:
-        """Set the CODE-SET clause."""
-        self.code_set = code_set
-        self.code_set_for_alphanumeric = for_alphanumeric
-        self.code_set_for_national = for_national
-
-    def set_recording_mode(self, mode: str) -> None:
-        """Set the RECORDING MODE clause."""
-        self.recording_mode = mode.upper()
-
-    def set_external(self, is_external: bool = True) -> None:
-        """Set the EXTERNAL attribute."""
-        self.is_external = is_external
-
-    def set_global(self, is_global: bool = True) -> None:
-        """Set the GLOBAL attribute."""
-        self.is_global = is_global
-
-    def to_dict(self) -> dict[str, Any]:
-        """Convert FD/SD to dictionary representation."""
-        result = {
-            "node_type": self.node_type,
-            "file_name": self.file_name,
-            "record_type": self.record_type,
-            "data_records": len(self.data_records),
-            "data_record_details": [d.to_dict() for d in self.data_records],
-            "location": self.location.to_dict(),
-            "metadata": self._metadata or {},
-        }
-
-        # BLOCK CONTAINS
-        if self.block_contains is not None:
-            result["block_contains"] = {
-                "count": self.block_contains,
-                "unit": self.block_contains_unit,
-            }
-        elif self.block_contains_min is not None:
-            result["block_contains"] = {
-                "min": self.block_contains_min,
-                "max": self.block_contains_max,
-                "unit": self.block_contains_unit,
-            }
-
-        # RECORD CONTAINS
-        if self.record_contains is not None:
-            result["record_contains"] = {"count": self.record_contains}
-        elif self.record_contains_min is not None:
-            result["record_contains"] = {
-                "min": self.record_contains_min,
-                "max": self.record_contains_max,
-                "depending_on": self.record_varying_depending_on,
-            }
-
-        # Other clauses
-        if self.label_records:
-            result["label_records"] = self.label_records
-        if self.value_of:
-            result["value_of"] = self.value_of
-        if self.data_record_names:
-            result["data_record_names"] = self.data_record_names
-        if self.linage_value is not None:
-            result["linage"] = {
-                "value": self.linage_value,
-                "footing": self.linage_footing,
-                "top": self.linage_top,
-                "bottom": self.linage_bottom,
-            }
-        if self.code_set:
-            result["code_set"] = {
-                "name": self.code_set,
-                "for_alphanumeric": self.code_set_for_alphanumeric,
-                "for_national": self.code_set_for_national,
-            }
-        if self.recording_mode:
-            result["recording_mode"] = self.recording_mode
-        if self.is_external:
-            result["is_external"] = True
-        if self.is_global:
-            result["is_global"] = True
-        if self.report_names:
-            result["report_names"] = self.report_names
-
-        return result
-
-
 # Forward references - actual implementations in data_items.py and statements.py
 # These are imported at runtime to avoid circular imports
 
@@ -1581,5 +1359,4 @@ __all__ = [
     "CobolDivision",
     "CobolSection",
     "CobolParagraph",
-    "CobolFileDescription",
 ]

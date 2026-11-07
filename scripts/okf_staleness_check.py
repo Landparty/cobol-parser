@@ -29,18 +29,15 @@ from pathlib import Path
 #      same-named module beside it -- "cobolparser/parsers/" never matched
 #      "cobolparser/parser.py", so the parse orchestrator changed for months
 #      without ever asking for an OKF update. Every module gets its own entry.
-#   2. Every non-test .py/.pyx file under cobolparser/ must match at least one
+#   2. Every non-test .py file under cobolparser/ must match at least one
 #      prefix. tests/test_okf_staleness_map.py enforces that, so a new
 #      package (the way cobolparser/jcl/ arrived) cannot land undocumented.
 OKF_MAP = [
     ("cobolparser/lexer.py", [".okf/lexer.md"]),
-    ("cobolparser/_lexer_fast.pyx", [".okf/lexer.md"]),
-    ("cobolparser/_accel.py", [".okf/lexer.md", ".okf/parser/orchestration.md"]),
     ("cobolparser/_literals.py", [".okf/lexer.md", ".okf/parser/statements.md"]),
     ("cobolparser/_lines.py", [".okf/lexer.md", ".okf/preprocessing.md"]),
     ("cobolparser/_source_directive.py", [".okf/preprocessing.md"]),
     ("cobolparser/preprocess/", [".okf/preprocessing.md"]),
-    ("cobolparser/_preprocess_fast.pyx", [".okf/preprocessing.md"]),
     ("cobolparser/parser.py", [".okf/parser/orchestration.md"]),
     ("cobolparser/_errors.py", [".okf/parser/orchestration.md"]),
     ("cobolparser/profiling.py", [".okf/parser/orchestration.md"]),
@@ -178,7 +175,6 @@ OKF_MAP = [
         [".okf/parser/statements-io.md"],
     ),
     ("cobolparser/models/", [".okf/ast-models.md"]),
-    ("cobolparser/_data_fast.pyx", [".okf/ast-models.md", ".okf/parser/divisions.md"]),
     (
         "cobolparser/_storage.py",
         [".okf/ast-models.md", ".okf/generators/record-data.md"],
@@ -186,6 +182,7 @@ OKF_MAP = [
     ("cobolparser/analysis/__init__.py", [".okf/analysis.md"]),
     ("cobolparser/analysis/program_flow/", [".okf/analysis/flow.md"]),
     ("cobolparser/analysis/dead_code.py", [".okf/analysis/flow.md"]),
+    ("cobolparser/analysis/input_dependence.py", [".okf/analysis/flow.md"]),
     ("cobolparser/analysis/recursion_risk.py", [".okf/analysis/flow.md"]),
     ("cobolparser/analysis/complexity.py", [".okf/analysis/flow.md"]),
     ("cobolparser/analysis/redundancy.py", [".okf/analysis/flow.md"]),
@@ -271,8 +268,23 @@ OKF_MAP = [
     ("cobolparser/batch.py", [".okf/batch.md"]),
     ("cobolparser/scan.py", [".okf/batch.md"]),
     ("cobolparser/_facts_cache.py", [".okf/batch.md"]),
+    ("cobolparser/_file_limits.py", [".okf/batch.md"]),
     ("cobolparser/cli/", [".okf/cli.md"]),
+    # cli/parse.py is the entry point and top-level parser; the subcommands
+    # live in cli/commands/ (one module per area) on top of cli/_common.py.
+    ("cobolparser/cli/_common.py", [".okf/cli.md"]),
+    ("cobolparser/cli/commands/", [".okf/cli.md"]),
+    (
+        "cobolparser/cli/commands/analyze.py",
+        [".okf/cli.md", ".okf/analysis/data-use.md"],
+    ),
+    (
+        "cobolparser/cli/commands/data.py",
+        [".okf/cli.md", ".okf/generators/fixtures.md"],
+    ),
     ("cobolparser/config/", [".okf/cli.md"]),
+    # The tool modules (CobolTools mixins, the JCL tools), one per area.
+    ("cobolparser/mcp/tools/", [".okf/mcp.md"]),
     ("cobolparser/mcp/", [".okf/mcp.md"]),
     ("cobolparser/__main__.py", [".okf/cli.md"]),
     (

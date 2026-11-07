@@ -14,21 +14,16 @@ reserved for '*'/'/'/'-'/'D'/'d'), so treating 'V'/'v' as a comment
 indicator too is unambiguous with real source -- mirrors the existing
 ``debug_lines_as_comments`` precedent (M4) for 'D'/'d', including a
 ``version_tag_lines_as_comments=False`` opt-out for callers that need
-V-lines compiled as code, and the same default-True behavior on both the
-pure-Python and Cython (``_preprocess_fast``) paths.
+V-lines compiled as code.
 """
 
 from cobolparser import TokenType, parse_cobol, tokenize_cobol
 from cobolparser.preprocess import (
-    _normalize_fixed_format_pure,
     normalize_fixed_format,
 )
 from cobolparser.preprocess.copy_statement_parser import is_comment_line
 
-IMPLS = [
-    ("fast", normalize_fixed_format),
-    ("pure", _normalize_fixed_format_pure),
-]
+IMPLS = [("normalize", normalize_fixed_format)]
 
 
 def _line(indicator: str, text: str) -> str:

@@ -168,7 +168,8 @@ def _unit_facts(workspace: Workspace, parsed: ParsedProgram, facts: FileFacts) -
         unit_commarea,
         unit_services,
     )
-    from .tools import _calls, _flow
+    from .tools.brief import _calls
+    from .tools.common import _flow
 
     response = Response()
     graph_ids = program_graph_ids(parsed.ast.program_units(), facts.path)
