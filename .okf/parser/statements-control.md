@@ -138,6 +138,13 @@ arm.
 
 ## PERFORM
 
+- **Structure.** `parse()` handles the missing-target error, then tries
+  `_parse_inline_form` (VARYING, `[WITH TEST] UNTIL`, `n TIMES` via
+  `_try_parse_inline_literal_times`) and `_parse_procedure_form` (`id TIMES`
+  inline, else target -> `_parse_thru_phrase` -> `_parse_trailing_times` ->
+  `[WITH TEST]` -> `_parse_out_of_line_loop` for VARYING / UNTIL), and ends with
+  `_consume_perform_end` (period or END-PERFORM). `_is_times_word` is the one
+  TIMES/TIME lookahead test.
 - **Forms.** Inline (`PERFORM [WITH TEST ...] [UNTIL ... | VARYING ... | n
   TIMES] ... END-PERFORM`) and out-of-line (`PERFORM p [THRU q] [n TIMES | [WITH
   TEST ...] UNTIL ... | VARYING ...]`). `PERFORM id TIMES` and `PERFORM P id
@@ -170,7 +177,8 @@ arm.
   `tests/unit/test_perform_until_newline.py`.
 - **WITH TEST.** `WITH`, `TEST` and `BEFORE` / `AFTER` may sit on separate lines;
   all three call sites (inline form, out-of-line form, inside
-  `_parse_varying_header`) `skip_whitespace` before each peek. Bare `TEST
+  `_parse_varying_header`) share `_parse_test_phrase`, which `skip_whitespace`s
+  before each peek. Bare `TEST
   BEFORE` (no WITH) and `WITH TEST AFTER VARYING ...` inline are accepted.
 - **TIMES lookahead.** After a target paragraph, a following IDENTIFIER /
   NUMERIC_LITERAL is a TIMES count only if `TIMES` / `TIME` follows
@@ -217,6 +225,12 @@ arm.
 
 ## CALL
 
+- **Structure.** `parse()` reads the program name (`_parse_program_name`), then
+  `_parse_call_phrases` loops until a period, a statement verb
+  (`_starts_next_statement`) or a word with no handler: `_phrase_word(token)`
+  is looked up in `_PHRASE_HANDLERS` (USING / RETURNING / GIVING / EXCEPTION /
+  OVERFLOW / ON / NOT / END-CALL -> `_phrase_*`, each returning False to end
+  the CALL). Every handler body goes through `_parse_handler_body`.
 - **Handler bodies** (`ON EXCEPTION` / `NOT ON EXCEPTION` / `ON OVERFLOW`, `ON`
   optional; the `ON` lookahead crosses line breaks) are parsed by
   `_parse_nested_stmts` through the registry. Termination: a `NOT` / `END-CALL`
@@ -228,7 +242,8 @@ arm.
   `_warn_and_skip_handler_statement` (one warning per dropped statement, tokens
   skipped to the next boundary), mirroring the top-level recovery. Pinned by
   `tests/regression/test_call_handler_body_termination.py`.
-- **USING list** (`_parse_using_clause`): stops at `SCOPE_TERMINATORS` (never
+- **USING list** (`_parse_using_clause`, with `_ends_using_clause`,
+  `_consume_passing_mode` and `_consume_using_argument`): stops at `SCOPE_TERMINATORS` (never
   captures `END-CALL`) and at the handler words; commas are separators;
   `OMITTED` is an argument; a figurative constant (`BY CONTENT ZERO`) or a signed
   literal (`BY VALUE -7`) is one argument named by its text; `BY VALUE 100`,

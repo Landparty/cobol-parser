@@ -428,22 +428,8 @@ _WARN_MOVES: frozenset[tuple[DataCategory, DataCategory]] = frozenset(
     }
 )
 
-# A reference folded with its subscript / reference-modification group glued
-# on (``T-E(2)``, ``WS-A(1:3)``, ``T-E(IX)(1:2)``) -- the MOVE parser folds a
-# *source* operand this way, while ``base_data_name`` only splits the spaced
-# ``WS-TAB ( 3 )`` form, so a glued source missed the catalog entirely.
-_GLUED_REFERENCE_RE = re.compile(r"^([A-Za-z0-9][A-Za-z0-9-]*)\s*\(")
-
 # The group names an ``OF``/``IN`` qualifier chain names in a folded operand.
 _QUALIFIER_RE = re.compile(r"\b(?:OF|IN)\s+([A-Za-z0-9][A-Za-z0-9-]*)", re.IGNORECASE)
-
-
-def _reference_name(name: str) -> str:
-    """The referenced item's own name from a folded operand string."""
-    match = _GLUED_REFERENCE_RE.match(name.strip())
-    if match:
-        return match.group(1)
-    return base_data_name(name)
 
 
 def _is_reference_modified(name: str) -> bool:
@@ -452,7 +438,7 @@ def _is_reference_modified(name: str) -> bool:
     A reference-modified operand is an alphanumeric item whatever its base
     item's category (IBM Language Reference, "Reference modification").
     """
-    base = _reference_name(name)
+    base = base_data_name(name)
     if base == name.strip():
         return False
     return ":" in name.strip()[len(base) :]
@@ -758,7 +744,7 @@ class MoveTypeChecker:
     def _qualified_entry(self, name: str) -> tuple[DataCategory, bool, bool] | None:
         """The declaration a qualified reference (``WS-A OF GRP1``) names,
         for a data name whose declarations disagree."""
-        declarations = self._declarations.get(_reference_name(name).upper())
+        declarations = self._declarations.get(base_data_name(name).upper())
         if not declarations:
             return None
         qualifiers = {q.upper() for q in _QUALIFIER_RE.findall(name)}
@@ -899,7 +885,7 @@ class MoveTypeChecker:
 
     def _resolve_group_item(self, ref: str) -> CobolDataItem | None:
         """The one group item a (possibly qualified) reference names."""
-        candidates = self._items.get(_reference_name(ref).upper(), [])
+        candidates = self._items.get(base_data_name(ref).upper(), [])
         qualifiers = {q.upper() for q in _QUALIFIER_RE.findall(ref)}
         matches = [item for ancestors, item in candidates if qualifiers <= ancestors]
         if len(matches) != 1:
@@ -1052,7 +1038,7 @@ class MoveTypeChecker:
             return self._resolve_function(function)[0]
         if _LENGTH_OF_RE.match(name):
             return DataCategory.NUMERIC
-        upper = _reference_name(name).upper()
+        upper = base_data_name(name).upper()
         qualified = None if upper in self._catalog else self._qualified_entry(name)
         if upper in self._catalog or qualified is not None:
             if _is_reference_modified(name):
@@ -1127,7 +1113,7 @@ class MoveTypeChecker:
         """Whether *name* is a DATA DIVISION item this checker has no
         category for (a PIC N / national item): declared, so no copybook is
         missing."""
-        upper = _reference_name(name).upper()
+        upper = base_data_name(name).upper()
         if upper in self._catalog:
             return self._catalog[upper] == DataCategory.UNKNOWN
         qualified = self._qualified_entry(name)
@@ -1161,7 +1147,7 @@ class MoveTypeChecker:
         function = _function_source(name)
         if function is not None:
             return self._resolve_function(function)[1]
-        upper = _reference_name(name).upper()
+        upper = base_data_name(name).upper()
         if upper in self._catalog:
             return upper in self._non_integer
         qualified = self._qualified_entry(name)
@@ -1170,7 +1156,7 @@ class MoveTypeChecker:
         return "." in name.strip()
 
     def _is_group(self, name: str) -> bool:
-        upper = _reference_name(name).upper()
+        upper = base_data_name(name).upper()
         if upper in self._catalog:
             return upper in self._groups
         qualified = self._qualified_entry(name)

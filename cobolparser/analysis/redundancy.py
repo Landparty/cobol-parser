@@ -39,6 +39,7 @@ from ..lexer import CobolLexer
 from ..models.ast_base import SourceLocation
 from ..models.program import CobolDivision, CobolParagraph, CobolProgram
 from ..models.statements.arithmetic import ROUNDING_MODES
+from ..models.statements.base import HANDLER_CLAUSE_ATTRS
 from ..models.statements.call import CallStatement
 from ..models.statements.control import (
     EvaluateStatement,
@@ -71,25 +72,10 @@ from .unused_variables import (
 _QUOTED_TEXT_RE = QUOTED_LITERAL_RE
 _WHITESPACE_RUN_RE = re.compile(r"\s+")
 
-# Clause-list attributes holding statements that run only when the clause
-# fires. Each present body is part of what its statement *does*, so it is
-# fingerprinted (#262). The same set ``complexity.py``'s ``_CLAUSE_PAIRS``
-# names, re-derived here per the analysis package's convention (one walker's
-# needs never silently change another's).
-_CLAUSE_ATTRS: tuple[str, ...] = (
-    "at_end_clause",
-    "not_at_end_clause",
-    "invalid_key_clause",
-    "not_invalid_key_clause",
-    "at_eop_clause",
-    "not_at_eop_clause",
-    "on_size_error",
-    "not_on_size_error",
-    "on_overflow",
-    "not_on_overflow",
-    "on_exception",
-    "not_on_exception",
-)
+# Handler clause bodies hold statements that run only when the clause fires.
+# Each present body is part of what its statement *does*, so it is
+# fingerprinted (#262): the statement models' canonical
+# ``HANDLER_CLAUSE_ATTRS``.
 
 # ``to_dict()`` keys that are not behaviour: where the statement sits, the
 # node bookkeeping, what the fingerprint already holds (type, operands,
@@ -105,7 +91,7 @@ _DETAIL_SKIP_KEYS = frozenset(
         "statement_type",
         "operands",
         "possible_values",
-        *_CLAUSE_ATTRS,
+        *HANDLER_CLAUSE_ATTRS,
     }
 )
 
@@ -385,7 +371,7 @@ class _Fingerprinter:
     def _clauses(self, stmt: Any) -> tuple[Any, ...]:
         return tuple(
             (attr, tuple(self._fp(s) for s in body))
-            for attr in _CLAUSE_ATTRS
+            for attr in HANDLER_CLAUSE_ATTRS
             if (body := getattr(stmt, attr, None))
         )
 

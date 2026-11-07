@@ -5,7 +5,7 @@ This package provides modern Python tools for parsing, analyzing, and working wi
 COBOL source code, with special emphasis on IBM Enterprise COBOL dialects.
 
 Key Features:
-- Configurable memory management (64MB-8GB limits)
+- A cap on how many errors one parse records (``MemoryConfiguration``)
 - JSON export for cross-platform interoperability
 - Enhanced error recovery modes (fail-fast vs collect-all)
 - IBM Enterprise COBOL dialect priority
@@ -14,8 +14,8 @@ Key Features:
 Basic Usage:
     >>> from cobolparser import CobolParser, MemoryConfiguration, ErrorRecoveryMode
     >>>
-    >>> # Configure parser with memory limits and error handling
-    >>> config = MemoryConfiguration(max_memory_mb=256)
+    >>> # Configure error handling (and the recorded-error cap)
+    >>> config = MemoryConfiguration(max_error_count=100)
     >>> parser = CobolParser(
     ...     memory_config=config,
     ...     error_recovery=ErrorRecoveryMode.COLLECT_ALL
@@ -37,16 +37,12 @@ Advanced Usage:
     >>> serialization = SerializationConfig(include_metadata=True)
     >>> parser = CobolParser(dialect=dialect, serialization_config=serialization)
 
-Memory Management:
-    The parser includes sophisticated memory management to handle large COBOL programs:
-
-    >>> # Configure for large programs (up to 8GB)
-    >>> heavy_config = MemoryConfiguration(
-    ...     max_memory_mb=8192,
-    ...     enable_streaming=True,
-    ...     chunk_size_kb=1024
-    ... )
-    >>> parser = CobolParser(memory_config=heavy_config)
+Memory:
+    ``MemoryConfiguration.max_memory_mb``, ``enable_streaming`` and
+    ``chunk_size_kb`` are validated and stored but **not enforced**: no parse
+    path reads them and the parser never stops at a memory limit. Only
+    ``max_error_count`` is honoured. Measure real peak memory with
+    ``cobolparser.profiling.ProfilerContext``.
 
 Error Recovery:
     Choose between fail-fast and collect-all error recovery modes:

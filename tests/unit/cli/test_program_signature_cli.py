@@ -14,7 +14,8 @@ from pathlib import Path
 
 import pytest
 
-from cobolparser.cli.parse import _build_parser, _cmd_program_signature
+from cobolparser.cli.commands.analyze import _cmd_program_signature
+from cobolparser.cli.parse import _build_parser
 
 SUBPGM = """       IDENTIFICATION DIVISION.
        PROGRAM-ID. SUBPGM.

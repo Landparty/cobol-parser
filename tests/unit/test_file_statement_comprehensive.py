@@ -7,7 +7,6 @@ Tests cover all clause variations from COBOL 85/2002/2014 standards:
 """
 
 from cobolparser import CobolParser, ErrorRecoveryMode, parse_cobol
-from cobolparser.models.program import CobolFileDescription
 from cobolparser.models.statements import SelectStatement
 
 
@@ -1084,87 +1083,6 @@ class TestSelectStatementModel:
         assert d["file_status"] == "STATUS-VAR"
 
 
-class TestFileDescriptionModel:
-    """Tests for CobolFileDescription model attributes and methods."""
-
-    def test_file_description_creation(self):
-        """Test creating CobolFileDescription directly."""
-        from cobolparser.models.ast_base import SourceLocation
-
-        location = SourceLocation(1, 1, None)
-        fd = CobolFileDescription("MYFILE", location)
-
-        assert fd.file_name == "MYFILE"
-        assert fd.record_type == "FD"  # Default
-        assert not fd.is_external
-        assert not fd.is_global
-
-    def test_file_description_setters(self):
-        """Test CobolFileDescription setter methods."""
-        from cobolparser.models.ast_base import SourceLocation
-
-        location = SourceLocation(1, 1, None)
-        fd = CobolFileDescription("TESTFILE", location)
-
-        # record_type is set directly, not through a setter
-        fd.record_type = "SD"
-        assert fd.record_type == "SD"
-
-        fd.set_block_contains(count=10, unit="RECORDS")
-        assert fd.block_contains == 10
-        assert fd.block_contains_unit == "RECORDS"
-
-        fd.set_record_contains(count=80)
-        # Note: record_contains uses count parameter
-
-        fd.set_label_records("STANDARD")
-        assert fd.label_records == "STANDARD"
-
-        fd.set_linage(60)
-        assert fd.linage_value == 60
-
-        fd.set_code_set("ASCII")
-        assert fd.code_set == "ASCII"
-
-        fd.set_recording_mode("V")
-        assert fd.recording_mode == "V"
-
-        fd.set_external(True)
-        assert fd.is_external
-
-        fd.set_global(True)
-        assert fd.is_global
-
-    def test_file_description_to_dict(self):
-        """Test CobolFileDescription to_dict serialization."""
-        from cobolparser.models.ast_base import SourceLocation
-
-        location = SourceLocation(1, 1, None)
-        fd = CobolFileDescription("TESTFILE", location)
-
-        fd.record_type = "FD"
-        fd.set_block_contains(count=5, unit="RECORDS")
-        fd.set_record_contains(count=100)
-        fd.set_label_records("STANDARD")
-        fd.set_recording_mode("F")
-        fd.set_external(True)
-
-        d = fd.to_dict()
-
-        assert d["file_name"] == "TESTFILE"
-        assert d["record_type"] == "FD"
-        # block_contains may be serialized as dict with count/unit or as separate fields
-        if isinstance(d.get("block_contains"), dict):
-            assert d["block_contains"]["count"] == 5
-            assert d["block_contains"]["unit"] == "RECORDS"
-        else:
-            assert d.get("block_contains") == 5 or d.get("block_contains_min") == 5
-        assert d["label_records"] == "STANDARD"
-        assert d["recording_mode"] == "F"
-        assert d["is_external"]
-
-
-# Test to verify integration with parse_cobol convenience function
 def test_parse_cobol_with_file_statements():
     """Test using parse_cobol convenience function with FILE statements."""
     src = """

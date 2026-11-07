@@ -9,7 +9,6 @@ Now a comma between digits is the decimal point of a numeric literal (the
 token value is the canonical ``2.75``, the source text stays in
 ``raw_value``), ``.`` is no longer a decimal point, and PICTURE exchanges
 the roles of ``,`` and ``.``. A comma followed by a space stays a separator.
-Both lexers (pure Python and ``_lexer_fast``) are exercised.
 """
 
 from __future__ import annotations
@@ -20,18 +19,11 @@ from cobolparser import CobolParser, ErrorRecoveryMode
 from cobolparser.generators import CopybookDataGenerator, DataGeneratorOptions
 from cobolparser.generators.data.decoding import RecordDecoder
 from cobolparser.generators.data.editing import deedit_numeric, edit_numeric
-from cobolparser.lexer import TokenType, _CobolLexerPure, declares_decimal_point_comma
+from cobolparser.lexer import CobolLexer, TokenType, declares_decimal_point_comma
 from cobolparser.models.ast_base import SourceLocation
 from cobolparser.models.data_items import PictureClause
 
-try:
-    from cobolparser._lexer_fast import CobolLexer as _FastLexer
-except ImportError:  # pragma: no cover - pure-Python install
-    _FastLexer = None
-
-LEXERS = [pytest.param(_CobolLexerPure, id="pure")]
-if _FastLexer is not None:
-    LEXERS.append(pytest.param(_FastLexer, id="fast"))
+LEXERS = [pytest.param(CobolLexer, id="lexer")]
 
 HEADER = """       IDENTIFICATION DIVISION.
        PROGRAM-ID. DPC.

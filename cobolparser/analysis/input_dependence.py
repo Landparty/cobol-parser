@@ -67,6 +67,7 @@ from ..models.statements.arithmetic import (
     MultiplyStatement,
     SubtractStatement,
 )
+from ..models.statements.base import HANDLER_CLAUSE_ATTRS
 from ..models.statements.call import CallStatement, EntryStatement
 from ..models.statements.control import (
     EvaluateStatement,
@@ -98,21 +99,9 @@ from ..models.statements.misc import (
 from ._procedures import ProcedureIndex, enclosing_section, statement_qualifier
 from ._values import ValuePass
 
-#: Clause bodies a statement runs or skips on an outcome of its own.
-_CLAUSE_ATTRS = (
-    "at_end_clause",
-    "not_at_end_clause",
-    "invalid_key_clause",
-    "not_invalid_key_clause",
-    "at_eop_clause",
-    "not_at_eop_clause",
-    "on_size_error",
-    "not_on_size_error",
-    "on_overflow",
-    "not_on_overflow",
-    "on_exception",
-    "not_on_exception",
-)
+#: Clause bodies a statement runs or skips on an outcome of its own: the
+#: statement models' one list (RECEIVE's NO DATA / WITH DATA included).
+_CLAUSE_ATTRS = HANDLER_CLAUSE_ATTRS
 #: Clauses whose firing depends on the statement's operands only (not on
 #: anything outside the program): ON SIZE ERROR, and STRING / UNSTRING's ON
 #: OVERFLOW. A CALL's ON OVERFLOW / ON EXCEPTION is an input event.

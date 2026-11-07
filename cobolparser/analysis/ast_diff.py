@@ -135,7 +135,12 @@ from ..models.data_items import CobolDataItem, ConditionNameItem, PictureClause
 from ..models.program import CobolParagraph, CobolProgram, CobolSection
 from ..models.sql_statements import ExecSQLStatement
 from ..models.statements.arithmetic import ComputeStatement
-from ..models.statements.base import CobolExpression, CobolStatement
+from ..models.statements.base import (
+    HANDLER_CLAUSE_PHRASES,
+    CobolExpression,
+    CobolStatement,
+    iter_clause_bodies,
+)
 from ..models.statements.call import CallStatement
 from ..models.statements.control import (
     EvaluateStatement,
@@ -157,27 +162,23 @@ from ..parsers.statements.ibm_exec_statements import ExecCicsStatement
 from .program_flow.condition_text import render_condition_text
 from .program_flow.statement_text import summarize_statement
 
-#: Attributes that hold a nested list of statements on some statement node,
-#: paired with the path segment used for the branch they represent. Ordered
-#: (not a set) so the flattened sequence is reproducible. ``then``/``else``
-#: and the EVALUATE/SEARCH WHEN arms are handled structurally instead, since
-#: their conditions are part of the comparison.
-_CLAUSE_ATTRS: tuple[tuple[str, str], ...] = (
-    ("at_end_clause", "AT-END"),
-    ("not_at_end_clause", "NOT-AT-END"),
-    ("invalid_key_clause", "INVALID-KEY"),
-    ("not_invalid_key_clause", "NOT-INVALID-KEY"),
-    ("on_size_error", "ON-SIZE-ERROR"),
-    ("not_on_size_error", "NOT-ON-SIZE-ERROR"),
-    ("on_overflow", "ON-OVERFLOW"),
-    ("not_on_overflow", "NOT-ON-OVERFLOW"),
-    ("on_exception", "ON-EXCEPTION"),
-    ("not_on_exception", "NOT-ON-EXCEPTION"),
-    ("at_eop_clause", "AT-EOP"),
-    ("not_at_eop_clause", "NOT-AT-EOP"),
-    ("no_data_clause", "NO-DATA"),
-    ("with_data_clause", "WITH-DATA"),
-)
+#: Path segment for a handler body whose COBOL phrase does not hyphenate
+#: into the historical segment (``AT END-OF-PAGE`` reads ``AT-EOP``). Every
+#: other handler body -- the canonical ``HANDLER_CLAUSE_ATTRS`` list -- is
+#: its phrase with blanks hyphenated (``ON SIZE ERROR`` -> ``ON-SIZE-ERROR``).
+#: ``then``/``else`` and the EVALUATE/SEARCH WHEN arms are handled
+#: structurally instead, since their conditions are part of the comparison.
+_SEGMENT_OVERRIDES: dict[str, str] = {
+    "at_eop_clause": "AT-EOP",
+    "not_at_eop_clause": "NOT-AT-EOP",
+}
+
+
+def _handler_segment(attr: str) -> str:
+    return _SEGMENT_OVERRIDES.get(attr) or HANDLER_CLAUSE_PHRASES[attr].replace(
+        " ", "-"
+    )
+
 
 #: Scalar ``CobolDataItem`` attributes compared one-for-one, with the change
 #: ``kind`` each one emits. PICTURE / OCCURS / level are handled separately
@@ -841,10 +842,11 @@ class _Flattener:
                 stmt.inline_statements, _join_path(path, "PERFORM/BODY"), out
             )
 
-        for attr, segment in _CLAUSE_ATTRS:
-            nested = getattr(stmt, attr, None)
-            if nested:
-                self._walk_all(nested, _join_path(path, segment), out)
+        for body in iter_clause_bodies(stmt, include_loops=False):
+            if body.kind == "handler":
+                self._walk_all(
+                    body.statements, _join_path(path, _handler_segment(body.attr)), out
+                )
 
     def _walk_all(
         self, statements: list[Any], path: str, out: list[_FlatStatement]

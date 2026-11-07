@@ -14,7 +14,8 @@ from pathlib import Path
 
 import pytest
 
-from cobolparser.cli.parse import _build_parser, _cmd_jcl
+from cobolparser.cli.commands.jcl import _cmd_jcl
+from cobolparser.cli.parse import _build_parser
 
 SAMPLES = Path(__file__).parents[2] / "samples" / "jcl"
 

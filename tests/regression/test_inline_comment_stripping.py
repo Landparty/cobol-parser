@@ -12,25 +12,18 @@ confirmed via `examples/cobol/shamrice/unstring.cbl:243`, previously
 special-cased as a known-unresolved entry in
 `tests/integration/test_boundary_inventory_corpus.py`.
 
-Fix: `tokenize_program_text` (pure-Python `lexer.py` and the Cython
-`_lexer_fast.pyx` mirror) now recognizes `*>` and emits the remainder of the
+Fix: `tokenize_program_text` (`lexer.py`) now recognizes `*>` and emits the
+remainder of the
 line as a single `COMMENT` token, checked before the single-character-token
 dispatch that would otherwise read `*` as `MULTIPLY_OP`. `COMMENT` tokens
 are already skipped by every statement parser via `skip_whitespace()`
 (`parsers/statements/_utils.py`), so no parser changes were needed.
 """
 
-import pytest
-
 from cobolparser import parse_cobol
 from cobolparser.analysis.boundary_inventory import BoundaryInventoryAnalyzer
 from cobolparser.generators import ProgramLayoutIndex
 from cobolparser.lexer import CobolLexer, TokenType
-
-try:
-    from cobolparser._lexer_fast import CobolLexer as _FastLexer
-except ImportError:
-    _FastLexer = None
 
 
 class TestInlineCommentStripping:
@@ -109,13 +102,3 @@ class TestInlineCommentStripping:
         index = ProgramLayoutIndex.build(result.ast)
         report = BoundaryInventoryAnalyzer().analyze(result.ast, index)
         assert not any("START" in u for u in report.unresolved)
-
-    def test_pure_and_cython_lexers_agree_on_inline_comment(self):
-        if _FastLexer is None:
-            pytest.skip("Cython extension not built in this environment")
-        line = 'MOVE "ABC" TO WS-STR *> trailing comment with keywords MOVE TO'
-        pure_tokens = CobolLexer(line, free_form=True).tokenize()
-        fast_tokens = _FastLexer(line, free_form=True).tokenize()
-        assert [(t.type, t.value) for t in pure_tokens] == [
-            (t.type, t.value) for t in fast_tokens
-        ]

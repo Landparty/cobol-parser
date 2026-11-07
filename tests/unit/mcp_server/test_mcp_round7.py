@@ -98,13 +98,13 @@ class TestExplainCondition:
     )
     def test_cond_in_words(self, condition: str, words: str) -> None:
         pytest.importorskip("jclparser")
-        from cobolparser.mcp.jcl_tools import explain_condition
+        from cobolparser.mcp.tools.jcl_common import explain_condition
 
         assert words in (explain_condition(condition) or "")
 
     def test_both_parts_of_a_compound_cond(self) -> None:
         pytest.importorskip("jclparser")
-        from cobolparser.mcp.jcl_tools import explain_condition
+        from cobolparser.mcp.tools.jcl_common import explain_condition
 
         words = explain_condition("((0,NE),EVEN)") or ""
         assert "every earlier step's return code is 0" in words

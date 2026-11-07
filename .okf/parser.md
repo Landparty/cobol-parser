@@ -1,7 +1,7 @@
 ---
 type: Module
 title: Parser
-description: Routing page for the parser reference -- CobolParser / ParseResult, the division parsers, the 72 statement parsers and their shared helpers, core/ infrastructure, plugins/core.py configuration, profiling.py and the _accel.py opt-in. Says which file under parser/ to load for a task.
+description: Routing page for the parser reference -- CobolParser / ParseResult, the division parsers, the 72 statement parsers and their shared helpers, core/ infrastructure, plugins/core.py configuration and profiling.py. Says which file under parser/ to load for a task.
 tags: [parser, ast, division, statement, registry]
 timestamp: 2026-10-15T00:00:00Z
 ---
@@ -24,9 +24,9 @@ under [parser/](parser/) -- load only the file the table below names.
 | Source passes before lexing (header skip, `CBL`/`PROCESS`, format detection, `REPLACE`, debug lines) | [parser/orchestration.md](parser/orchestration.md) |
 | Multi-program members, nested programs, OO `CLASS-ID` / `METHOD-ID` units | [parser/orchestration.md](parser/orchestration.md) |
 | `core/` (`TokenStream`, `StatementParserRegistry`, `ASTNodeFactory`, `ParseContext`, exceptions), `_errors.py` | [parser/orchestration.md](parser/orchestration.md) |
-| `plugins/core.py` (`ErrorRecoveryMode`, `MemoryConfiguration`, `ParseStatistics`, ...), `_accel.py`, `profiling.py` | [parser/orchestration.md](parser/orchestration.md) |
+| `plugins/core.py` (`ErrorRecoveryMode`, `MemoryConfiguration`, `ParseStatistics`, ...), `profiling.py` | [parser/orchestration.md](parser/orchestration.md) |
 | IDENTIFICATION / ENVIRONMENT division, SELECT, SPECIAL-NAMES | [parser/divisions.md](parser/divisions.md) |
-| DATA DIVISION: PICTURE / VALUE / USAGE / OCCURS, FD / SD / RD, REPORT SECTION, level-88/66, `_data_fast` | [parser/divisions.md](parser/divisions.md) |
+| DATA DIVISION: PICTURE / VALUE / USAGE / OCCURS, FD / SD / RD, REPORT SECTION, level-88/66 | [parser/divisions.md](parser/divisions.md) |
 | PROCEDURE DIVISION loop, paragraph / section boundaries, DECLARATIVES, `UNSUPPORTED_VERBS` recovery | [parser/divisions.md](parser/divisions.md) |
 | Verb -> parser table, registration order, boundary invariants (statement swallowing, H9), `_utils.py` helpers, `_literals.py`, `_conditions.py`, adding a statement parser | [parser/statements.md](parser/statements.md) |
 | IF, EVALUATE, PERFORM, GO TO, ALTER, SEARCH, CALL, ENTRY, INVOKE, STOP, NEXT SENTENCE, legacy verbs | [parser/statements-control.md](parser/statements-control.md) |
@@ -61,7 +61,7 @@ from cobolparser import ErrorRecoveryMode, MemoryConfiguration
 
 result: ParseResult = parse_cobol(source, filename="prog.cob")  # FAIL_FAST default
 parser = CobolParser(
-    memory_config=MemoryConfiguration(max_memory_mb=256),
+    memory_config=MemoryConfiguration(max_error_count=100),  # memory fields: not enforced
     error_recovery=ErrorRecoveryMode.COLLECT_ALL,               # the CLI default
 )
 result = parser.parse(source)
@@ -78,7 +78,7 @@ Full signatures: [parser/orchestration.md](parser/orchestration.md#public-api).
 ## See also
 
 - [lexer.md](lexer.md) — upstream tokenisation, `TokenType`, the lexer's
-  warnings channel and the `_lexer_fast` signature-drift guard
+  warnings channel
 - [preprocessing.md](preprocessing.md) — `normalize_fixed_format`, format
   detection, copybook expansion and the source map
 - [ast-models.md](ast-models.md) — what `ParseResult.ast` contains

@@ -15,7 +15,7 @@ from pathlib import Path
 
 import pytest
 
-from cobolparser.cli.parse import _cmd_jcl
+from cobolparser.cli.commands.jcl import _cmd_jcl
 from cobolparser.jcl import JclParser, bindings_for_ddname, parse_jcl
 
 PROCLIB_MEMBER = """\

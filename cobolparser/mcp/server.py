@@ -886,7 +886,7 @@ def warm_indexes(workspace: Workspace) -> threading.Thread:
         if facts_thread is not None:
             facts_thread.join()
         builders: list[Callable[[Workspace], Any]] = [programs_index]
-        from .jcl_tools import jcl_available, jcl_index
+        from .tools.jcl_index import jcl_available, jcl_index
 
         if jcl_available():
             builders.append(jcl_index)

@@ -26,7 +26,8 @@ from cobolparser.cli._changed_files import (
     program_candidates,
     select_changed_programs,
 )
-from cobolparser.cli.parse import _github_command, main
+from cobolparser.cli.commands.lint import _github_command
+from cobolparser.cli.parse import main
 
 CLEAN = """\
        IDENTIFICATION DIVISION.

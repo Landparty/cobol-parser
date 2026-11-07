@@ -291,9 +291,7 @@ def normalize_with_recovery(
     the retry's. *debug_lines_as_comments* is ``normalize_fixed_format``'s
     flag of the same name, passed to both passes.
     """
-    # The package attribute, not ``_normalize``'s: ``preprocess/__init__``
-    # swaps in the Cython-accelerated implementation when it is built.
-    from . import normalize_fixed_format
+    from ._normalize import normalize_fixed_format
 
     pass_warnings: list[str] = []
     try:

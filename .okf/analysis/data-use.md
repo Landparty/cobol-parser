@@ -57,17 +57,25 @@ procedure half of the rule is in [flow.md](flow.md)).
   directions by `qualified_name` where xref set one. Procedure xref
   entries are still name-keyed.
 
-### Folded-reference normalization: `_names.base_data_name`
+### Folded-reference normalization: `_names.py`
 
 Statement parsers fold `OF`/`IN` qualifier chains and `( subscript )`
-groups into single operand strings. `analysis/_names.py::base_data_name`
-recovers the referenced item's own name (first word, split off only when
-followed by OF/IN or `(` — literals with spaces and `ALL 'X'` pass through
-unchanged). Used by `MoveTypeChecker._resolve_category` (catalog lookup)
-and `DynamicCallAnalyzer`'s MOVE source/target keying (a bare `CALL
-WS-PROG` must find values MOVEd to `WS-PROG OF GRP-1`). Any new analyzer
-keying data items by bare name needs it too. Pinned by
-`tests/regression/test_folded_reference_analyzers.py`.
+groups into single operand strings (a MOVE source with the subscript glued
+on: `T-E(2)`). `analysis/_names.py` is the one module that reduces them;
+no analyzer splits a reference itself. One function per reduction:
+
+| Function | Gives | For |
+|----------|-------|-----|
+| `base_data_name` | the item's own name, case kept; a literal, `ALL 'X'` or anything not followed by OF/IN or a subscript group passes through whole | `MoveTypeChecker` catalog lookups, `DynamicCallAnalyzer` MOVE keying, `ims_segment_analyzer` |
+| `strip_subscripts` | everything before the first `(`, qualification kept | `const_fold`'s `_base_name` (poisons the whole base item) |
+| `strip_qualification` | everything before the first `OF`/`IN` | building block |
+| `bare_item_name` | subscripts and qualification stripped, upper-cased | `sql_cics_lint` (after dropping a host-variable `:`), `linkage_checker`, `constraints`' SQLCODE test |
+
+`base_data_name` splits the glued `WS-TAB(3)` too: it used to come back
+unchanged, so `MOVE WS-ENT(1) TO WS-PGM` lost WS-ENT's values for a later
+`CALL WS-PGM`. Any new analyzer keying data items by bare name needs one of
+these. Pinned by `tests/regression/test_folded_reference_analyzers.py` and
+`tests/regression/test_statement_walker_consolidation.py::TestNameNormalizers`.
 
 ### CICS translator functions: `_names.strip_translator_arguments`
 
@@ -275,7 +283,7 @@ unconditional way.
 takes an optional `copybook_item_names: set[str]` the caller computes by
 diffing `collect_declared_items()` on an *unexpanded* parse against the
 expanded one -- see the `unused-variables` CLI subcommand
-(`_parse_without_copybook_expansion` in `cli/parse.py`; `lint` reuses it via
+(`_parse_without_copybook_expansion` in `cli/commands/analyze.py`; `lint` reuses it via
 `_lint_copybook_item_names`) for the reference implementation. The expansion
 source map (`CopybookExpansion.source_location_map` /
 `ParseResult.expansion_source_map`, see
@@ -365,7 +373,13 @@ paragraph, and the **role** it plays there.
 
 **Roles by statement.** Each mapping below gives the operand its real
 read/write role; `program_signature.py` grades LINKAGE directions and
-`business-rules` lists inputs/outputs from them.
+`business-rules` lists inputs/outputs from them. `_role_assignments` gathers
+the per-family mappers; `_data_statement_roles` dispatches through
+`_DATA_ROLE_HANDLERS`, an ordered `(statement class, _<verb>_roles method)`
+table where the first `isinstance` match wins (so a subclass row must precede
+its base's). `_control_statement_roles` does the same through
+`_CONTROL_ROLE_HANDLERS`, and `_io_statement_roles` (after recording the
+file operation) through `_IO_ROLE_HANDLERS`. A new verb mapping is one method plus one row.
 
 * **Arithmetic.** With GIVING, only the GIVING/REMAINDER items are `write`; the
   TO/FROM operand is `read` (`SUBTRACT A FROM B GIVING C` does not write B).
@@ -628,10 +642,8 @@ Pinned by
 `tests/unit/analysis/test_move_type_checker.py::TestGroupReceiverAndZeroToAlphabetic`.
 
 **Glued subscripts and reference modification.** The MOVE parser folds a
-*source* as `T-E(2)` / `WS-A(1:3)` (no blanks), which `base_data_name` does
-not split, so `_reference_name()` recovers the item name locally
-(value_tracker keeps `base_data_name`, so a substring never propagates whole
-values). A reference-modified operand (source or receiver) is ALPHANUMERIC
+*source* as `T-E(2)` / `WS-A(1:3)` (no blanks); `base_data_name` recovers
+the item name from either spelling. A reference-modified operand (source or receiver) is ALPHANUMERIC
 whatever its base item is: `MOVE WS-A TO WS-N(2:3)` does not warn, `MOVE
 WS-D(1:2) TO WS-A` with a `V99` base is legal. Pinned by
 `test_move_type_checker.py::TestSubscriptedAndReferenceModifiedOperands`.

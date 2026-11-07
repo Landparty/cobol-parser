@@ -756,23 +756,6 @@ class TestCobolLexerFigurativeConstants:
 class TestCobolLexerCommentMethods:
     """Unit tests for comment tokenization methods."""
 
-    def test_read_comment_method(self):
-        """Test the read_comment method directly."""
-        from cobolparser.lexer import CobolLexer, TokenType
-
-        # Create lexer and manually test read_comment
-        cobol_source = "       * This is a comment line"
-        lexer = CobolLexer(cobol_source)
-
-        # Position at the comment start
-        lexer.current_pos = 7  # After the 7 spaces
-
-        # Call read_comment directly
-        comment_token = lexer.read_comment()
-
-        assert comment_token.type == TokenType.COMMENT
-        assert "* This is a comment line" in comment_token.value
-
     def test_inline_comments(self):
         """Test comments that appear inline (not just column 7)."""
         from cobolparser.lexer import CobolLexer, TokenType
@@ -1014,40 +997,3 @@ class TestCobolLexerMethods:
         lexer2 = CobolLexer('       DISPLAY "Unterminated')
         lexer2.tokenize()
         assert lexer2.has_errors()
-
-    def test_get_current_location(self):
-        """Test get_current_location method."""
-        from cobolparser.lexer import CobolLexer
-
-        lexer = CobolLexer("       IDENTIFICATION DIVISION.")
-
-        # At start
-        location = lexer.get_current_location()
-        assert location.line == 1
-        assert location.column == 1
-
-        # After advancing
-        lexer.advance_char()
-        location = lexer.get_current_location()
-        assert location.line == 1
-        assert location.column == 2
-
-    def test_peek_char_and_advance(self):
-        """Test peek_char and advance_char methods."""
-        from cobolparser.lexer import CobolLexer
-
-        lexer = CobolLexer("AB")
-
-        # Peek at first char
-        assert lexer.peek_char() == "A"
-        assert lexer.peek_char(1) == "B"
-
-        # Advance
-        char = lexer.advance_char()
-        assert char == "A"
-        assert lexer.peek_char() == "B"
-
-        # Advance to end
-        char = lexer.advance_char()
-        assert char == "B"
-        assert lexer.peek_char() is None

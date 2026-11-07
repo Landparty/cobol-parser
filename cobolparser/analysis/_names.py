@@ -42,21 +42,63 @@ IDENTIFIER_TOKEN_RE = re.compile(
 RELAXED_IDENTIFIER_TOKEN_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9-]*")
 
 
+# Name normalization. Statement parsers fold a reference into one operand
+# string (``"WS-NUM OF GRP-1"``, ``"WS-TAB OF GRP ( 3 )"``, a MOVE source as
+# ``"T-E(2)"``). Each function below is one distinct reduction of such a
+# string; analyzers use these rather than splitting the string themselves.
+
+#: An identifier with its subscript / reference-modification group glued on
+#: or spaced off: ``T-E(2)``, ``WS-A (1:3)``, ``T-E(IX)(1:2)``.
+_SUBSCRIPTED_REFERENCE_RE = re.compile(r"^([A-Za-z0-9][A-Za-z0-9-]*)\s*\(")
+
+
 def base_data_name(ref: str) -> str:
-    """Return the referenced data item's own name from a folded reference.
+    """Return the referenced data item's own name from a folded reference,
+    case kept.
 
     ``"WS-NUM OF GRP-1"`` / ``"WS-NUM IN GRP-1"`` / ``"WS-TAB ( 3 )"`` /
-    ``"WS-TAB OF GRP ( IDX )"`` all yield the first word. Anything else --
-    a bare name, a quoted literal (even one containing spaces), a
-    figurative constant like ``ALL 'X'`` -- is returned unchanged: the
-    first word is only split off when what follows is a recognized
-    qualifier keyword or subscript group, so a literal's content is never
-    truncated.
+    ``"WS-TAB(3)"`` / ``"WS-TAB OF GRP ( IDX )"`` all yield the first word.
+    Anything else -- a bare name, a quoted literal (even one containing
+    spaces or parentheses), a figurative constant like ``ALL 'X'`` -- is
+    returned unchanged: the first word is only split off when what follows
+    is a recognized qualifier keyword or subscript group, so a literal's
+    content is never truncated. (The glued ``WS-TAB(3)`` form, which the
+    MOVE parser builds for a source, used to come back unchanged and miss
+    every lookup keyed by the bare name.)
     """
+    match = _SUBSCRIPTED_REFERENCE_RE.match(ref.strip())
+    if match:
+        return match.group(1)
     parts = ref.split()
-    if len(parts) >= 2 and (parts[1].upper() in ("OF", "IN") or parts[1] == "("):
+    if len(parts) >= 2 and parts[1].upper() in ("OF", "IN"):
         return parts[0]
     return ref
+
+
+def strip_subscripts(ref: str) -> str:
+    """*ref* without its subscript / reference-modification suffix -- from
+    the first ``(`` on -- with any ``OF``/``IN`` qualification kept and the
+    case unchanged: ``"WS-T ( 1 )"`` -> ``"WS-T"``, ``"WS-B(1:1)"`` ->
+    ``"WS-B"``, ``"A OF G (2)"`` -> ``"A OF G"``."""
+    text = (ref or "").strip()
+    cut = text.find("(")
+    return text[:cut].strip() if cut >= 0 else text
+
+
+def strip_qualification(ref: str) -> str:
+    """*ref* without its ``OF``/``IN`` qualifier chain (``IN`` is a full
+    synonym of ``OF``), case unchanged: ``"AMT IN OUT-GRP OF OUT-REC"`` ->
+    ``"AMT"``."""
+    return _QUALIFIER_SPLIT_RE.split((ref or "").strip(), maxsplit=1)[0].strip()
+
+
+def bare_item_name(ref: str) -> str:
+    """The upper-cased name of the item *ref* addresses, with subscripts,
+    reference modification and qualification all stripped:
+    ``"ws-stmt(1:80)"`` and ``"WS-STMT OF WS-REC"`` both give ``"WS-STMT"``.
+    Unlike :func:`base_data_name` it does not protect literals; use it on
+    something already known to be a data reference."""
+    return strip_qualification(strip_subscripts(ref)).upper()
 
 
 #: ``DFHRESP(cond)`` / ``DFHVALUE(cvda)``: the CICS translator replaces each

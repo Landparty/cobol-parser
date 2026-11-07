@@ -425,7 +425,12 @@ def _edit_digits(layout: _Layout, scaled: int, negative: bool) -> str:
 
 def _edit_zero(layout: _Layout) -> str:
     """A zero value in a picture with no ``9``: all spaces, or all ``*``
-    (keeping the decimal point) when ``*`` is the suppression symbol."""
+    (keeping the decimal point) when ``*`` is the suppression symbol.
+
+    "All" is every character position, a fixed sign or ``CR``/``DB`` among
+    them: ``***.**CR`` edits zero as ``***.****``, just as ``***.**-`` edits
+    it as ``***.***`` (IBM LRM, zero suppression and replacement editing;
+    GnuCOBOL's move.c pads every non-decimal-point byte the same way)."""
     width = sum(
         2 if s in ("CR", "DB") else 0 if s == "V" else 1 for s in layout.symbols
     )
@@ -436,7 +441,7 @@ def _edit_zero(layout: _Layout) -> str:
         if sym == "V":
             continue
         if sym in ("CR", "DB"):
-            out.extend("  ")
+            out.extend("**")
         else:
             out.append("." if sym == "." else "*")
     return "".join(out)

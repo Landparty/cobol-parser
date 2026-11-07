@@ -367,9 +367,13 @@ bytes a `MOVE` leaves (never the logical value left-justified, e.g.
 `9516.07 ` for `PIC $$,$$9.99`, which no COBOL program writes). `editing.py`
 implements IBM's editing rules — Z/`*` suppression, floating `$`/`+`/`-`
 strings, fixed `+`/`-`/`CR`/`DB`/`$`, `B`/`0`/`/`/`,` insertion, the
-all-`Z`/all-`*` zero case — and every case in
-`tests/unit/generators/data/test_editing.py` was checked byte for byte against
-GnuCOBOL 3. A floating `+`/`-` can land on an insertion position inside its
+all-`Z`/all-`*` zero case — and is tested against two tables in
+`tests/unit/generators/data/test_editing.py`: cases checked byte for byte
+against GnuCOBOL 3, and the IBM LRM's own editing examples
+(`$B*,***,***.**BBDB` holding -12345.67 is `$ ***12,345.67  DB`). The all-`*`
+zero case fills *every* position but the decimal point with `*`, a fixed sign
+or `CR`/`DB` included (`***.**CR` edits zero as `***.****`, as `***.**-` edits
+it `***.***`); before 2026-11 `CR`/`DB` were left as two spaces there. A floating `+`/`-` can land on an insertion position inside its
 own string (`PIC +++,+++` edits -514 as `   -514`, the sign where the comma
 would be); `deedit_numeric` reads the sign there too.
 `deedit_numeric` accepts only text that *is* an edited form: after reading
@@ -946,7 +950,11 @@ bytes each *record* carries.
 * `tests/unit/generators/data/test_layout.py` / `test_values.py` — flattening
   internals and `ValueFactory`
 * `tests/unit/generators/data/test_editing.py` — numeric-edited
-  `edit_numeric`/`deedit_numeric`, every case checked against GnuCOBOL 3
+  `edit_numeric`/`deedit_numeric`: a table checked against GnuCOBOL 3, a
+  table of the IBM LRM "PICTURE clause editing" worked examples (simple,
+  special, fixed and floating insertion, zero suppression), round-trips of
+  both, the all-`*` zero case, and record images through the public
+  generator/decoder API (signed vs. unsigned value generation)
 * `tests/contracts/test_copybook_data_module_paths.py` — every `data/`
   submodule import path and the `copybook_data.py` shim
 

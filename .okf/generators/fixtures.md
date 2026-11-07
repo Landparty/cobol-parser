@@ -367,7 +367,7 @@ entry, so `gen-fixtures --strict` exits 2 rather than passing a coverage claim
 its own data contradicts. `absent`/`unknown` do not demote — they are "could
 not tell", which `unverified` already says.
 
-`cli/parse.py`'s `gen-fixtures` prints an unverified summary on **stderr**
+`cli/commands/data.py`'s `gen-fixtures` prints an unverified summary on **stderr**
 (stdout stays JSON-only — mockymock's `fixtures` contract), and mockymock's
 `generate --with-data` renders the same reasons as a `*> UNVERIFIED:` comment
 above the affected TESTCASE.
@@ -444,8 +444,8 @@ before solving. Consequences:
 * IF/EVALUATE/SEARCH arms join the chain, including **SEARCH's `AT END`**
   (`_ARM_BEARING_ATTRS`): `_extract_search` registers an `arms["AT_END"]`
   entry, so a statement nested under it has an enclosing arm to join to, even
-  though the clause reaches the walk through `_NESTED_STATEMENT_ATTRS` rather
-  than a `when_clauses` list. It carries no conjuncts (the real precondition,
+  though the clause reaches the walk as a handler body rather than a
+  `when_clauses` arm. It carries no conjuncts (the real precondition,
   "the table search found nothing", is not a field constraint), so it lands in
   `path_gaps` — which is the point: untagged, a branch inside it would look
   top-level and could be reported `verified` without its data establishing

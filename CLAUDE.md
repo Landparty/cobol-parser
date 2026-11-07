@@ -20,7 +20,7 @@ This repo uses a structured knowledge base at `.okf/`. **Load `.okf/index.md` at
 
 | Task type | Load |
 |-----------|------|
-| Tokenization, `TokenType`, Cython fast-path | `.okf/lexer.md` |
+| Tokenization, `TokenType`, literal helpers | `.okf/lexer.md` |
 | Parser, `DivisionParserFactory`, statement parsers | `.okf/parser.md` (routing page for `.okf/parser/`) |
 | `normalize_fixed_format`, copybook expansion | `.okf/preprocessing.md` |
 | `ASTNode` hierarchy, `CobolProgram`, `to_dict()` | `.okf/ast-models.md` |
@@ -46,22 +46,16 @@ This file is the short orientation. Module-by-module detail, report shapes and c
 ## Consumers
 
 - **backend** vendors this library into `backend/_vendor/cobol-parser/`; it does not install it from PyPI. Changes reach it only by copying: `cp -r cobolparser/ ../backend/_vendor/cobol-parser/cobolparser/`.
-- **PyPI** `cobol-parser` (wheels plus sdist) exists for `mocky-mock` and other external users. It does not change the backend's vendoring flow.
+- **PyPI** `cobol-parser` (a pure-Python wheel plus sdist) exists for `mocky-mock` and other external users. It does not change the backend's vendoring flow.
 - **Interface contract:** [`interface-contract.md`](interface-contract.md) documents what the backend adapter and `mocky-mock`'s generators surface (`ProgramFixtureGenerator`, gated on `FixtureBundle`'s `bundle_version`) call. Read it before changing a public API shape; a breaking change to either surface bumps the relevant version field.
 
 ## Commands
 
 ```bash
 # Requires Python >= 3.11 (supports 3.11, 3.12, 3.13)
-pip install -e ".[dev,docs]"
+pip install -e ".[dev]"      # pure Python: nothing is compiled
 
-# Pure Python is the default backend: nothing is compiled. The Cython hot-path
-# modules are opt-in via COBOLPARSER_ACCEL=1, read at build time AND import time:
-pip install -e ".[fast]"
-COBOLPARSER_ACCEL=1 python setup.py build_ext --inplace
-COBOLPARSER_ACCEL=1 python -m pytest tests/ --no-cov
-
-# Tests (90% coverage floor; measure it on pure Python, see "Tests" below)
+# Tests (90% coverage floor, see "Tests" below)
 python -m pytest tests/ -v
 python -m pytest tests/ -q -n 4 --no-cov          # fast full run (pytest-xdist)
 python -m pytest tests/unit/test_lexer.py -v
@@ -100,7 +94,7 @@ COBOL source (.cbl/.cob)
 | Package | What it holds | OKF |
 |---|---|---|
 | `cobolparser/preprocess/` | fixed-format normalization, `expand_copybooks`, source map, conditional compilation, REPLACE, secure path resolution | `.okf/preprocessing.md` |
-| `cobolparser/lexer.py` | `CobolLexer`, `TokenType` (<!-- okf:gen tokentype-count -->246<!-- /okf:gen --> members) | `.okf/lexer.md` |
+| `cobolparser/lexer.py` | `CobolLexer`, `TokenType` (<!-- okf:gen tokentype-count -->245<!-- /okf:gen --> members) | `.okf/lexer.md` |
 | `cobolparser/parser.py`, `core/`, `parsers/` | `CobolParser`, `TokenStream`, `DivisionParserFactory`, <!-- okf:gen statement-parser-file-count -->33<!-- /okf:gen --> statement parser files | `.okf/parser.md` |
 | `cobolparser/models/` | `CobolProgram` and every AST node | `.okf/ast-models.md` |
 | `cobolparser/dialects/` | IBM Enterprise dialect, EXEC SQL/CICS/IMS, LE and intrinsic signatures | `.okf/dialects.md` |
@@ -165,15 +159,15 @@ Per-analyzer and per-generator APIs, with examples: the OKF topic for that area.
 
 Layout, markers, fixtures and the per-directory breakdown: `.okf/tests.md`. `tests/samples/` holds the shared COBOL fixtures (`tests/samples/enterprise/` has one program per IBM Enterprise COBOL program type, see [`docs/enterprise-program-types.md`](docs/enterprise-program-types.md)); `examples/cobol/` holds the NIST COBOL-85 suite and the shamrice examples, which must parse cleanly.
 
-**Coverage:** `--cov-fail-under=90` with branch coverage, from `pyproject.toml`'s `addopts`. Measure it on the pure-Python backend (leave `COBOLPARSER_ACCEL` unset): coverage.py cannot see into a compiled Cython extension, so with the accelerators on, the pure-Python bodies they shadow read as unexecuted. A subset run fails the floor; that is expected.
+**Coverage:** `--cov-fail-under=90` with branch coverage, from `pyproject.toml`'s `addopts`. A subset run fails the floor; that is expected.
 
 ## CI/CD
 
-**Manual dispatch only:** `.github/workflows/ci.yml` has only a `workflow_dispatch` trigger (push, PR and the nightly schedule are off), to save cost. Run lint, typecheck and the full suite locally before pushing. When dispatched it runs lint, mypy, a build matrix over Python 3.11-3.13 against the compiled extensions (`--no-cov`), and a pure-Python coverage job that enforces the floor.
+**Manual dispatch only:** `.github/workflows/ci.yml` has only a `workflow_dispatch` trigger (push, PR and the nightly schedule are off), to save cost. Run lint, typecheck and the full suite locally before pushing. When dispatched it runs lint, mypy, and the full suite with the coverage floor on Python 3.11-3.13.
 
 ## Release & Distribution
 
-`release-please` (`.github/workflows/release-please.yml`, Conventional Commits) cuts versions and `CHANGELOG.md` sections on pushes to `main`, then publishes `cobol-parser` to PyPI: `cibuildwheel` wheels (`[tool.cibuildwheel]` in `pyproject.toml`) for manylinux x86_64, macOS arm64 and Windows AMD64 on Python 3.11-3.13, plus an sdist. Wheels ship the three Cython accelerators compiled but still run pure Python unless `COBOLPARSER_ACCEL=1` is set; every other module ships as plain `.py`. `workflow_dispatch` with `target: testpypi` rehearses the pipeline against test.pypi.org.
+`release-please` (`.github/workflows/release-please.yml`, Conventional Commits) cuts versions and `CHANGELOG.md` sections on pushes to `main`, then publishes `cobol-parser` to PyPI: one `python -m build` job makes the sdist and a single pure-Python `py3-none-any` wheel (the package has no compiled code and no `setup.py`; `pyproject.toml` is the whole build config). `workflow_dispatch` with `target: testpypi` rehearses the pipeline against test.pypi.org.
 
 `CHANGELOG.md`: the `Unreleased` section lists what has landed on `main` since the last release. When a release ships, its hand-written entries move under that release's `### Release notes`.
 
@@ -201,4 +195,4 @@ Layout, markers, fixtures and the per-directory breakdown: `.okf/tests.md`. `tes
 - `scripts/` -- `okf_check.py` (OKF claims vs. code, run by the pre-commit hook), `okf_staleness_check.py` (which OKF file a source file maps to), `validate_io_coverage.py`
 - `tools/` -- IO catalog, IO coverage, metrics and perf-threshold utilities
 - `benchmarks/`, `reports/` -- benchmark programs; dated audit reports and `reports/open-findings.md`
-- `.pre-commit-config.yaml` -- ruff, ruff-format, black and mypy hooks; `pre-commit run --all-files` matches what CI would check
+- `.pre-commit-config.yaml` -- ruff, black and mypy hooks; `pre-commit run --all-files` matches what CI would check

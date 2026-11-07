@@ -16,7 +16,9 @@ from unittest.mock import patch
 
 import pytest
 
-from cobolparser.cli.parse import _cmd_analyze, _cmd_program_flow, _text_out, main
+from cobolparser.cli._common import _text_out
+from cobolparser.cli.commands.analyze import _cmd_analyze, _cmd_program_flow
+from cobolparser.cli.parse import main
 
 SAMPLES = Path(__file__).parents[2] / "samples"
 

@@ -20,12 +20,8 @@ by per-directory `conftest.py` files.
 Getting started: `pip install -e ".[dev]"`, then `python -m pytest
 tests/unit/test_lexer.py --no-cov` for a single file (`--no-cov`, because a
 subset always fails the 90% floor), or `python -m pytest tests/ -n auto` for
-the whole suite with coverage (`pytest-xdist` is in `[dev]`). The default
-backend is **pure Python**: the Cython accelerators are only built and only
-used under `COBOLPARSER_ACCEL=1` (`cobolparser/_accel.py`), so a default run
-measures coverage correctly even with `*.so` files present. To exercise the
-fast paths, build and run with the variable set and `--no-cov` (see
-[Coverage](#coverage-requirement-detail)).
+the whole suite with coverage (`pytest-xdist` is in `[dev]`). The library is
+pure Python, so coverage sees every line.
 
 Where to put a new test: `tests/unit/` (one component; analyzers under
 `unit/analysis/`, CLI under `unit/cli/`, record encoding/decoding under
@@ -68,7 +64,6 @@ tests/
     test_scenario_planner.py         # ScenarioPlanner: THEN/ELSE targeting, disjoint-field merging, unsatisfiable arms, fixed families (empty-input/error-status/boundary-values), exact coverage accounting, TestScenarioNamesAreUnique (#267) (see generators.md)
     test_extended_verb_parsers.py    # 2026-09-02 statement-coverage audit: every Report Writer / Communication / legacy / COBOL 2002 verb -> node, operands, no warnings; UNSUPPORTED_VERBS == {EXECUTE, GOTO, RECOVER}; every STATEMENT_KEYWORDS verb dispatches (see parser.md)
     test_function_id.py              # FUNCTION-ID units (IBM 6.4 user-defined functions): unit_kind/external_name, END FUNCTION, REPOSITORY entries, function_references, codebase `function` edges, FUNCTION call_example
-    test_fast_import.py              # Cython import guard: extensions load when compiled (importorskip otherwise), pure Python is the default even when compiled, swapped in only under COBOLPARSER_ACCEL=1, accelerators_enabled() spellings
     definitions/                     # test_definitions.py (CSD, BMS, DDL, DBD, PSB parsers over tests/samples/definitions/); test_issues_800_802.py (JCL jobs and Python never detected as definitions, #800; view base_tables without CTEs / function FROMs / TABLE(), DEFAULT NULL, inline UNIQUE / ON DELETE, #801; PSB NAME= as DBD name, PROCSEQ, #802) (see definitions.md)
     analysis/                  # 50 files: every analyzer
       test_call_interface.py   # CallInterfaceChecker / call-check: count, passing mode, length (short=error, long=info), usage, RETURNING, argument shapes, dynamic/ENTRY/nested targets, CLI exit codes (--fail-on after --min-severity)
@@ -116,7 +111,6 @@ tests/
     test_answer_keys.py        # `integration` in-file: every tasks.json task's tool answer states its key's facts, over the shop build_shop.py assembles (shop/ + samples + NIST); a task without a test fails
                                # + run_eval.py (a script, not collected: headless Claude Code with/without the MCP server, a judge, a report; writes .eval-runs/)
   performance/                 # test_factory_performance.py (`slow`; absolute floors skipped under a tracer); test_large_program.py (per-analyzer time budgets on a generated program: 4,000 lines by default, 40,000 plus a x4-size scaling check under COBOLPARSER_PERF=1)
-                               # + bench_cython_vs_pure.py (a script, not collected)
   samples/                     # shared COBOL fixtures: 48 *.cbl at top level
     copybook_programs/         # programs with COPY statements
     copybooks/                 # .CPY files
@@ -188,10 +182,6 @@ python -m pytest tests/integration/test_call_comprehensive.py::TestCallComprehen
 python -m pytest tests/regression/ -v
 python -m pytest tests/contracts/ -v
 python -m pytest tests/performance/ -v
-
-# The suite against the Cython accelerators (opt-in; never trust its coverage)
-COBOLPARSER_ACCEL=1 python setup.py build_ext --inplace
-COBOLPARSER_ACCEL=1 python -m pytest tests/ -q --no-cov
 ```
 
 Running only a subset of tests with coverage on will trigger a coverage
@@ -281,16 +271,6 @@ Conventions and traps that have each cost real debugging time:
   test should also declare something that *is* reported (an unused
   `WS-DEAD`), so a parser regression that drops the declarations cannot make
   it pass vacuously.
-* **Pure/Cython parity.** Behaviour mirrored in `_preprocess_fast.pyx` /
-  `_lexer_fast.pyx` / `_data_fast.pyx` (column-72 quote rule, continuation
-  across a comment line, `*>` stripping, V-line comments) needs its
-  regression file run once with the extensions built and
-  `COBOLPARSER_ACCEL=1`. Accelerator-specific tests `importorskip` the
-  extension. `test_data_fast_signature_drift.py` counts the
-  `parse_data_item` call's arguments with `ast` because
-  `_DATA_FAST_ARG_COUNT` is a third copy of that arity; a stale extension
-  must be reported through `logger`, not `warnings.warn` (a `-W error`
-  subprocess test pins that `import cobolparser` survives).
 * **Process pools under coverage.** `field-impact` CLI tests pass
   `--workers 1`: scan's process pool under pytest-cov fails to pickle its
   work items. `jcl-parser` is in `[dev]`, but jcl end-to-end tests still
@@ -330,7 +310,7 @@ regression files are named for their issue (`test_issue_NNN_*.py`) or audit
 | gen-fixtures register branches | `unit/generators/test_issue_839_840_register_branches.py` (EVALUATE on a CALL's RETURN-CODE drives the CALL mock, #839; branches on SQLCODE drive the SQL fixture's status with realistic codes and verify, #840); `unit/generators/test_scenario_verification.py::TestCallReturnCode` (#831) |
 | gen-fixtures CALL arguments | `regression/test_call_function_argument.py` (#579), `regression/test_issue_582_call_constant_arguments.py` (literal / figurative / OMITTED / LENGTH OF / ADDRESS OF arguments are no resolution gap, #582; a subscripted / reference-modified one says why it gets no value) |
 | gen-fixtures csv-dir | `unit/test_program_fixtures.py` (`write_csv_dir`, MANIFEST shape), `regression/test_issue_568_empty_input_csv.py` (the empty-input scenario's READ gets a header-only CSV, #568) |
-| Accelerators | `unit/test_fast_import.py`, `regression/test_data_fast_signature_drift.py`, `regression/test_occurs_indexed_before_key_issue_542.py` (#542: OCCURS KEY/INDEXED BY in either order; also run it with `COBOLPARSER_ACCEL=1`) |
+| OCCURS KEY / INDEXED BY order | `regression/test_occurs_indexed_before_key_issue_542.py` (#542: OCCURS KEY/INDEXED BY in either order) |
 | AWS CardDemo gaps | `unit/test_carddemo_gaps.py` (`ADD n TO ZERO GIVING x` parses and a literal without GIVING still errors; `project.proc_path` resolution and missing folders; `load_jobs` over several PROC folders, first wins; the MCP server expands a suffix-less cataloged PROC member only from `proc_path` folders inside its root, with a caveat otherwise, and a `.prc` member without any; an IDCAMS `SYSIN` dataset is named in a note) |
 | SARIF | `unit/analysis/test_sarif.py` (levels, rules/`ruleIndex`, `%SRCROOT%`-relative vs absolute URIs, no line -> no location, `origin` over `location`, notifications; `lint` / `scan` (file-level lint, copybook findings in the copybook, failed file) / `call-check --format sarif` through the CLI) |
 | Facts cache | `unit/test_facts_cache.py` (`FactsCache` stamps, settings/namespace separation, corrupt entries; `scan --cache-dir`: a hit, then a miss for an edited program, copybook, new member in a copybook dir, an edited wrapper copybook that only COPYs another (#763), other options) |
@@ -354,18 +334,6 @@ addopts = [
 Branch coverage is also enabled (`[tool.coverage.run] branch = true`,
 `source = ["cobolparser"]`). No coverage baselines are stored in the repo
 (there is no `baselines/` directory); the floor above is the only gate.
-
-**Measure coverage on the pure-Python backend.** coverage.py cannot see into
-a compiled Cython extension, so with the accelerators in use the pure-Python
-bodies they shadow read as unexecuted: same suite, same commit, measured
-2026-09-07, **54.32%** with the extensions in use vs **91.76%** without.
-Pure Python is the default -- a built `*.so` is ignored unless
-`COBOLPARSER_ACCEL=1` is set at import time -- so a plain `python -m
-pytest tests/` measures correctly. Run the accelerated suite separately with
-`COBOLPARSER_ACCEL=1 ... --no-cov`. Accelerator-specific tests
-(`tests/unit/test_fast_import.py`,
-`tests/regression/test_data_fast_signature_drift.py`, the parity checks)
-`importorskip` the extension and set the variable themselves where needed.
 
 **Timing assertions and coverage.** `tests/performance/test_factory_performance.py`
 guards its two absolute nodes/sec floors (100,000) with `requires_untraced`
@@ -410,49 +378,30 @@ docs-only change runs no CI. A new push to a PR cancels the run in flight
 1. **lint** -- `ruff check .` + `black --check .` (Python 3.13, `ruff==0.15.0`
    / `black==26.3.0`, pinned to match `.pre-commit-config.yaml`)
 2. **typecheck** -- `mypy cobolparser/` (Python 3.13, `mypy==1.20.0`)
-3. **build** -- `pip install -e ".[dev,fast]"` +
-   `COBOLPARSER_ACCEL=1 python setup.py build_ext --inplace` +
-   `COBOLPARSER_ACCEL=1 python -m pytest <targets> -q -p no:randomly -n auto --no-cov`
-   on matrix Python 3.11, 3.12, 3.13, on every trigger. Its job is to run the
-   suite *through the Cython extensions* (hence the variable at both ends,
-   and `--no-cov`). The full `tests/` suite runs on all three for a push to
-   `main`, the nightly run and a dispatch; on a **PR** only 3.13 runs the
-   full suite, and 3.11/3.12 run a smoke subset (`tests/unit/test_lexer.py
-   tests/test_all_samples.py tests/unit/test_program_fixtures.py`). The
-   nightly full matrix is what catches a 3.11/3.12-only break that slipped
-   through a PR.
-4. **coverage** -- `COBOLPARSER_SKIP_EXT=1 pip install -e ".[dev]"` +
-   `python -m pytest tests/ -q -p no:randomly -n auto` on Python 3.13
-   (`if: github.event_name != 'push'`: PRs, nightly and dispatch). This is
-   where the 90% floor (from `addopts`) is enforced, on a pure-Python
-   install, for the reason in [Coverage](#coverage-requirement-detail).
-   (`COBOLPARSER_SKIP_EXT=1` is belt and braces: without
-   `COBOLPARSER_ACCEL=1` nothing is compiled anyway.)
+3. **test** -- `pip install -e ".[dev]"` +
+   `python -m pytest tests/ -q -p no:randomly -n auto` on matrix Python 3.11,
+   3.12, 3.13. Coverage is on, so the 90% floor (from `addopts`) is enforced
+   on every version: the library is pure Python, so one job both runs the
+   suite and measures coverage.
 
 `-n auto` keeps each test job near two minutes; `-p no:randomly` keeps a
 failure reproducible from the log (pytest-randomly is not a declared
-dependency; the flag is a no-op without it). The `build`/`coverage` split
-exists because a single job cannot both exercise the extensions and measure
-coverage; with CI disabled, nothing enforces the floor unless it is run
-locally.
+dependency; the flag is a no-op without it). With CI disabled, nothing
+enforces the floor unless it is run locally.
 
 Release builds are a separate workflow,
 `.github/workflows/release-please.yml`: release-please cuts the release from
-Conventional Commits, then `cibuildwheel` builds wheels (manylinux x86_64,
-macOS arm64, Windows AMD64 x CPython 3.11-3.13, with
-`environment = { COBOLPARSER_ACCEL = "1" }` so the three Cython accelerators
-are compiled; every other module ships as `.py`) and a `build-sdist` job
-builds the sdist; both are published to PyPI as `cobol-parser` via Trusted
-Publishing. `[tool.cibuildwheel]`'s `test-command` imports the three
-extensions, sets `COBOLPARSER_ACCEL=1` and asserts the fast lexer is swapped
-in, then runs `tests/unit/test_lexer.py tests/test_all_samples.py
-tests/unit/test_program_fixtures.py --no-cov` against the installed wheel.
+Conventional Commits, then one `build-dist` job runs `python -m build` to make
+the sdist and a single pure-Python `py3-none-any` wheel (there is no
+`setup.py`; `pyproject.toml` is the whole build config), and both are
+published to PyPI as `cobol-parser` via Trusted Publishing (`workflow_dispatch`
+with `target: testpypi` rehearses against test.pypi.org).
 There is no closed-source release mode; the package is AGPL-3.0-or-later.
 
 ## OKF guards
 
 `tests/test_okf_staleness_map.py` pins `scripts/okf_staleness_check.py`'s
-`OKF_MAP`: every tracked `.py`/`.pyx` under `cobolparser/` must map to at
+`OKF_MAP`: every tracked `.py` under `cobolparser/` must map to at
 least one OKF file, every mapped OKF file must exist, and every prefix that
 names a directory must end with `/`. (`tests/` itself maps to this file.)
 
@@ -489,7 +438,7 @@ README example needs no test change unless it names a sample file
   encoding/decoding, program layout index, and fixture bundle tests
 * [analysis.md](analysis.md) -- `tests/unit/analysis/` covers analyzers
 * [parser.md](parser.md) -- `tests/integration/` covers end-to-end parsing
-* [lexer.md](lexer.md) -- the `COBOLPARSER_ACCEL` switch and pure/Cython parity
+* [lexer.md](lexer.md) -- tokenizer behaviour the lexer tests pin
 * `tests/unit/cli/test_gen_data_cli.py::TestRecordImageFormats` -- the
   `gen-data --format record|hex` flags, that CSV output is unchanged by any
   of them, and (counting `encode_record` calls) that `--output` encodes the

@@ -5,7 +5,8 @@ This package implements AST nodes for COBOL statements, expressions,
 and control flow constructs with full functionality.
 
 Family modules:
-    base        — CobolStatement, CobolExpression, and expression subclasses
+    base        — CobolStatement, CobolExpression, and expression subclasses;
+                  the nested-body attribute lists and walk_statements()
     arithmetic  — ArithmeticStatement, AddStatement, SubtractStatement,
                   MultiplyStatement, DivideStatement, ComputeStatement
     control     — IfStatement, EvaluateStatement, WhenClause, PerformStatement,
@@ -26,12 +27,23 @@ from .arithmetic import (
     SubtractStatement,
 )
 from .base import (
+    BRANCH_BODY_ATTRS,
+    HANDLER_CLAUSE_ATTRS,
+    HANDLER_CLAUSE_PAIRS,
+    HANDLER_CLAUSE_PHRASES,
+    LOOP_BODY_ATTRS,
+    NESTED_BODY_ATTRS,
+    STATEMENT_LIST_ATTRS,
+    WHEN_ARM_ATTRS,
     ArithmeticExpression,
+    ClauseBody,
     CobolExpression,
     CobolStatement,
     ConditionalExpression,
     FunctionCall,
     LogicalExpression,
+    iter_clause_bodies,
+    walk_statements,
 )
 from .call import (
     CallParameter,
@@ -121,6 +133,17 @@ from .report_writer import (
 # Module exports — preserved from original statements.py
 __all__ = [
     "CobolStatement",
+    "ClauseBody",
+    "iter_clause_bodies",
+    "walk_statements",
+    "BRANCH_BODY_ATTRS",
+    "LOOP_BODY_ATTRS",
+    "HANDLER_CLAUSE_PAIRS",
+    "HANDLER_CLAUSE_ATTRS",
+    "HANDLER_CLAUSE_PHRASES",
+    "WHEN_ARM_ATTRS",
+    "STATEMENT_LIST_ATTRS",
+    "NESTED_BODY_ATTRS",
     "MoveStatement",
     "DisplayStatement",
     "PerformStatement",

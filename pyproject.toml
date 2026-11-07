@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=68.0", "wheel", "cython>=3.0"]
+requires = ["setuptools>=68.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -28,7 +28,6 @@ keywords = ["cobol", "parser", "mainframe", "ibm", "enterprise", "legacy"]
 dependencies = []
 
 [project.optional-dependencies]
-fast = ["cython>=3.0"]
 # `cobolparser.jcl` reads JCL through the sibling jcl-parser package; the
 # rest of the library has no runtime dependency.
 jcl = ["jcl-parser>=2.0.0"]
@@ -46,14 +45,10 @@ dev = [
     "pytest>=7.0.0",
     "pytest-cov>=4.0.0",
     "pytest-xdist>=3.0.0",
-    "ruff>=0.1.0",
-    "black>=23.0.0",
-    "mypy>=1.5.0",
-    "cython>=3.0",
-]
-docs = [
-    "sphinx>=7.0.0",
-    "sphinx-rtd-theme>=1.3.0",
+    # Pinned to the versions .pre-commit-config.yaml and CI use.
+    "ruff==0.15.0",
+    "black==26.3.0",
+    "mypy==1.20.0",
 ]
 profiling = ["psutil>=5.9"]
 
@@ -72,11 +67,6 @@ include = ["cobolparser*"]
 # COPY is looked for; see cobolparser/preprocess/_system_copybooks.py.
 [tool.setuptools.package-data]
 "cobolparser.preprocess" = ["system_copybooks/*.cpy"]
-
-# cythonize() writes each generated .c file next to its .pyx source inside the
-# package tree; keep the generated C and Cython sources out of built wheels.
-[tool.setuptools.exclude-package-data]
-"*" = ["*.c", "*.pyx", "*.h"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -167,42 +157,6 @@ extend-exclude = '''
 )/
 '''
 
-[tool.cibuildwheel]
-# Build CPython 3.11–3.13 only (matches requires-python)
-build = "cp311-* cp312-* cp313-*"
-# Skip musllinux (Alpine) -- niche target for this library; it can build from
-# the published sdist.
-skip = "*-musllinux*"
-test-requires = "pytest pytest-cov"
-# Wheels still ship the compiled accelerators, so `COBOLPARSER_ACCEL=1` works
-# for PyPI users without a compiler; without it they run pure Python like
-# every other install (cobolparser/_accel.py).
-environment = { COBOLPARSER_ACCEL = "1" }
-# Smoke-test against the INSTALLED wheel (not the source tree): confirm the
-# Cython accelerators loaded and that the opt-in swaps them in, then run a fast subset of the suite. --no-cov
-# disables the repo's --cov-fail-under gate (coverage.py cannot see into
-# compiled extensions). --import-mode=importlib keeps the source tree from
-# shadowing the installed wheel (tests/__init__.py exists, so the default
-# "prepend" mode would put {project} first on sys.path).
-test-command = "python -c \"from cobolparser._lexer_fast import CobolLexer; from cobolparser._preprocess_fast import normalize_fixed_format; from cobolparser._data_fast import parse_data_item_clauses_fast; import os; os.environ['COBOLPARSER_ACCEL'] = '1'; import cobolparser.lexer as L; assert L.CobolLexer is not L._CobolLexerPure\" && pytest {project}/tests/unit/test_lexer.py {project}/tests/test_all_samples.py {project}/tests/unit/test_program_fixtures.py --no-cov -q --import-mode=importlib"
-
-# NOTE: release CI overrides these per job via CIBW_ARCHS (see
-# .github/workflows/release-please.yml). These values still apply to local
-# `cibuildwheel` runs.
-#
-# Only the most common targets are covered: manylinux x86_64 (not aarch64 --
-# that required slow QEMU emulation with no known ARM-Linux consumer) and
-# macOS arm64 (not x86_64 -- Intel Macs are a shrinking minority for this
-# library). Revisit if a real user needs one of the dropped targets.
-[tool.cibuildwheel.linux]
-archs = ["x86_64"]
-
-[tool.cibuildwheel.macos]
-archs = ["arm64"]
-
-[tool.cibuildwheel.windows]
-archs = ["AMD64"]
-
 [tool.mypy]
 python_version = "3.11"
 warn_return_any = true
@@ -236,8 +190,3 @@ ignore_missing_imports = true
 [[tool.mypy.overrides]]
 module = ["mcp", "mcp.*", "pydantic", "pydantic.*", "anyio", "anyio.*"]
 ignore_missing_imports = true
-
-[[tool.mypy.overrides]]
-module = "tests.*"
-disallow_untyped_defs = false
-disallow_incomplete_defs = false

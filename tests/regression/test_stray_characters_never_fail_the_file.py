@@ -13,7 +13,7 @@ lines. Both lexer backends share the post-pass.
 import pytest
 
 from cobolparser import ErrorRecoveryMode, parse_cobol
-from cobolparser.lexer import CobolLexer, TokenType, _CobolLexerPure
+from cobolparser.lexer import CobolLexer, TokenType
 
 HEAD = (
     "       IDENTIFICATION DIVISION.\n"
@@ -125,13 +125,9 @@ def test_a_clean_program_has_no_stray_warning():
 
 
 @pytest.mark.parametrize("char", ["|", "#", "¦", "?"])
-def test_both_lexers_agree(char):
+def test_lexer_leaves_no_stray_char_token(char):
     text = HEAD + f"       01  WS-{char}B PIC X.  {char}\n" + TAIL
-    fast = CobolLexer(text)
-    pure = _CobolLexerPure(text)
-    fast_tokens = [(t.type, t.value) for t in fast.tokenize()]
-    pure_tokens = [(t.type, t.value) for t in pure.tokenize()]
-    assert fast_tokens == pure_tokens
-    assert fast.warnings == pure.warnings
-    assert not fast.errors and not pure.errors
-    assert all(t != TokenType.STRAY_CHAR for t, _ in fast_tokens)
+    lexer = CobolLexer(text)
+    tokens = [(t.type, t.value) for t in lexer.tokenize()]
+    assert not lexer.errors
+    assert all(t != TokenType.STRAY_CHAR for t, _ in tokens)

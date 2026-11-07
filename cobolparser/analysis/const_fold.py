@@ -92,6 +92,7 @@ from ..models.statements.base import (
     ConditionalExpression,
     FunctionCall,
     LogicalExpression,
+    iter_clause_bodies,
 )
 from ..models.statements.call import CallStatement
 from ..models.statements.control import (
@@ -99,7 +100,6 @@ from ..models.statements.control import (
     GoStatement,
     IfStatement,
     PerformStatement,
-    SearchStatement,
     StopStatement,
 )
 from ..models.statements.data import DisplayStatement, MoveStatement
@@ -113,6 +113,7 @@ from ..models.statements.misc import (
     SortStatement,
 )
 from ._files import same_record_area_groups
+from ._names import strip_subscripts
 
 if TYPE_CHECKING:
     # Same shape as constraints.py's own guard: cobolparser.generators
@@ -133,7 +134,6 @@ _QUOTED_LITERAL_RE = re.compile(r'^(["\'])(.*)\1$', re.DOTALL)
 #: into a numeric field, a run of "0" characters into an alphanumeric one.
 _ZERO_FIGURATIVES = frozenset({"ZERO", "ZEROS", "ZEROES"})
 #: A subscript or reference-modification suffix: ``WS-T ( 1 )``, ``WS-B(1:1)``.
-_SUFFIX_RE = re.compile(r"\s*\(.*$", re.DOTALL)
 
 #: Statement visits the main walk may make before giving up. Fall-through
 #: makes the walk follow real control flow, which re-walks a PERFORMed
@@ -152,51 +152,6 @@ _UNNAMED_KEY = "\x00UNNAMED:"
 
 _TEXT_CATEGORIES = frozenset(
     {FieldCategory.ALPHANUMERIC, FieldCategory.ALPHABETIC, FieldCategory.NATIONAL}
-)
-
-#: Nested statement-list attributes a write-target scan (for IF/EVALUATE arm
-#: bodies and loop bodies) must recurse into. Mirrors the same discipline
-#: `program_flow/scanner.py` and `boundary_inventory.py` each converged on
-#: independently.
-_NESTED_STATEMENT_ATTRS = (
-    "then_statements",
-    "else_statements",
-    "inline_statements",
-    "at_end_clause",
-    "not_at_end_clause",
-    "invalid_key_clause",
-    "not_invalid_key_clause",
-    "at_eop_clause",
-    "not_at_eop_clause",
-    "on_size_error",
-    "not_on_size_error",
-    "on_overflow",
-    "not_on_overflow",
-    "on_exception",
-    "not_on_exception",
-)
-
-#: The conditional-handler subset of the above: statement-level clause bodies
-#: that may or may not fire at runtime (AT END, INVALID KEY, ON SIZE ERROR,
-#: ON OVERFLOW, ON EXCEPTION, AT EOP -- and their NOT variants). The main
-#: fold walk cannot evaluate whether such a handler fires, so every field a
-#: handler body could write must be poisoned, exactly like an IF arm --
-#: "exact by construction, or absent". Excludes the structural attributes
-#: (`then_statements`/`else_statements`/`inline_statements`), which the walk
-#: already dispatches on per statement type.
-_HANDLER_BODY_ATTRS = (
-    "at_end_clause",
-    "not_at_end_clause",
-    "invalid_key_clause",
-    "not_invalid_key_clause",
-    "at_eop_clause",
-    "not_at_eop_clause",
-    "on_size_error",
-    "not_on_size_error",
-    "on_overflow",
-    "not_on_overflow",
-    "on_exception",
-    "not_on_exception",
 )
 
 
@@ -222,9 +177,7 @@ def _base_name(name: str) -> tuple[str, bool]:
     inside ``WS-T``/``WS-B`` that this walk does not model position by
     position, so a write through either poisons the base item as a whole."""
     text = (name or "").strip()
-    if "(" in text:
-        return _SUFFIX_RE.sub("", text).strip(), True
-    return text, False
+    return strip_subscripts(text), "(" in text
 
 
 class _LayoutFacts:
@@ -1158,11 +1111,10 @@ def _walk_one(
     # poisoned, the same treatment an IF arm gets. Runs *after* the dispatch
     # above so a handler write always trumps the statement's own folded
     # result (`ADD 1 TO X ON SIZE ERROR MOVE 0 TO X` must leave X unknown).
-    for attr in _HANDLER_BODY_ATTRS:
-        body = getattr(stmt, attr, None)
-        if isinstance(body, list) and body:
+    for body in iter_clause_bodies(stmt):
+        if body.kind == "handler":
             _poison_written_names(
-                body, index, state.env, by_name, ordered_names, state=state
+                body.statements, index, state.env, by_name, ordered_names, state=state
             )
     return result
 
@@ -1621,23 +1573,9 @@ def _nested_statement_lists(stmt: Any) -> list[list[Any]]:
 
 
 def _collect_nested_lists(stmt: Any) -> list[list[Any]]:
-    lists: list[list[Any]] = []
-    for attr in _NESTED_STATEMENT_ATTRS:
-        value = getattr(stmt, attr, None)
-        if isinstance(value, list):
-            lists.append(value)
-    if isinstance(stmt, EvaluateStatement):
-        for wc in stmt.when_clauses:
-            lists.append(wc.statements)
-        if stmt.default_when:
-            lists.append(stmt.default_when.statements)
-    elif isinstance(stmt, SearchStatement):
-        # SEARCH's WHEN clauses are dicts: {"condition", "statements"}.
-        for clause in stmt.when_clauses:
-            body = clause.get("statements") if isinstance(clause, dict) else None
-            if isinstance(body, list):
-                lists.append(body)
-    return lists
+    """Every nested statement body of *stmt*: IF arms, inline PERFORM, every
+    handler clause, EVALUATE / SEARCH WHEN arms (``iter_clause_bodies``)."""
+    return [body.statements for body in iter_clause_bodies(stmt)]
 
 
 def _procedure_ranges(stmt: Any) -> list[tuple[str, str | None]]:

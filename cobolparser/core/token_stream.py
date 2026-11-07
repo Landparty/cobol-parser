@@ -1,10 +1,9 @@
 """The token cursor that statement and division parsers read from.
 
-``TokenStream`` wraps the lexer's token list with peek, consume and expect,
-and ``transaction()`` rolls the position back when a speculative parse fails.
+``TokenStream`` wraps the lexer's token list with peek, consume and expect;
+parsers look ahead with ``peek(n)`` rather than backtracking.
 """
 
-from contextlib import contextmanager
 from typing import Any
 
 from ..lexer import Token, TokenType
@@ -119,16 +118,6 @@ class TokenStream(ITokenStream):
             ):
                 break
             self.consume()
-
-    @contextmanager
-    def transaction(self) -> Any:
-        """Context manager for backtracking on failure."""
-        saved_pos = self._pos
-        try:
-            yield
-        except Exception:
-            self._pos = saved_pos
-            raise
 
     @property
     def context(self) -> Any | None:

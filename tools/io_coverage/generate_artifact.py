@@ -55,7 +55,7 @@ import argparse
 import json
 import os
 import sys
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -184,7 +184,7 @@ def generate_coverage_artifact(
     # Build the artifact
     artifact = {
         "version": "1.0.0",
-        "generated_at": datetime.utcnow().isoformat() + "Z",
+        "generated_at": datetime.now(UTC).replace(tzinfo=None).isoformat() + "Z",
         "parser_version": parser_version,
         "total_variations": len(catalog_variations),
         "covered_variations": 0,
