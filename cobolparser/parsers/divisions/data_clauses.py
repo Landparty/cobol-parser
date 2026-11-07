@@ -19,7 +19,8 @@ match, so a stale binary costs speed rather than correctness.
 """
 
 import logging
-from typing import Any
+from collections.abc import Callable, Iterable
+from typing import Any, ClassVar
 
 from cobolparser._accel import accelerators_enabled
 from cobolparser._literals import quote_literal
@@ -378,6 +379,37 @@ def _follows_gap(prev: Token, token: Token) -> bool:
     )
 
 
+def _is_word(token: Token, token_type: TokenType, word: str) -> bool:
+    """True when *token* is *token_type*, or an IDENTIFIER spelling *word*."""
+    return token.type == token_type or (
+        token.type == TokenType.IDENTIFIER
+        and bool(token.value)
+        and token.value.upper() == word
+    )
+
+
+#: A data-item clause handler, called with the clause word peeked (not yet
+#: consumed): ``(self, token_stream, token, data_item, location,
+#: report_group)``. See ``DataItemClauseParser._CLAUSE_HANDLERS``.
+_ClauseHandler = Callable[
+    ["DataItemClauseParser", ITokenStream, Token, CobolDataItem, SourceLocation, bool],
+    None,
+]
+
+
+def _clause_table(
+    *entries: tuple[Iterable[str], _ClauseHandler],
+) -> dict[str, _ClauseHandler]:
+    """Map each clause word to its handler. *entries* are in priority order:
+    a word listed in more than one entry keeps the first handler, exactly
+    as the first matching branch of an ``elif`` chain would win."""
+    table: dict[str, _ClauseHandler] = {}
+    for words, handler in entries:
+        for word in words:
+            table.setdefault(word, handler)
+    return table
+
+
 class DataItemClauseParser:
     """Parses a single data-description entry and its clauses.
 
@@ -450,6 +482,33 @@ class DataItemClauseParser:
         location = token.location
         token_stream.consume()  # Consume level number
 
+        name, implicit_filler = self._parse_entry_name(
+            token_stream, level, location, report_group
+        )
+
+        # Create data item
+        data_item = CobolDataItem(name, level, location)
+        if implicit_filler:
+            data_item.is_filler = True
+
+        if _HAS_DATA_FAST:
+            self._run_fast_clause_loop(token_stream, data_item, location)
+
+        self._parse_clauses(token_stream, data_item, location, report_group)
+        return data_item
+
+    def _parse_entry_name(
+        self,
+        token_stream: ITokenStream,
+        level: int,
+        location: SourceLocation,
+        report_group: bool,
+    ) -> tuple[str, bool]:
+        """Consume the data-name after the level number.
+
+        Returns ``(name, implicit_filler)``; an entry with no data-name gets
+        an ``ANONYMOUS-<level>-<line>`` name.
+        """
         # Get data name. It may sit on the line after its level number
         # (NIST NC205A writes ``02\n    SPACING-2.``); without crossing the
         # break the item became anonymous and the name was dropped as an
@@ -457,7 +516,6 @@ class DataItemClauseParser:
         # meaningful token can actually be a name -- an IDENTIFIER or
         # FILLER -- so a bare level number at end of line followed by the
         # *next* item's level number is left exactly as before.
-        name = None
         token = token_stream.peek()
         if token and token.type == TokenType.NEWLINE:
             following = self._peek_next_meaningful(token_stream, 0)
@@ -468,7 +526,6 @@ class DataItemClauseParser:
                 self._skip_newlines(token_stream)
                 token = token_stream.peek()
 
-        implicit_filler = False
         if (
             report_group
             and token
@@ -476,68 +533,81 @@ class DataItemClauseParser:
             and token.value.upper() in _REPORT_ANONYMOUS_STARTS
         ):
             # ``01 TYPE IS PAGE HEADING.`` -- the clause word is not a name.
-            name = f"ANONYMOUS-{level}-{location.line}"
-        elif token and token.type == TokenType.IDENTIFIER:
-            name = token.value
+            return f"ANONYMOUS-{level}-{location.line}", False
+        if token and token.type == TokenType.IDENTIFIER:
             token_stream.consume()
-        elif token and token.value and token.value.upper() == "FILLER":
-            name = "FILLER"
+            return token.value, False
+        if token and token.value and token.value.upper() == "FILLER":
             token_stream.consume()
-        else:
-            # Anonymous data item; ``location`` is always a SourceLocation.
-            name = f"ANONYMOUS-{level}-{location.line}"
-            # Outside a report group, an entry with no data-name is FILLER
-            # with the word omitted (``05 PIC X(3).``): set below.
-            implicit_filler = not report_group
+            return "FILLER", False
+        # Anonymous data item; ``location`` is always a SourceLocation.
+        # Outside a report group, an entry with no data-name is FILLER
+        # with the word omitted (``05 PIC X(3).``).
+        return f"ANONYMOUS-{level}-{location.line}", not report_group
 
-        # Create data item
-        data_item = CobolDataItem(name, level, location)
-        if implicit_filler:
-            data_item.is_filler = True
+    def _run_fast_clause_loop(
+        self,
+        token_stream: ITokenStream,
+        data_item: CobolDataItem,
+        location: SourceLocation,
+    ) -> None:
+        """Drive the common-clause loop in Cython (``_HAS_DATA_FAST`` only).
 
-        # Fast path: drive the common-clause loop in Cython. VALUE and
-        # USAGE clauses call back into the Python helpers below via
-        # ``parser_self``. The fast helper handles only the hot clauses
-        # (PICTURE, VALUE, USAGE, COMP, REDEFINES, OCCURS) and bails back
-        # on any clause it does not recognize (SIGN, SYNCHRONIZED,
-        # JUSTIFIED, BLANK, POINTER, EXTERNAL, GLOBAL, ...). We then fall
-        # through to the pure-Python loop below, which is the single
-        # source of truth for those clauses -- so the two implementations
-        # can never drift on the rarer clauses.
-        if _HAS_DATA_FAST:
-            tokens_list = getattr(token_stream, "_tokens", None)
-            if tokens_list is not None:
-                new_pos = _fast_data_item_clauses(
-                    tokens_list,
-                    token_stream._pos,  # type: ignore[attr-defined]
-                    data_item,
-                    location,
-                    self._parser,
-                    token_stream,
-                    _PICTURE_TERMINATOR_KEYWORDS,
-                    _PICTURE_PATTERN_TOKEN_TYPES,
-                    _COMP_KEYWORDS,
-                    _COMP_TOKEN_TYPES,
-                    _DIVISION_TOKEN_TYPES,
-                    self._picture_clause,
-                    OccursClause,
-                    TokenType.PERIOD,
-                    TokenType.LEVEL_NUMBER,
-                    TokenType.IDENTIFIER,
-                    TokenType.NUMERIC_LITERAL,
-                    TokenType.NEWLINE,
-                    TokenType.COMMA,
-                    TokenType.SEMICOLON,
-                )
-                token_stream._pos = new_pos  # type: ignore[attr-defined]
-                # Fall through (no early return): the Python loop below
-                # finishes any clauses the fast helper handed back.
-                #
-                # The argument list above is positional and must stay
-                # _DATA_FAST_ARG_COUNT long; the import-time probe checks the
-                # compiled extension against that count.
+        VALUE and USAGE clauses call back into the Python helpers below via
+        ``parser_self``. The fast helper handles only the hot clauses
+        (PICTURE, VALUE, USAGE, COMP, REDEFINES, OCCURS) and bails back
+        on any clause it does not recognize (SIGN, SYNCHRONIZED,
+        JUSTIFIED, BLANK, POINTER, EXTERNAL, GLOBAL, ...). The caller then
+        runs the pure-Python loop (:meth:`_parse_clauses`), which is the
+        single source of truth for those clauses -- so the two
+        implementations can never drift on the rarer clauses.
+        """
+        tokens_list = getattr(token_stream, "_tokens", None)
+        if tokens_list is None:
+            return
+        new_pos = _fast_data_item_clauses(
+            tokens_list,
+            token_stream._pos,  # type: ignore[attr-defined]
+            data_item,
+            location,
+            self._parser,
+            token_stream,
+            _PICTURE_TERMINATOR_KEYWORDS,
+            _PICTURE_PATTERN_TOKEN_TYPES,
+            _COMP_KEYWORDS,
+            _COMP_TOKEN_TYPES,
+            _DIVISION_TOKEN_TYPES,
+            self._picture_clause,
+            OccursClause,
+            TokenType.PERIOD,
+            TokenType.LEVEL_NUMBER,
+            TokenType.IDENTIFIER,
+            TokenType.NUMERIC_LITERAL,
+            TokenType.NEWLINE,
+            TokenType.COMMA,
+            TokenType.SEMICOLON,
+        )
+        token_stream._pos = new_pos  # type: ignore[attr-defined]
+        # No early return in the caller: the Python loop finishes any
+        # clauses the fast helper handed back.
+        #
+        # The argument list above is positional and must stay
+        # _DATA_FAST_ARG_COUNT long; the import-time probe checks the
+        # compiled extension against that count.
 
-        # Parse clauses until period or next item
+    def _parse_clauses(
+        self,
+        token_stream: ITokenStream,
+        data_item: CobolDataItem,
+        location: SourceLocation,
+        report_group: bool,
+    ) -> None:
+        """Parse clauses until the period or the next entry.
+
+        Each clause word is dispatched through ``_CLAUSE_HANDLERS`` (keyed
+        by the upper-cased word) or, failing that, ``_CLAUSE_TYPE_HANDLERS``
+        (keyed by token type); anything else is warned about and skipped.
+        """
         while not token_stream.is_empty():
             token = token_stream.peek()
             if not token:
@@ -560,318 +630,523 @@ class DataItemClauseParser:
                 token_stream.consume()
                 continue
 
-            # A DIVISION or DATA DIVISION section header ends this data item
-            # (don't consume it): its period was left off, and IBM assumes
-            # one. Issue #559: the loop used to stop at DIVISION tokens only,
-            # so ``01 A PIC X`` + ``LINKAGE SECTION.`` ate the header and
-            # every LINKAGE item landed in the previous section.
-            header = data_entry_ending_header(token_stream)
-            if header:
-                self._warn_item_missing_period(token, header, data_item)
+            if self._entry_ends_before(token_stream, token, data_item):
                 break
 
-            # An EXEC SQL block ends this data item without consuming it.
-            # A data-division EXEC SQL statement (e.g. DCLGEN's
-            # ``EXEC SQL INCLUDE SQLCA END-EXEC``) is recognized by the
-            # section-level scan loop (``DataDivisionParser._parse_section``)
-            # -- but only when that loop sees the leading EXEC token fresh.
-            # If the previous data item's terminating period was omitted
-            # (a common real-world slip, especially right before a COPY- or
-            # DCLGEN-inserted block), this per-item clause loop would
-            # otherwise treat EXEC/SQL/INCLUDE/SQLCA/END-EXEC one token at a
-            # time as unrecognized clauses and drop the whole SQL statement
-            # from the AST. Breaking here (implicitly closing the item, same
-            # as the LEVEL_NUMBER/division-token cases above) hands the EXEC
-            # token back to the section loop so it parses normally.
-            if tok_type == TokenType.EXEC or (
-                tok_type == TokenType.IDENTIFIER
-                and token.value
-                and token.value.upper() == "EXEC"
-            ):
-                nxt = self._peek_next_meaningful(token_stream)
-                if nxt and (
-                    nxt.type == TokenType.SQL
-                    or (
-                        nxt.type == TokenType.IDENTIFIER
-                        and nxt.value
-                        and nxt.value.upper() == "SQL"
-                    )
-                ):
-                    break
-
-            # Compute upper-cased token value once -- the chain of clause
-            # checks below would otherwise call ``.upper()`` up to six times
-            # per loop iteration on the same string.
+            # Upper-case the token value once for the dispatch lookup.
             value_upper = token.value.upper() if token.value else ""
+            handler = self._CLAUSE_HANDLERS.get(value_upper)
+            if handler is None:
+                handler = self._CLAUSE_TYPE_HANDLERS.get(tok_type)
+            if handler is None:
+                handler = DataItemClauseParser._clause_unknown
+            handler(self, token_stream, token, data_item, location, report_group)
 
-            #  PICTURE/PIC clause
-            if value_upper == "PICTURE" or value_upper == "PIC":
-                token_stream.consume()  # Consume PIC keyword
-                picture_pattern = self.parse_picture_clause(token_stream)
-                if picture_pattern:
-                    data_item.set_picture_clause(
-                        self._picture_clause(picture_pattern, location)
-                    )
+    def _entry_ends_before(
+        self, token_stream: ITokenStream, token: Token, data_item: CobolDataItem
+    ) -> bool:
+        """True when *token* (not consumed) closes the entry whose period
+        was left off: a DIVISION / DATA DIVISION section header, or EXEC SQL.
+        """
+        # A DIVISION or DATA DIVISION section header ends this data item
+        # (don't consume it): its period was left off, and IBM assumes
+        # one. Issue #559: the loop used to stop at DIVISION tokens only,
+        # so ``01 A PIC X`` + ``LINKAGE SECTION.`` ate the header and
+        # every LINKAGE item landed in the previous section.
+        header = data_entry_ending_header(token_stream)
+        if header:
+            self._warn_item_missing_period(token, header, data_item)
+            return True
 
-            # VALUE clause
-            elif value_upper == "VALUE":
-                token_stream.consume()  # Consume VALUE keyword
-                value = self.parse_value_clause(token_stream)
-                if value:
-                    data_item.set_value_clause(value)
+        # An EXEC SQL block ends this data item without consuming it.
+        # A data-division EXEC SQL statement (e.g. DCLGEN's
+        # ``EXEC SQL INCLUDE SQLCA END-EXEC``) is recognized by the
+        # section-level scan loop (``DataDivisionParser._parse_section``)
+        # -- but only when that loop sees the leading EXEC token fresh.
+        # If the previous data item's terminating period was omitted
+        # (a common real-world slip, especially right before a COPY- or
+        # DCLGEN-inserted block), this per-item clause loop would
+        # otherwise treat EXEC/SQL/INCLUDE/SQLCA/END-EXEC one token at a
+        # time as unrecognized clauses and drop the whole SQL statement
+        # from the AST. Breaking here (implicitly closing the item, same
+        # as the LEVEL_NUMBER/division-token cases) hands the EXEC
+        # token back to the section loop so it parses normally.
+        if not _is_word(token, TokenType.EXEC, "EXEC"):
+            return False
+        nxt = self._peek_next_meaningful(token_stream)
+        return bool(nxt and _is_word(nxt, TokenType.SQL, "SQL"))
 
-            # USAGE clause
-            elif value_upper == "USAGE":
-                token_stream.consume()  # Consume USAGE keyword
-                if self._at_object_reference(token_stream):
-                    self._parse_object_reference(token_stream, data_item)
-                else:
-                    usage = self.parse_usage_clause(token_stream)
-                    if usage:
-                        data_item.set_usage(usage)
+    # ------------------------------------------------------------------
+    # Clause handlers. Each is called with the clause word peeked, not yet
+    # consumed: (self, token_stream, token, data_item, location,
+    # report_group). ``_CLAUSE_HANDLERS`` below maps clause words to them.
+    # ------------------------------------------------------------------
 
-            # OBJECT REFERENCE [class-name] without the USAGE keyword
-            elif value_upper == "OBJECT" and self._at_object_reference(token_stream):
-                self._parse_object_reference(token_stream, data_item)
+    def _clause_unknown(
+        self,
+        token_stream: ITokenStream,
+        token: Token,
+        data_item: CobolDataItem,
+        location: SourceLocation,
+        report_group: bool,
+    ) -> None:
+        # Skip unknown tokens/clauses. PERIOD, LEVEL_NUMBER, and
+        # division tokens are already handled at the top of the
+        # loop (they ``break`` before we get here), so the only
+        # remaining case is "consume and continue". Record a warning
+        # for meaningful (non-whitespace) tokens so a data-item clause
+        # this parser does not yet support is not dropped completely
+        # silently — symmetric with the ENVIRONMENT division's SELECT
+        # handling.
+        self._warn_dropped_data_token(token, data_item)
+        token_stream.consume()
 
-            # VOLATILE (Enterprise COBOL 6.2)
-            elif value_upper == "VOLATILE":
-                data_item.is_volatile = True
-                token_stream.consume()
+    def _clause_picture(
+        self,
+        token_stream: ITokenStream,
+        token: Token,
+        data_item: CobolDataItem,
+        location: SourceLocation,
+        report_group: bool,
+    ) -> None:
+        token_stream.consume()  # Consume PIC keyword
+        picture_pattern = self.parse_picture_clause(token_stream)
+        if picture_pattern:
+            data_item.set_picture_clause(
+                self._picture_clause(picture_pattern, location)
+            )
 
-            # BASED (Micro Focus / GnuCOBOL): storage comes from ALLOCATE.
-            elif value_upper == "BASED":
-                data_item.metadata["based"] = True
-                token_stream.consume()
+    def _clause_value(
+        self,
+        token_stream: ITokenStream,
+        token: Token,
+        data_item: CobolDataItem,
+        location: SourceLocation,
+        report_group: bool,
+    ) -> None:
+        token_stream.consume()  # Consume VALUE keyword
+        value = self.parse_value_clause(token_stream)
+        if value:
+            data_item.set_value_clause(value)
 
-            # PIC U BYTE-LENGTH n (UTF-8, Enterprise COBOL 6.3)
-            elif value_upper == "BYTE-LENGTH":
-                token_stream.consume()  # BYTE-LENGTH
+    def _clause_usage(
+        self,
+        token_stream: ITokenStream,
+        token: Token,
+        data_item: CobolDataItem,
+        location: SourceLocation,
+        report_group: bool,
+    ) -> None:
+        token_stream.consume()  # Consume USAGE keyword
+        if self._at_object_reference(token_stream):
+            self._parse_object_reference(token_stream, data_item)
+        else:
+            usage = self.parse_usage_clause(token_stream)
+            if usage:
+                data_item.set_usage(usage)
+
+    def _clause_object(
+        self,
+        token_stream: ITokenStream,
+        token: Token,
+        data_item: CobolDataItem,
+        location: SourceLocation,
+        report_group: bool,
+    ) -> None:
+        # OBJECT REFERENCE [class-name] without the USAGE keyword
+        if self._at_object_reference(token_stream):
+            self._parse_object_reference(token_stream, data_item)
+        else:
+            self._clause_unknown(token_stream, token, data_item, location, report_group)
+
+    def _clause_volatile(
+        self,
+        token_stream: ITokenStream,
+        token: Token,
+        data_item: CobolDataItem,
+        location: SourceLocation,
+        report_group: bool,
+    ) -> None:
+        # VOLATILE (Enterprise COBOL 6.2)
+        data_item.is_volatile = True
+        token_stream.consume()
+
+    def _clause_based(
+        self,
+        token_stream: ITokenStream,
+        token: Token,
+        data_item: CobolDataItem,
+        location: SourceLocation,
+        report_group: bool,
+    ) -> None:
+        # BASED (Micro Focus / GnuCOBOL): storage comes from ALLOCATE.
+        data_item.metadata["based"] = True
+        token_stream.consume()
+
+    def _clause_byte_length(
+        self,
+        token_stream: ITokenStream,
+        token: Token,
+        data_item: CobolDataItem,
+        location: SourceLocation,
+        report_group: bool,
+    ) -> None:
+        # PIC U BYTE-LENGTH n (UTF-8, Enterprise COBOL 6.3)
+        token_stream.consume()  # BYTE-LENGTH
+        self._skip_clause_separators(token_stream)
+        if self._consume_if(token_stream, "IS") is not None:
+            self._skip_clause_separators(token_stream)
+        length = self._consume_integer(token_stream)
+        if length is None:
+            self._warn_dropped_data_token(token, data_item)
+        else:
+            data_item.set_byte_length(length)
+
+    def _clause_dynamic_length(
+        self,
+        token_stream: ITokenStream,
+        token: Token,
+        data_item: CobolDataItem,
+        location: SourceLocation,
+        report_group: bool,
+    ) -> None:
+        # DYNAMIC LENGTH [LIMIT [IS] n] (Enterprise COBOL 6.3)
+        token_stream.consume()  # DYNAMIC
+        self._skip_clause_separators(token_stream)
+        self._consume_if(token_stream, "LENGTH")
+        self._skip_clause_separators(token_stream)
+        limit: int | None = None
+        if self._consume_if(token_stream, "LIMIT") is not None:
+            self._skip_clause_separators(token_stream)
+            if self._consume_if(token_stream, "IS") is not None:
                 self._skip_clause_separators(token_stream)
-                if self._consume_if(token_stream, "IS") is not None:
-                    self._skip_clause_separators(token_stream)
-                length = self._consume_integer(token_stream)
-                if length is None:
-                    self._warn_dropped_data_token(token, data_item)
-                else:
-                    data_item.set_byte_length(length)
+            limit = self._consume_integer(token_stream)
+        data_item.set_dynamic_length(limit)
 
-            # DYNAMIC LENGTH [LIMIT [IS] n] (Enterprise COBOL 6.3)
-            elif value_upper == "DYNAMIC":
-                token_stream.consume()  # DYNAMIC
-                self._skip_clause_separators(token_stream)
-                self._consume_if(token_stream, "LENGTH")
-                self._skip_clause_separators(token_stream)
-                limit: int | None = None
-                if self._consume_if(token_stream, "LIMIT") is not None:
-                    self._skip_clause_separators(token_stream)
-                    if self._consume_if(token_stream, "IS") is not None:
-                        self._skip_clause_separators(token_stream)
-                    limit = self._consume_integer(token_stream)
-                data_item.set_dynamic_length(limit)
+    def _clause_usage_word(
+        self,
+        token_stream: ITokenStream,
+        token: Token,
+        data_item: CobolDataItem,
+        location: SourceLocation,
+        report_group: bool,
+    ) -> None:
+        # A USAGE value written without the USAGE keyword: COMP, COMP-3,
+        # ... (by word or by COMP_n token type); POINTER, PROCEDURE-POINTER,
+        # FUNCTION-POINTER; and NATIONAL / DISPLAY-1 / UTF-8
+        # (``05 X PIC N(5) NATIONAL.``, ``05 X PIC G(4) DISPLAY-1.``).
+        # None of the last three can name a data item, so in clause
+        # position each is the usage; before, NATIONAL was glued onto the
+        # PICTURE and DISPLAY-1 dropped with an "Unparsed token" warning.
+        data_item.set_usage(token.value.upper() if token.value else "")
+        token_stream.consume()
 
-            # COMP, COMP-3, etc. without USAGE keyword
-            elif value_upper in _COMP_KEYWORDS:
-                data_item.set_usage(value_upper)
+    def _clause_binary_sign(
+        self,
+        token_stream: ITokenStream,
+        token: Token,
+        data_item: CobolDataItem,
+        location: SourceLocation,
+        report_group: bool,
+    ) -> None:
+        # ``BINARY-LONG [SIGNED|UNSIGNED]`` written without the USAGE
+        # keyword: the sign does not change the width (#524). The fast
+        # clause loop hands this word back here, so one branch serves both.
+        if (data_item.usage or "").upper().startswith("BINARY-"):
+            token_stream.consume()
+        else:
+            self._clause_unknown(token_stream, token, data_item, location, report_group)
+
+    def _clause_display(
+        self,
+        token_stream: ITokenStream,
+        token: Token,
+        data_item: CobolDataItem,
+        location: SourceLocation,
+        report_group: bool,
+    ) -> None:
+        # DISPLAY without the USAGE keyword (``05 X PIC X(3) DISPLAY.``).
+        # DISPLAY lexes as the verb token, which no branch accepted, so
+        # the clause was dropped with an "Unparsed token" warning (32
+        # times across the NIST corpus). A data item can never be
+        # *named* DISPLAY, so in clause position it is the usage.
+        data_item.set_usage("DISPLAY")
+        token_stream.consume()
+
+    def _clause_index(
+        self,
+        token_stream: ITokenStream,
+        token: Token,
+        data_item: CobolDataItem,
+        location: SourceLocation,
+        report_group: bool,
+    ) -> None:
+        # INDEX without the USAGE keyword: ``05 X [USAGE [IS]] INDEX.``
+        # -- both USAGE and IS are optional in the grammar, and INDEX
+        # is a reserved word, so a bare INDEX in clause position is
+        # unambiguously the usage (a data item can never be *named*
+        # INDEX). USAGE IS INDEX already worked via parse_usage_clause;
+        # only this bare form fell through to the unknown-clause branch
+        # and was dropped with an "Unparsed token 'INDEX'" warning.
+        data_item.set_usage("INDEX")
+        token_stream.consume()
+
+    def _clause_group_usage(
+        self,
+        token_stream: ITokenStream,
+        token: Token,
+        data_item: CobolDataItem,
+        location: SourceLocation,
+        report_group: bool,
+    ) -> None:
+        # GROUP-USAGE [IS] NATIONAL | UTF-8 (a national / UTF-8 group:
+        # every subordinate elementary item takes that usage -- applied
+        # by ``propagate_group_usage_and_sign`` once the hierarchy is
+        # built). It used to be dropped with two "Unparsed token"
+        # warnings, leaving ``PIC 9`` children sized as DISPLAY.
+        token_stream.consume()  # GROUP-USAGE
+        self._consume_if(token_stream, "IS")
+        group_usage = self._consume_if(token_stream, "NATIONAL", "UTF-8")
+        if group_usage is None:
+            self._warn_dropped_data_token(token, data_item)
+        else:
+            data_item.group_usage = group_usage
+
+    def _clause_sign(
+        self,
+        token_stream: ITokenStream,
+        token: Token,
+        data_item: CobolDataItem,
+        location: SourceLocation,
+        report_group: bool,
+    ) -> None:
+        # SIGN clause: SIGN [IS] LEADING|TRAILING [SEPARATE [CHARACTER]]
+        # (each keyword may start a continuation line -- and the
+        # direction read is restricted to LEADING/TRAILING: the old
+        # any-truthy-value read recorded a raw "\n" as the sign clause
+        # whenever SIGN IS landed at the end of a 72-column line)
+        token_stream.consume()
+        self._skip_newlines(token_stream)
+        nxt = token_stream.peek()
+        if nxt and nxt.value and nxt.value.upper() == "IS":
+            token_stream.consume()
+        self._parse_sign_direction(token_stream, data_item)
+
+    def _clause_sign_direction(
+        self,
+        token_stream: ITokenStream,
+        token: Token,
+        data_item: CobolDataItem,
+        location: SourceLocation,
+        report_group: bool,
+    ) -> None:
+        # The same clause with the SIGN word omitted -- ``[SIGN IS]
+        # LEADING|TRAILING [SEPARATE [CHARACTER]]`` is the standard's
+        # grammar, and NIST NC117A/NC118A write ``PIC S999 LEADING
+        # SEPARATE`` and ``01 MULTIPLY-DATA LEADING SEPARATE.``
+        # (a group-level sign clause). Neither word can name a data
+        # item, so in clause position they are unambiguous.
+        self._parse_sign_direction(token_stream, data_item)
+
+    def _clause_synchronized(
+        self,
+        token_stream: ITokenStream,
+        token: Token,
+        data_item: CobolDataItem,
+        location: SourceLocation,
+        report_group: bool,
+    ) -> None:
+        # SYNCHRONIZED / SYNC [IS] [LEFT|RIGHT] clause
+        data_item.synchronized = True
+        token_stream.consume()
+        nxt = token_stream.peek()
+        if nxt and nxt.type == TokenType.IS:
+            token_stream.consume()
+            nxt = token_stream.peek()
+        if nxt and nxt.value and nxt.value.upper() in {"LEFT", "RIGHT"}:
+            token_stream.consume()
+
+    def _clause_justified(
+        self,
+        token_stream: ITokenStream,
+        token: Token,
+        data_item: CobolDataItem,
+        location: SourceLocation,
+        report_group: bool,
+    ) -> None:
+        # JUSTIFIED / JUST [IS] [RIGHT] clause
+        data_item.justified = True
+        token_stream.consume()
+        nxt = token_stream.peek()
+        if nxt and nxt.type == TokenType.IS:
+            token_stream.consume()
+            nxt = token_stream.peek()
+        if nxt and nxt.value and nxt.value.upper() == "RIGHT":
+            token_stream.consume()
+
+    def _clause_blank_when_zero(
+        self,
+        token_stream: ITokenStream,
+        token: Token,
+        data_item: CobolDataItem,
+        location: SourceLocation,
+        report_group: bool,
+    ) -> None:
+        # BLANK WHEN ZERO clause
+        token_stream.consume()
+        nxt = token_stream.peek()
+        if nxt and nxt.value and nxt.value.upper() == "WHEN":
+            token_stream.consume()
+        nxt = token_stream.peek()
+        if nxt and nxt.value and nxt.value.upper() in {"ZERO", "ZEROS", "ZEROES"}:
+            token_stream.consume()
+        data_item.blank_when_zero = True
+
+    def _clause_external(
+        self,
+        token_stream: ITokenStream,
+        token: Token,
+        data_item: CobolDataItem,
+        location: SourceLocation,
+        report_group: bool,
+    ) -> None:
+        # EXTERNAL clause: [IS] EXTERNAL [AS literal]
+        data_item.is_external = True
+        token_stream.consume()
+        nxt = token_stream.peek()
+        if nxt and nxt.value and nxt.value.upper() == "AS":
+            token_stream.consume()
+            lit = token_stream.peek()
+            if lit and lit.type in (
+                TokenType.STRING_LITERAL,
+                TokenType.IDENTIFIER,
+            ):
                 token_stream.consume()
 
-            # Also check for COMP token types (COMP_1, COMP_2, COMP_3, etc.)
-            elif token.type in _COMP_TOKEN_TYPES:
-                data_item.set_usage(token.value.upper())
-                token_stream.consume()
+    def _clause_global(
+        self,
+        token_stream: ITokenStream,
+        token: Token,
+        data_item: CobolDataItem,
+        location: SourceLocation,
+        report_group: bool,
+    ) -> None:
+        # GLOBAL clause: [IS] GLOBAL
+        data_item.is_global = True
+        token_stream.consume()
 
-            # POINTER, PROCEDURE-POINTER, FUNCTION-POINTER without USAGE keyword
-            elif value_upper in _POINTER_KEYWORDS:
-                data_item.set_usage(value_upper)
-                token_stream.consume()
+    def _clause_is(
+        self,
+        token_stream: ITokenStream,
+        token: Token,
+        data_item: CobolDataItem,
+        location: SourceLocation,
+        report_group: bool,
+    ) -> None:
+        # Leading "IS" ahead of EXTERNAL / GLOBAL / a bare
+        # USAGE-family keyword (POINTER, PROCEDURE-POINTER,
+        # FUNCTION-POINTER, INDEX). EXTERNAL and GLOBAL are standard
+        # "[IS] <keyword>" clauses; the USAGE-omitted POINTER/INDEX
+        # forms accept the same optional "IS" as a real-world IBM
+        # Enterprise convention. The keyword itself is handled by its
+        # own handler on the very next loop iteration, so this handler
+        # only needs to swallow the "IS" -- silently, since nothing is
+        # actually lost. Falling through to the generic "unknown token"
+        # handler instead would misreport a dropped-content warning for
+        # a clause that in fact parsed completely.
+        nxt = self._peek_next_meaningful(token_stream)
+        nxt_upper = nxt.value.upper() if nxt and nxt.value else ""
+        if (
+            nxt_upper in _POINTER_KEYWORDS
+            or nxt_upper in _BARE_USAGE_WORDS
+            or nxt_upper in ("EXTERNAL", "GLOBAL", "INDEX")
+        ):
+            token_stream.consume()  # Consume the optional IS
+        else:
+            self._warn_dropped_data_token(token, data_item)
+            token_stream.consume()
 
-            # ``BINARY-LONG [SIGNED|UNSIGNED]`` written without the USAGE
-            # keyword: the sign does not change the width (#524). The fast
-            # clause loop hands this word back here, so one branch serves both.
-            elif value_upper in ("SIGNED", "UNSIGNED") and (
-                data_item.usage or ""
-            ).upper().startswith("BINARY-"):
-                token_stream.consume()
+    def _clause_report(
+        self,
+        token_stream: ITokenStream,
+        token: Token,
+        data_item: CobolDataItem,
+        location: SourceLocation,
+        report_group: bool,
+    ) -> None:
+        # REPORT SECTION report-group clauses (TYPE, LINE, NEXT GROUP,
+        # COLUMN, SOURCE, SUM, GROUP INDICATE, PRESENT WHEN); outside a
+        # report group the word is an unknown clause.
+        if report_group:
+            self._parse_report_clause(token_stream, data_item, token.value.upper())
+        else:
+            self._clause_unknown(token_stream, token, data_item, location, report_group)
 
-            # DISPLAY without the USAGE keyword (``05 X PIC X(3) DISPLAY.``).
-            # DISPLAY lexes as the verb token, which no branch accepted, so
-            # the clause was dropped with an "Unparsed token" warning (32
-            # times across the NIST corpus). A data item can never be
-            # *named* DISPLAY, so in clause position it is the usage.
-            elif tok_type == TokenType.DISPLAY or value_upper == "DISPLAY":
-                data_item.set_usage("DISPLAY")
-                token_stream.consume()
+    def _clause_redefines(
+        self,
+        token_stream: ITokenStream,
+        token: Token,
+        data_item: CobolDataItem,
+        location: SourceLocation,
+        report_group: bool,
+    ) -> None:
+        token_stream.consume()  # Consume REDEFINES keyword
+        # The target may sit on the next line (continuation).
+        self._skip_newlines(token_stream)
+        redef_token = token_stream.peek()
+        if redef_token and redef_token.type == TokenType.IDENTIFIER:
+            data_item.set_redefines(redef_token.value)
+            token_stream.consume()
 
-            # INDEX without the USAGE keyword: ``05 X [USAGE [IS]] INDEX.``
-            # -- both USAGE and IS are optional in the grammar, and INDEX
-            # is a reserved word, so a bare INDEX in clause position is
-            # unambiguously the usage (a data item can never be *named*
-            # INDEX). USAGE IS INDEX already worked via parse_usage_clause;
-            # only this bare form fell through to the unknown-clause branch
-            # and was dropped with an "Unparsed token 'INDEX'" warning.
-            elif value_upper == "INDEX":
-                data_item.set_usage("INDEX")
-                token_stream.consume()
+    def _clause_occurs(
+        self,
+        token_stream: ITokenStream,
+        token: Token,
+        data_item: CobolDataItem,
+        location: SourceLocation,
+        report_group: bool,
+    ) -> None:
+        token_stream.consume()  # Consume OCCURS keyword
+        self._parse_occurs_clause(token_stream, data_item, location)
 
-            # GROUP-USAGE [IS] NATIONAL | UTF-8 (a national / UTF-8 group:
-            # every subordinate elementary item takes that usage -- applied
-            # by ``propagate_group_usage_and_sign`` once the hierarchy is
-            # built). It used to be dropped with two "Unparsed token"
-            # warnings, leaving ``PIC 9`` children sized as DISPLAY.
-            elif value_upper == "GROUP-USAGE":
-                token_stream.consume()  # GROUP-USAGE
-                self._consume_if(token_stream, "IS")
-                group_usage = self._consume_if(token_stream, "NATIONAL", "UTF-8")
-                if group_usage is None:
-                    self._warn_dropped_data_token(token, data_item)
-                else:
-                    data_item.group_usage = group_usage
-
-            # NATIONAL / DISPLAY-1 / UTF-8 without the USAGE keyword
-            # (``05 X PIC N(5) NATIONAL.``, ``05 X PIC G(4) DISPLAY-1.``).
-            # None can name a data item, so in clause position each is the
-            # usage; before, NATIONAL was glued onto the PICTURE and
-            # DISPLAY-1 dropped with an "Unparsed token" warning.
-            elif value_upper in _BARE_USAGE_WORDS or tok_type == TokenType.DISPLAY_1:
-                data_item.set_usage(value_upper)
-                token_stream.consume()
-
-            # SIGN clause: SIGN [IS] LEADING|TRAILING [SEPARATE [CHARACTER]]
-            # (each keyword may start a continuation line -- and the
-            # direction read is restricted to LEADING/TRAILING: the old
-            # any-truthy-value read recorded a raw "\n" as the sign clause
-            # whenever SIGN IS landed at the end of a 72-column line)
-            elif value_upper == "SIGN":
-                token_stream.consume()
-                self._skip_newlines(token_stream)
-                nxt = token_stream.peek()
-                if nxt and nxt.value and nxt.value.upper() == "IS":
-                    token_stream.consume()
-                self._parse_sign_direction(token_stream, data_item)
-
-            # The same clause with the SIGN word omitted -- ``[SIGN IS]
-            # LEADING|TRAILING [SEPARATE [CHARACTER]]`` is the standard's
-            # grammar, and NIST NC117A/NC118A write ``PIC S999 LEADING
-            # SEPARATE`` and ``01 MULTIPLY-DATA LEADING SEPARATE.``
-            # (a group-level sign clause). Neither word can name a data
-            # item, so in clause position they are unambiguous.
-            elif value_upper in ("LEADING", "TRAILING"):
-                self._parse_sign_direction(token_stream, data_item)
-
-            # SYNCHRONIZED / SYNC [IS] [LEFT|RIGHT] clause
-            elif value_upper in {"SYNCHRONIZED", "SYNC"}:
-                data_item.synchronized = True
-                token_stream.consume()
-                nxt = token_stream.peek()
-                if nxt and nxt.type == TokenType.IS:
-                    token_stream.consume()
-                    nxt = token_stream.peek()
-                if nxt and nxt.value and nxt.value.upper() in {"LEFT", "RIGHT"}:
-                    token_stream.consume()
-
-            # JUSTIFIED / JUST [IS] [RIGHT] clause
-            elif value_upper in {"JUSTIFIED", "JUST"}:
-                data_item.justified = True
-                token_stream.consume()
-                nxt = token_stream.peek()
-                if nxt and nxt.type == TokenType.IS:
-                    token_stream.consume()
-                    nxt = token_stream.peek()
-                if nxt and nxt.value and nxt.value.upper() == "RIGHT":
-                    token_stream.consume()
-
-            # BLANK WHEN ZERO clause
-            elif value_upper == "BLANK":
-                token_stream.consume()
-                nxt = token_stream.peek()
-                if nxt and nxt.value and nxt.value.upper() == "WHEN":
-                    token_stream.consume()
-                nxt = token_stream.peek()
-                if (
-                    nxt
-                    and nxt.value
-                    and nxt.value.upper() in {"ZERO", "ZEROS", "ZEROES"}
-                ):
-                    token_stream.consume()
-                data_item.blank_when_zero = True
-
-            # EXTERNAL clause: [IS] EXTERNAL [AS literal]
-            elif value_upper == "EXTERNAL":
-                data_item.is_external = True
-                token_stream.consume()
-                nxt = token_stream.peek()
-                if nxt and nxt.value and nxt.value.upper() == "AS":
-                    token_stream.consume()
-                    lit = token_stream.peek()
-                    if lit and lit.type in (
-                        TokenType.STRING_LITERAL,
-                        TokenType.IDENTIFIER,
-                    ):
-                        token_stream.consume()
-
-            # GLOBAL clause: [IS] GLOBAL
-            elif value_upper == "GLOBAL":
-                data_item.is_global = True
-                token_stream.consume()
-
-            # Leading "IS" ahead of EXTERNAL / GLOBAL / a bare
-            # USAGE-family keyword (POINTER, PROCEDURE-POINTER,
-            # FUNCTION-POINTER, INDEX). EXTERNAL and GLOBAL are standard
-            # "[IS] <keyword>" clauses; the USAGE-omitted POINTER/INDEX
-            # forms accept the same optional "IS" as a real-world IBM
-            # Enterprise convention. The keyword itself is handled by its
-            # own branch above/below on the very next loop iteration, so
-            # this branch only needs to swallow the "IS" -- silently,
-            # since nothing is actually lost. Falling through to the
-            # generic "unknown token" branch instead would misreport a
-            # dropped-content warning for a clause that in fact parsed
-            # completely.
-            elif value_upper == "IS":
-                nxt = self._peek_next_meaningful(token_stream)
-                nxt_upper = nxt.value.upper() if nxt and nxt.value else ""
-                if (
-                    nxt_upper in _POINTER_KEYWORDS
-                    or nxt_upper in _BARE_USAGE_WORDS
-                    or nxt_upper in ("EXTERNAL", "GLOBAL", "INDEX")
-                ):
-                    token_stream.consume()  # Consume the optional IS
-                else:
-                    self._warn_dropped_data_token(token, data_item)
-                    token_stream.consume()
-
-            # REPORT SECTION report-group clauses (TYPE, LINE, NEXT GROUP,
-            # COLUMN, SOURCE, SUM, GROUP INDICATE, PRESENT WHEN)
-            elif report_group and value_upper in _REPORT_CLAUSE_STARTS:
-                self._parse_report_clause(token_stream, data_item, value_upper)
-
-            # REDEFINES clause
-            elif value_upper == "REDEFINES":
-                token_stream.consume()  # Consume REDEFINES keyword
-                # The target may sit on the next line (continuation).
-                self._skip_newlines(token_stream)
-                redef_token = token_stream.peek()
-                if redef_token and redef_token.type == TokenType.IDENTIFIER:
-                    data_item.set_redefines(redef_token.value)
-                    token_stream.consume()
-
-            # OCCURS clause
-            elif value_upper == "OCCURS":
-                token_stream.consume()  # Consume OCCURS keyword
-                self._parse_occurs_clause(token_stream, data_item, location)
-
-            else:
-                # Skip unknown tokens/clauses. PERIOD, LEVEL_NUMBER, and
-                # division tokens are already handled at the top of the
-                # loop (they ``break`` before we get here), so the only
-                # remaining case is "consume and continue". Record a warning
-                # for meaningful (non-whitespace) tokens so a data-item clause
-                # this parser does not yet support (GROUP-USAGE, VOLATILE,
-                # DYNAMIC LENGTH, ...) is not dropped completely silently —
-                # symmetric with the ENVIRONMENT division's SELECT handling.
-                self._warn_dropped_data_token(token, data_item)
-                token_stream.consume()
-
-        return data_item
+    # Clause word -> handler. Built in the priority order of the elif chain
+    # this table replaced; ``_clause_table`` keeps the first entry for a
+    # word that appears in more than one set.
+    _CLAUSE_HANDLERS: ClassVar[dict[str, _ClauseHandler]] = _clause_table(
+        (("PICTURE", "PIC"), _clause_picture),
+        (("VALUE",), _clause_value),
+        (("USAGE",), _clause_usage),
+        (("OBJECT",), _clause_object),
+        (("VOLATILE",), _clause_volatile),
+        (("BASED",), _clause_based),
+        (("BYTE-LENGTH",), _clause_byte_length),
+        (("DYNAMIC",), _clause_dynamic_length),
+        (_COMP_KEYWORDS, _clause_usage_word),
+        (_POINTER_KEYWORDS, _clause_usage_word),
+        (("SIGNED", "UNSIGNED"), _clause_binary_sign),
+        (("DISPLAY",), _clause_display),
+        (("INDEX",), _clause_index),
+        (("GROUP-USAGE",), _clause_group_usage),
+        (_BARE_USAGE_WORDS, _clause_usage_word),
+        (("SIGN",), _clause_sign),
+        (("LEADING", "TRAILING"), _clause_sign_direction),
+        (("SYNCHRONIZED", "SYNC"), _clause_synchronized),
+        (("JUSTIFIED", "JUST"), _clause_justified),
+        (("BLANK",), _clause_blank_when_zero),
+        (("EXTERNAL",), _clause_external),
+        (("GLOBAL",), _clause_global),
+        (("IS",), _clause_is),
+        (_REPORT_CLAUSE_STARTS, _clause_report),
+        (("REDEFINES",), _clause_redefines),
+        (("OCCURS",), _clause_occurs),
+    )
+    # Token type -> handler, consulted when the word has no entry above:
+    # COMP-n token types, the DISPLAY verb token and DISPLAY-1.
+    _CLAUSE_TYPE_HANDLERS: ClassVar[dict[TokenType, _ClauseHandler]] = {
+        **dict.fromkeys(_COMP_TOKEN_TYPES, _clause_usage_word),
+        TokenType.DISPLAY: _clause_display,
+        TokenType.DISPLAY_1: _clause_usage_word,
+    }
 
     def _parse_sign_direction(
         self, token_stream: ITokenStream, data_item: CobolDataItem

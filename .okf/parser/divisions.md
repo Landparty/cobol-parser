@@ -39,7 +39,7 @@ Individual statement parsers are in [statements.md](statements.md).
 | `environment_sections.py` | `ConfigurationSectionParser` (CONFIGURATION SECTION + SPECIAL-NAMES) and `InputOutputSectionParser` (INPUT-OUTPUT SECTION + FILE-CONTROL) |
 | `environment_select.py` | `SelectClauseParser` — SELECT statement + all clause parsers (ASSIGN/ORGANIZATION/ACCESS/KEY/STATUS/ALTERNATE/PADDING/RESERVE/SHARING/LOCK/PASSWORD) and `SelectStatement` node construction |
 | `data.py` | DATA DIVISION — section scan, level-number hierarchy, AST node; entry parsing delegated to the three `data_*.py` collaborators below. `_build_data_hierarchy` ends with `propagate_group_usage_and_sign()`: a group's USAGE / SIGN is pushed onto subordinates with none of their own (IBM rule). Explicitness is `CobolDataItem.usage_explicit`, set by `set_usage()` — which both the pure-Python and `_data_fast` clause loops call |
-| `data_clauses.py` | `DataItemClauseParser` — data-item entries + PICTURE/VALUE/USAGE/OCCURS/... clauses; owns the optional `_data_fast` Cython fast-path invocation |
+| `data_clauses.py` | `DataItemClauseParser` — data-item entries + PICTURE/VALUE/USAGE/OCCURS/... clauses; owns the optional `_data_fast` Cython fast-path invocation (`_run_fast_clause_loop`) |
 | `data_file_description.py` | `FileDescriptionClauseParser` — FD/SD file-description clause capture (BLOCK/RECORD/LABEL/...) |
 | `data_report_description.py` | `ReportDescriptionClauseParser` — REPORT SECTION `RD` clause capture (CODE/CONTROLS/PAGE LIMIT/HEADING/FIRST-LAST DETAIL/FOOTING/GLOBAL) |
 | `data_special_entries.py` | `SpecialEntryParser` — level-88 condition names (each value's literal kind in `ConditionNameItem.value_kinds`), level-66 RENAMES, data-division EXEC SQL blocks |
@@ -453,9 +453,22 @@ suite: `tests/regression/test_value_all_clause.py`.
   `OccursClause.is_unbounded`) and `OCCURS n TO UNBOUNDED [TIMES] DEPENDING ON`
   (Enterprise COBOL 6.x, #402: `UNBOUNDED` is the maximum, `min_times` n).
 
+**Clause dispatch.** `parse_data_item` reads the level and name
+(`_parse_entry_name`), runs the optional fast path, then `_parse_clauses`: the
+loop stops at `.`, a level number, or (`_entry_ends_before`) a header / EXEC
+SQL, and dispatches every other token through `_CLAUSE_HANDLERS` (upper-cased
+word -> `_clause_*` handler method), then `_CLAUSE_TYPE_HANDLERS` (COMP-n /
+DISPLAY / DISPLAY-1 token types), else `_clause_unknown` (the "Unparsed token"
+warning). `_clause_table` builds the word table in priority order and keeps
+the first handler for a word in more than one set, as the old `elif` chain
+did. Handlers whose word is conditional (`OBJECT` without `REFERENCE`,
+`SIGNED`/`UNSIGNED` after a non-`BINARY-*` usage, report-clause words outside
+a REPORT SECTION) fall back to `_clause_unknown` themselves. A new clause is a
+handler method plus one table row.
+
 **Other clauses.**
 - `[IS] EXTERNAL` / `[IS] GLOBAL`: the `IS` comes *before* the keyword, so the
-  dispatch loop has a peek-ahead branch on `TokenType.IS` that consumes it when
+  dispatch table has a peek-ahead handler for `IS` (`_clause_is`) that consumes it when
   `EXTERNAL` / `GLOBAL` (or `INDEX`, a bare usage word) follows.
   `SYNCHRONIZED IS LEFT` / `JUSTIFIED IS RIGHT` consume the `IS` after the
   keyword, like `SIGN`. Pinned by `tests/regression/test_parser_completeness.py`.
