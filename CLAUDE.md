@@ -195,4 +195,4 @@ Layout, markers, fixtures and the per-directory breakdown: `.okf/tests.md`. `tes
 - `scripts/` -- `okf_check.py` (OKF claims vs. code, run by the pre-commit hook), `okf_staleness_check.py` (which OKF file a source file maps to), `validate_io_coverage.py`
 - `tools/` -- IO catalog, IO coverage, metrics and perf-threshold utilities
 - `benchmarks/`, `reports/` -- benchmark programs; dated audit reports and `reports/open-findings.md`
-- `.pre-commit-config.yaml` -- ruff, ruff-format, black and mypy hooks; `pre-commit run --all-files` matches what CI would check
+- `.pre-commit-config.yaml` -- ruff, black and mypy hooks; `pre-commit run --all-files` matches what CI would check
