@@ -35,9 +35,16 @@ How it decides (conservative throughout: when in doubt, input-dependent):
   input-independent when its own operands are untainted and it is not in
   the region of an input-dependent decision.
 
+* **Values.** :mod:`._values` runs a forward pass over the same graph that
+  carries WORKING-STORAGE bytes as far as they are known and follows each
+  PERFORM with its own caller's values. An IF outcome no state takes is
+  infeasible whatever the taint says: ``BAIL-OUT`` runs only for passing
+  tests, where ``COMPUTED-A`` is still spaces.
+
 :meth:`InputDependenceReport.unreachable` then combines the analysis with
 what a measured run took: outcomes an input-independent decision never took
-are pruned, and everything reachable only through them -- or through
+are pruned (and, for a run from the entry point, the outcomes the value
+pass shows infeasible), and everything reachable only through them -- or through
 nothing at all -- is unreachable. A paragraph a test PERFORMs directly is
 outside that claim: it is a statement about the program's own control flow
 from its entry point, so callers should only apply it to runs that start
@@ -89,6 +96,7 @@ from ..models.statements.misc import (
     SortStatement,
 )
 from ._procedures import ProcedureIndex, enclosing_section, statement_qualifier
+from ._values import ValuePass
 
 #: Clause bodies a statement runs or skips on an outcome of its own.
 _CLAUSE_ATTRS = (
@@ -222,6 +230,7 @@ _SOURCE_TYPE_NAMES = frozenset(
 #: Reasons (also the strings the report carries).
 REASON_FIXED = "decided by the program's own data: no input can change it"
 REASON_DEAD = "no PERFORM, GO TO or fall-through reaches it"
+REASON_VALUES = "no value the program can hold there takes it"
 #: Edge outcomes of the non-IF/EVALUATE decisions (ON SIZE ERROR, SEARCH,
 #: PERFORM UNTIL, ...) start here, clear of IF / EVALUATE outcome indexes.
 CLAUSE_OUTCOME_BASE = 1000
@@ -282,6 +291,9 @@ class InputDependenceReport:
     #: Clause decisions (not IF / EVALUATE) no input can change: first
     #: context copy of each.
     _independent_clauses: list[int] = field(default_factory=list, repr=False)
+    #: IF decision node (first context copy) -> outcomes no value the
+    #: program can hold there takes (see :mod:`._values`).
+    _infeasible: dict[int, set[int]] = field(default_factory=dict, repr=False)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -314,6 +326,21 @@ class InputDependenceReport:
             if cut:
                 pruned[node] = cut
 
+    def _prune_infeasible(
+        self,
+        graph: _Graph,
+        pruned: dict[int, set[int]],
+        result: UnreachableResult,
+    ) -> None:
+        for node, cut in self._infeasible.items():
+            line = graph.statement_lines.get(node)
+            if not cut or line is None:
+                continue
+            pruned.setdefault(node, set()).update(cut)
+            entry = result.outcomes.setdefault(("IF", line), {})
+            for outcome in cut:
+                entry.setdefault(outcome, REASON_VALUES)
+
     def decision(self, kind: str, line: int) -> Decision | None:
         for d in self.decisions:
             if d.kind == kind and d.line == line:
@@ -336,7 +363,10 @@ class InputDependenceReport:
                 With it, an input-independent clause decision (``ON SIZE
                 ERROR``, ``SEARCH``, a looping ``PERFORM``) that ran prunes
                 the clause bodies whose first line never ran, when that
-                line belongs to nothing else the decision leads to.
+                line belongs to nothing else the decision leads to. Passing
+                it also says the runs started at the entry point, so the IF
+                outcomes the value pass shows infeasible are pruned too
+                (`REASON_VALUES`).
         """
         result = UnreachableResult()
         graph = self._graph
@@ -364,6 +394,7 @@ class InputDependenceReport:
                     )
         if executed_lines is not None:
             self._prune_clauses(graph, set(executed_lines), pruned)
+            self._prune_infeasible(graph, pruned, result)
         static = graph.reachable({})
         live = graph.reachable(pruned) if pruned else static
         for i, unit in enumerate(graph.units):
@@ -435,6 +466,8 @@ class _Graph:
         self.calls: dict[int, list[tuple[int, int]]] = {}
         #: Return node -> the range context it ends.
         self.ret_of: dict[int, int] = {}
+        #: PERFORM site node -> [(range entry node, node control returns to)].
+        self.call_entries: dict[int, list[tuple[int, int]]] = {}
         self.exit = self.new()
 
     def new(self) -> int:
@@ -848,11 +881,14 @@ class _Builder:
                     pass
                 elif label == "range":
                     start, end = target
-                    g.edge(n, self.node(self.unit_entry[start], end))
+                    range_entry = self.node(self.unit_entry[start], end)
+                    g.edge(n, range_entry)
                     looping = self.t_kind[template] in ("cond", "event")
                     back = template if looping else self._after_of(template)
                     self._wire_return(end, back, ctx)
-                    g.calls.setdefault(n, []).append((end, self.node(back, ctx)))
+                    back_node = self.node(back, ctx)
+                    g.calls.setdefault(n, []).append((end, back_node))
+                    g.call_entries.setdefault(n, []).append((range_entry, back_node))
                 elif label == "nextsent":
                     for later in self._top_level_after(template, int(target)):
                         g.edge(n, self.node(later, ctx))
@@ -982,6 +1018,9 @@ class InputDependenceAnalyzer:
         # Code nothing reaches neither runs nor writes: leave it out of the
         # taint fixpoint, where it could only make live code look dependent.
         live = merged.reachable({})
+        # Context copies matter too: a copy nothing reaches (a PERFORMed
+        # paragraph's fall-through copy, say) must not decide anything.
+        live_nodes = _Graph.reachable(graph, {})
         live_stmts = {k: s for k, s in stmt_of.items() if stmt_nodes[k][0] in live}
         names_of = {k: records.roots_named(s) for k, s in live_stmts.items()}
         writes_of = {k: records.roots_written(s) for k, s in live_stmts.items()}
@@ -1002,7 +1041,7 @@ class InputDependenceAnalyzer:
         decision_nodes = [
             n
             for n, stmt in graph.node_stmt.items()
-            if len(graph.succ[n]) > 1 and id(stmt) in live_stmts
+            if len(graph.succ[n]) > 1 and n in live_nodes
         ]
         tainted = set(records.seeds)
         tainted_decisions: set[int] = set()
@@ -1036,7 +1075,7 @@ class InputDependenceAnalyzer:
                     continue
                 tainted_decisions.add(n)
                 reasons[n] = why
-                new = _region(graph, n, ipdom) - controlled
+                new = (_region(graph, n, ipdom) & live_nodes) - controlled
                 if new:
                     controlled |= new
                     changed = True
@@ -1059,6 +1098,7 @@ class InputDependenceAnalyzer:
                 )
             )
         decisions.sort(key=lambda d: (d.line, d.column))
+        infeasible = _value_infeasible(ast, graph, builder, records, stmt_nodes)
         named = set().union(*names_of.values()) if names_of else set()
         return InputDependenceReport(
             decisions=decisions,
@@ -1074,7 +1114,49 @@ class InputDependenceAnalyzer:
                 )
                 and not isinstance(graph.node_stmt[n], (IfStatement, EvaluateStatement))
             ],
+            _infeasible=infeasible,
         )
+
+
+def _value_infeasible(
+    ast: CobolProgram,
+    graph: _Graph,
+    builder: _Builder,
+    records: _Records,
+    stmt_nodes: dict[int, list[int]],
+) -> dict[int, set[int]]:
+    """IF decision node (first context copy) -> outcomes the value pass
+    shows no run from the entry point takes; empty when it gave up."""
+    if builder.entry_unit is None or any(
+        isinstance(s, EntryStatement) for s in builder.t_stmt
+    ):
+        return {}
+    untracked: set[str] = set()
+    # DECLARATIVES run whenever an I/O event fires: what they (or what they
+    # PERFORM) write can change anywhere.
+    seen: set[int] = set()
+    stack = list(graph.roots[1:])
+    while stack:
+        n = stack.pop()
+        if n in seen:
+            continue
+        seen.add(n)
+        stmt = graph.node_stmt.get(n)
+        if stmt is not None:
+            untracked |= records.roots_written(stmt)
+        stack.extend(t for t, _ in graph.succ[n])
+    for stmt in builder.t_stmt:
+        if stmt is not None and "ADDRESS" in _statement_tokens(stmt):
+            untracked |= records.roots_named(stmt)
+    found = ValuePass(ast, graph, records, graph.call_entries, untracked).run()
+    if not found:
+        return {}
+    out: dict[int, set[int]] = {}
+    for stmt_id, cut in found.items():
+        nodes = stmt_nodes.get(stmt_id)
+        if nodes and cut:
+            out[nodes[0]] = cut
+    return out
 
 
 class _ContextMergedGraph(_Graph):
@@ -1115,6 +1197,8 @@ class _Records:
     def __init__(self, ast: CobolProgram) -> None:
         self.roots_of: dict[str, set[str]] = {}
         self.seeds: set[str] = set()
+        #: id() of each 01/77 item -> its storage root.
+        self.root_of_item: dict[int, str] = {}
         self._labels: dict[str, str] = {}
         data = ast.data_division
         if data is not None:
@@ -1149,6 +1233,7 @@ class _Records:
             root = next(iter(sorted(roots))) if roots else f"#{name}"
         else:
             root = f"{section}:{name}:{id(item)}"
+        self.root_of_item[id(item)] = root
         self._labels[root] = name
         if seed or item.is_external:
             self.seeds.add(root)
@@ -1229,6 +1314,15 @@ class _Records:
 
 def _select_input_names(ast: CobolProgram) -> set[str]:
     names: set[str] = set()
+    # RECORD VARYING ... DEPENDING ON: a READ sets the record's length there.
+    data = ast.data_division
+    file_section = data._sections.get("FILE") if data is not None else None
+    for item in file_section.data_items if file_section is not None else ():
+        clauses = item.get_metadata("fd_clauses")
+        record = clauses.get("record") if isinstance(clauses, dict) else None
+        value = record.get("depending_on") if isinstance(record, dict) else None
+        if isinstance(value, str) and value:
+            names.update(_tokens(value))
     env = ast.get_division("ENVIRONMENT")
     if env is None:
         return names

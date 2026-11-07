@@ -194,6 +194,8 @@ OKF_MAP = [
     ("cobolparser/analysis/_cics.py", [".okf/analysis/flow.md"]),
     ("cobolparser/analysis/_abend.py", [".okf/analysis/flow.md"]),
     ("cobolparser/analysis/_sql_whenever.py", [".okf/analysis/flow.md"]),
+    ("cobolparser/analysis/input_dependence.py", [".okf/analysis/flow.md"]),
+    ("cobolparser/analysis/_values.py", [".okf/analysis/flow.md"]),
     ("cobolparser/analysis/unused_variables.py", [".okf/analysis/data-use.md"]),
     ("cobolparser/analysis/xref.py", [".okf/analysis/data-use.md"]),
     ("cobolparser/analysis/move_type_checker.py", [".okf/analysis/data-use.md"]),

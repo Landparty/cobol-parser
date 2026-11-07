@@ -857,7 +857,8 @@ FAIL branch of a NIST CCVS85 program, a flag nobody sets.
 
 * **Taint** per 01/77 storage root (REDEFINES / RENAMES share their record).
   Seeds: FILE SECTION and LINKAGE records, EXTERNAL items, FILE STATUS /
-  RELATIVE KEY items, runtime-set special registers, and whatever CALL,
+  RELATIVE KEY items, the RECORD VARYING DEPENDING ON item a READ sets,
+  runtime-set special registers, and whatever CALL,
   ACCEPT, READ INTO, RETURN, EXEC SQL / CICS / DLI, INVOKE and XML / JSON
   write, plus `extra_inputs` (a test case's setup MOVE targets).
 * **Implicit flow** through a statement-level CFG: a decision's region is
@@ -876,6 +877,33 @@ FAIL branch of a NIST CCVS85 program, a flag nobody sets.
   `outcomes` and `statements` with a reason, `REASON_DEAD` (nothing reaches
   it at all) or `REASON_FIXED` / "reached only through decision outcomes no
   input can take".
+* **Value pass** (`cobolparser/analysis/_values.py`, added 2026-11-07): a
+  forward pass over the same graph carrying WORKING-STORAGE / LOCAL-STORAGE
+  bytes as far as they are known (VALUE clauses, MOVE, ADD / SUBTRACT; any
+  other write forgets whole 01 records). It keeps a stack of PERFORM return
+  points, so a shared paragraph (CCVS `PRINT-DETAIL`, `BAIL-OUT`,
+  `FAIL-ROUTINE`) is judged with each caller's values, and an IF it can
+  decide sends a state down one branch only. Bytes are known, unknown, or
+  "a digit" (a numeric-edited `9` position, digits merged). Not tracked:
+  FILE / LINKAGE / COMMUNICATION / SCREEN records, EXTERNAL / GLOBAL items,
+  the taint seeds (FILE STATUS, RECORD VARYING DEPENDING ON, registers),
+  `extra_inputs`, anything an `ADDRESS OF` names or DECLARATIVES write,
+  records it cannot lay out exactly (SYNC, OCCURS DEPENDING ON), and
+  records no condition reads (so line counters do not multiply states).
+  FILLER VALUEs are trusted only while no write can change them (mocky-mock's
+  between-case reset skips FILLER). Comparisons are decided only when the
+  collating sequence cannot matter; abbreviated combined relations (any
+  condition naming one subject twice) and literals longer than their item
+  never are. Up to 16 states per (node, return stack), then the new state
+  merges into the nearest one, a byte some condition reads weighing 1000x.
+  Gives up (claims nothing) past 400,000 steps, on a recursive PERFORM, or
+  when the program has ENTRY points. `report.unreachable(...)` with
+  `executed_lines` (a run from the entry point) also prunes these
+  outcomes, reason `REASON_VALUES`.
+* **Live copies only**: decisions and regions use the context copies the
+  valid-path walk reaches; a fall-through copy of a PERFORMed paragraph that
+  nothing runs no longer spreads "runs only under an input-dependent
+  decision" over the whole program.
 * **Entry point**: `report.entry_names` (the first procedure after
   DECLARATIVES, and a section's first paragraph). The pruning claim holds
   only for runs that start there; callers check that (mocky-mock falls back
@@ -883,7 +911,8 @@ FAIL branch of a NIST CCVS85 program, a flag nobody sets.
 * Exact by construction, or absent: `report.incomplete` (graph over
   `max_nodes`, nesting too deep) means nothing is claimed.
 
-Tests: `tests/unit/analysis/test_input_dependence.py`.
+Tests: `tests/unit/analysis/test_input_dependence.py`,
+`tests/unit/analysis/test_input_dependence_values.py`.
 
 ## See also
 

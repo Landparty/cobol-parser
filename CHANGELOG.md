@@ -15,7 +15,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `report.unreachable(taken)` turns a measured run into the outcomes,
   paragraphs and statements no test can ever reach. mocky-mock's
   `--branch-coverage` uses it to report the self-checks of a NIST CCVS85
-  program as unreachable instead of as gaps.
+  program as unreachable instead of as gaps. A value pass judges each
+  PERFORM of shared code with its own caller's values, so the CCVS report
+  paragraphs (`PRINT-DETAIL`, `BAIL-OUT`, `FAIL-ROUTINE`) are pruned where
+  no value the program can hold takes a branch.
 * **Lint reports what IBM's compiler would.** Ten new rules, on by default,
   for the mistakes Enterprise COBOL rejects or warns about, so they show up
   in the editor and the CI gate instead of the compile listing:
