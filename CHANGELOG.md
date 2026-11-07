@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+* **Which decisions an input can change.** `InputDependenceAnalyzer`
+  (`cobolparser.analysis.input_dependence`) finds every IF / EVALUATE no
+  input reaches (nothing read, ACCEPTed, CALLed or passed in), and
+  `report.unreachable(taken)` turns a measured run into the outcomes,
+  paragraphs and statements no test can ever reach. mocky-mock's
+  `--branch-coverage` uses it to report the self-checks of a NIST CCVS85
+  program as unreachable instead of as gaps.
 * **Lint reports what IBM's compiler would.** Ten new rules, on by default,
   for the mistakes Enterprise COBOL rejects or warns about, so they show up
   in the editor and the CI gate instead of the compile listing:
