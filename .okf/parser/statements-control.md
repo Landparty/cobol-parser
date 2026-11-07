@@ -225,6 +225,12 @@ arm.
 
 ## CALL
 
+- **Structure.** `parse()` reads the program name (`_parse_program_name`), then
+  `_parse_call_phrases` loops until a period, a statement verb
+  (`_starts_next_statement`) or a word with no handler: `_phrase_word(token)`
+  is looked up in `_PHRASE_HANDLERS` (USING / RETURNING / GIVING / EXCEPTION /
+  OVERFLOW / ON / NOT / END-CALL -> `_phrase_*`, each returning False to end
+  the CALL). Every handler body goes through `_parse_handler_body`.
 - **Handler bodies** (`ON EXCEPTION` / `NOT ON EXCEPTION` / `ON OVERFLOW`, `ON`
   optional; the `ON` lookahead crosses line breaks) are parsed by
   `_parse_nested_stmts` through the registry. Termination: a `NOT` / `END-CALL`

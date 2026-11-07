@@ -1,6 +1,7 @@
 """Call statement parser implementing IStatementParser interface."""
 
-from typing import Any, cast
+from collections.abc import Callable
+from typing import Any, ClassVar, cast
 
 from cobolparser.parsers.statements._utils import (
     CONTROL_FLOW_BOUNDARIES,
@@ -24,9 +25,48 @@ from cobolparser.parsers.statements._utils import (
 from ...core.ast_factory import get_factory
 from ...core.exceptions import ParseError
 from ...core.interfaces import IStatementParser, ITokenStream, ParseContext
-from ...lexer import TokenType
+from ...lexer import Token, TokenType
 from ...models.ast_base import SourceLocation
 from ...models.statements import CallStatement
+
+
+def _call_parse_context(token_stream: ITokenStream) -> ParseContext | None:
+    """The stream's parse context, for error reporting, if it has one."""
+    parse_ctx: ParseContext | None = token_stream.context
+    if parse_ctx is None:
+        parse_ctx = getattr(token_stream, "_context", None)
+    if parse_ctx is None and hasattr(token_stream, "context"):
+        parse_ctx = token_stream.context
+    return parse_ctx
+
+
+def _starts_next_statement(token: Token) -> bool:
+    """True when *token* is a statement verb that ends the CALL (RETURNING
+    and GIVING are statement keywords too, but CALL phrases here)."""
+    if token.type in STATEMENT_TOKEN_TYPES:
+        return True
+    if token.type != TokenType.IDENTIFIER or not token.value:
+        return False
+    upper = token.value.upper()
+    return upper in STATEMENT_KEYWORDS and upper not in ("RETURNING", "GIVING")
+
+
+def _phrase_word(token: Token) -> str:
+    """The CALL phrase word *token* spells, for ``_PHRASE_HANDLERS``: the
+    USING / ON / NOT token types, any IDENTIFIER's upper-cased value, and
+    EXCEPTION / OVERFLOW whatever they lexed as; ``""`` otherwise."""
+    if token.type == TokenType.USING:
+        return "USING"
+    if token.type == TokenType.IDENTIFIER:
+        return token.value.upper() if token.value else ""
+    upper = token_value_upper(token)
+    if upper in ("EXCEPTION", "OVERFLOW"):
+        return upper
+    if token.type == TokenType.ON:
+        return "ON"
+    if token.type == TokenType.NOT:
+        return "NOT"
+    return ""
 
 
 class CallStatementParser(IStatementParser):
@@ -58,11 +98,7 @@ class CallStatementParser(IStatementParser):
         )
 
         # Get context for error reporting if available
-        parse_ctx: ParseContext | None = token_stream.context
-        if parse_ctx is None:
-            parse_ctx = getattr(token_stream, "_context", None)
-        if parse_ctx is None and hasattr(token_stream, "context"):
-            parse_ctx = token_stream.context
+        parse_ctx = _call_parse_context(token_stream)
 
         try:
             skip_whitespace(token_stream)
@@ -77,203 +113,201 @@ class CallStatementParser(IStatementParser):
                     )
                 return stmt
 
-            # Parse the program name (can be literal or identifier)
-            if token.type == TokenType.STRING_LITERAL:
-                # Static CALL with literal program name
-                program_name = token.value
-                stmt.set_called_program(program_name, is_dynamic=False)
-                token_stream.consume()
-            elif token.type == TokenType.IDENTIFIER:
-                # Dynamic CALL with variable program name
-                program_name = token.value
-                stmt.set_called_program(program_name, is_dynamic=True)
-                token_stream.consume()
-                # ``CALL WS-SERVICE-PGM (WS-IDX) USING ...`` -- a table-driven
-                # dispatch. The bare name stays ``called_program`` (what
-                # DynamicCallAnalyzer resolves); the full subscripted /
-                # qualified reference is kept in metadata rather than being
-                # stranded as unparsed tokens.
-                full_reference = consume_optional_qualifiers(
-                    token_stream, program_name or ""
-                )
-                if full_reference != (program_name or ""):
-                    stmt.set_metadata("called_program_reference", full_reference)
-            else:
-                # Unknown token type, report error
-                if parse_ctx:
-                    parse_ctx.error(
-                        f"Expected program name (literal or identifier), found {token.type.name if hasattr(token.type, 'name') else str(token.type)}",
-                        (
-                            token.location
-                            if hasattr(token, "location")
-                            else SourceLocation(0, 0)
-                        ),
-                    )
-                token_stream.consume()
+            if not self._parse_program_name(token_stream, stmt, token, parse_ctx):
                 return stmt
 
             # Parse optional USING and RETURNING clauses
-
-            while not token_stream.is_empty():
-                # ``USING A, B; ON OVERFLOW ...`` -- a separator before a
-                # handler clause is plain COBOL punctuation.
-                skip_statement_separators(token_stream)
-                token = token_stream.peek()
-
-                if not token:
-                    break
-
-                if token.type == TokenType.PERIOD:
-                    token_stream.consume()
-                    break
-
-                # Check for statement keywords that end the CALL statement
-                if token.type in STATEMENT_TOKEN_TYPES:
-                    # This is a new statement, not part of CALL
-                    break
-
-                if token.type == TokenType.IDENTIFIER and token.value:
-                    if (
-                        token.value.upper() in STATEMENT_KEYWORDS
-                        and token.value.upper() not in ("RETURNING", "GIVING")
-                    ):
-                        # This is a new statement, not part of CALL
-                        break
-
-                # Parse USING clause
-                if token.type == TokenType.USING or (
-                    token.type == TokenType.IDENTIFIER
-                    and token.value
-                    and token.value.upper() == "USING"
-                ):
-                    token_stream.consume()
-                    # Parse parameter list until RETURNING or GIVING or PERIOD
-                    self._parse_using_clause(token_stream, stmt)
-                    continue
-                elif (
-                    token.type == TokenType.IDENTIFIER
-                    and token.value
-                    and token.value.upper() == "RETURNING"
-                ):
-                    token_stream.consume()
-                    skip_whitespace(token_stream)
-                    token = token_stream.peek()
-                    if token and token.type == TokenType.IDENTIFIER:
-                        token_stream.consume()
-                        # ``RETURNING WS-RC OF WS-CTL`` / ``RETURNING T (I)``:
-                        # the item is the whole data reference (the
-                        # qualifier was dropped as unparsed tokens).
-                        stmt.set_returning_parameter(
-                            consume_optional_qualifiers(token_stream, token.value)
-                        )
-                elif (
-                    token.type == TokenType.IDENTIFIER
-                    and token.value
-                    and token.value.upper() == "GIVING"
-                ):
-                    token_stream.consume()
-                    skip_whitespace(token_stream)
-                    token = token_stream.peek()
-                    if token and token.type == TokenType.IDENTIFIER:
-                        token_stream.consume()
-                        stmt.set_giving_parameter(
-                            consume_optional_qualifiers(token_stream, token.value)
-                        )
-                elif token_value_upper(token) in ("EXCEPTION", "OVERFLOW"):
-                    # ``ON`` is optional: ``CALL ... EXCEPTION stmts`` and
-                    # ``CALL ... OVERFLOW stmts`` are standard COBOL. Without
-                    # this branch the word was swallowed as a bogus USING
-                    # parameter and the handler body escaped to the enclosing
-                    # paragraph as free-standing statements -- silently.
-                    kind = token_value_upper(token)
-                    token_stream.consume()
-                    if kind == "EXCEPTION":
-                        nested = self._parse_nested_stmts(
-                            token_stream, stop_at={"ON", "NOT", "END-CALL"}
-                        )
-                        self._set_handler(token_stream, stmt, "on_exception", nested)
-                    else:
-                        nested = self._parse_nested_stmts(
-                            token_stream, stop_at={"ON", "NOT", "END-CALL"}
-                        )
-                        self._set_handler(token_stream, stmt, "on_overflow", nested)
-                    for _nested_stmt in nested or []:
-                        stmt.add_child(_nested_stmt)
-                elif token.type == TokenType.ON or (
-                    token.type == TokenType.IDENTIFIER
-                    and token.value
-                    and token.value.upper() == "ON"
-                ):
-                    # ``ON <newline> EXCEPTION``: look past the line break,
-                    # or the handler was dropped and its body escaped.
-                    next_tok, _ = peek_past_noise(token_stream, 1)
-                    next_val = (
-                        next_tok.value.upper() if next_tok and next_tok.value else ""
-                    )
-                    if next_val == "EXCEPTION":
-                        token_stream.consume()  # ON
-                        skip_whitespace(token_stream)
-                        token_stream.consume()  # EXCEPTION
-                        nested = self._parse_nested_stmts(
-                            token_stream, stop_at={"ON", "NOT", "END-CALL"}
-                        )
-                        self._set_handler(token_stream, stmt, "on_exception", nested)
-                        for _nested_stmt in nested or []:
-                            stmt.add_child(_nested_stmt)
-                    elif next_val == "OVERFLOW":
-                        token_stream.consume()  # ON
-                        skip_whitespace(token_stream)
-                        token_stream.consume()  # OVERFLOW
-                        nested = self._parse_nested_stmts(
-                            token_stream, stop_at={"ON", "NOT", "END-CALL"}
-                        )
-                        self._set_handler(token_stream, stmt, "on_overflow", nested)
-                        for _nested_stmt in nested or []:
-                            stmt.add_child(_nested_stmt)
-                    else:
-                        break
-                elif token.type == TokenType.NOT or (
-                    token.type == TokenType.IDENTIFIER
-                    and token.value
-                    and token.value.upper() == "NOT"
-                ):
-                    # NOT [ON] EXCEPTION clause (ON is optional here too)
-                    t1, i1 = peek_past_noise(token_stream, 1)
-                    if t1 and token_value_upper(t1) == "ON":
-                        t2, _ = peek_past_noise(token_stream, i1 + 1)
-                    else:
-                        t2 = t1
-                    if t2 and token_value_upper(t2) == "EXCEPTION":
-                        token_stream.consume()  # NOT
-                        skip_whitespace(token_stream)
-                        if token_value_upper(token_stream.peek()) == "ON":
-                            token_stream.consume()  # ON
-                            skip_whitespace(token_stream)
-                        token_stream.consume()  # EXCEPTION
-                        nested = self._parse_nested_stmts(
-                            token_stream, stop_at={"ON", "NOT", "END-CALL"}
-                        )
-                        self._set_handler(
-                            token_stream, stmt, "not_on_exception", nested
-                        )
-                        for _nested_stmt in nested or []:
-                            stmt.add_child(_nested_stmt)
-                    else:
-                        break
-                elif (
-                    token.type == TokenType.IDENTIFIER
-                    and token.value
-                    and token.value.upper() == "END-CALL"
-                ):
-                    token_stream.consume()  # consume END-CALL
-                    break
-                else:
-                    # Skip unknown tokens or end of CALL statement
-                    break
+            self._parse_call_phrases(token_stream, stmt)
         except ParseError:
             pass
 
         return stmt
+
+    def _parse_program_name(
+        self,
+        token_stream: ITokenStream,
+        stmt: CallStatement,
+        token: Token,
+        parse_ctx: ParseContext | None,
+    ) -> bool:
+        """Consume the program name (literal or identifier) at *token*.
+        False -- after reporting and consuming the token -- when it is
+        neither, which ends the CALL."""
+        if token.type == TokenType.STRING_LITERAL:
+            # Static CALL with literal program name
+            stmt.set_called_program(token.value, is_dynamic=False)
+            token_stream.consume()
+            return True
+        if token.type == TokenType.IDENTIFIER:
+            # Dynamic CALL with variable program name
+            program_name = token.value
+            stmt.set_called_program(program_name, is_dynamic=True)
+            token_stream.consume()
+            # ``CALL WS-SERVICE-PGM (WS-IDX) USING ...`` -- a table-driven
+            # dispatch. The bare name stays ``called_program`` (what
+            # DynamicCallAnalyzer resolves); the full subscripted /
+            # qualified reference is kept in metadata rather than being
+            # stranded as unparsed tokens.
+            full_reference = consume_optional_qualifiers(
+                token_stream, program_name or ""
+            )
+            if full_reference != (program_name or ""):
+                stmt.set_metadata("called_program_reference", full_reference)
+            return True
+        # Unknown token type, report error
+        if parse_ctx:
+            parse_ctx.error(
+                f"Expected program name (literal or identifier), found {token.type.name if hasattr(token.type, 'name') else str(token.type)}",
+                (
+                    token.location
+                    if hasattr(token, "location")
+                    else SourceLocation(0, 0)
+                ),
+            )
+        token_stream.consume()
+        return False
+
+    def _parse_call_phrases(
+        self, token_stream: ITokenStream, stmt: CallStatement
+    ) -> None:
+        """Parse the phrases after the program name (USING, RETURNING,
+        GIVING, the exception/overflow handlers, END-CALL) through
+        ``_PHRASE_HANDLERS`` until the CALL ends."""
+        while not token_stream.is_empty():
+            # ``USING A, B; ON OVERFLOW ...`` -- a separator before a
+            # handler clause is plain COBOL punctuation.
+            skip_statement_separators(token_stream)
+            token = token_stream.peek()
+
+            if not token:
+                break
+
+            if token.type == TokenType.PERIOD:
+                token_stream.consume()
+                break
+
+            # Check for statement keywords that end the CALL statement
+            if _starts_next_statement(token):
+                # This is a new statement, not part of CALL
+                break
+
+            handler = self._PHRASE_HANDLERS.get(_phrase_word(token))
+            # Anything else: unknown token or end of CALL statement
+            if handler is None or not handler(self, token_stream, stmt):
+                break
+
+    # ------------------------------------------------------------------
+    # Phrase handlers: called with the phrase word peeked, not consumed.
+    # True to keep reading phrases, False to end the CALL.
+    # ------------------------------------------------------------------
+
+    def _phrase_using(self, token_stream: ITokenStream, stmt: CallStatement) -> bool:
+        token_stream.consume()
+        # Parse parameter list until RETURNING or GIVING or PERIOD
+        self._parse_using_clause(token_stream, stmt)
+        return True
+
+    def _phrase_returning(
+        self, token_stream: ITokenStream, stmt: CallStatement
+    ) -> bool:
+        token_stream.consume()
+        skip_whitespace(token_stream)
+        token = token_stream.peek()
+        if token and token.type == TokenType.IDENTIFIER:
+            token_stream.consume()
+            # ``RETURNING WS-RC OF WS-CTL`` / ``RETURNING T (I)``:
+            # the item is the whole data reference (the
+            # qualifier was dropped as unparsed tokens).
+            stmt.set_returning_parameter(
+                consume_optional_qualifiers(token_stream, token.value)
+            )
+        return True
+
+    def _phrase_giving(self, token_stream: ITokenStream, stmt: CallStatement) -> bool:
+        token_stream.consume()
+        skip_whitespace(token_stream)
+        token = token_stream.peek()
+        if token and token.type == TokenType.IDENTIFIER:
+            token_stream.consume()
+            stmt.set_giving_parameter(
+                consume_optional_qualifiers(token_stream, token.value)
+            )
+        return True
+
+    def _phrase_bare_handler(
+        self, token_stream: ITokenStream, stmt: CallStatement
+    ) -> bool:
+        # ``ON`` is optional: ``CALL ... EXCEPTION stmts`` and
+        # ``CALL ... OVERFLOW stmts`` are standard COBOL. Without
+        # this handler the word was swallowed as a bogus USING
+        # parameter and the handler body escaped to the enclosing
+        # paragraph as free-standing statements -- silently.
+        kind = token_value_upper(token_stream.peek())
+        token_stream.consume()
+        attr = "on_exception" if kind == "EXCEPTION" else "on_overflow"
+        self._parse_handler_body(token_stream, stmt, attr)
+        return True
+
+    def _phrase_on(self, token_stream: ITokenStream, stmt: CallStatement) -> bool:
+        # ``ON <newline> EXCEPTION``: look past the line break,
+        # or the handler was dropped and its body escaped.
+        next_tok, _ = peek_past_noise(token_stream, 1)
+        next_val = next_tok.value.upper() if next_tok and next_tok.value else ""
+        if next_val not in ("EXCEPTION", "OVERFLOW"):
+            return False
+        token_stream.consume()  # ON
+        skip_whitespace(token_stream)
+        token_stream.consume()  # EXCEPTION / OVERFLOW
+        attr = "on_exception" if next_val == "EXCEPTION" else "on_overflow"
+        self._parse_handler_body(token_stream, stmt, attr)
+        return True
+
+    def _phrase_not(self, token_stream: ITokenStream, stmt: CallStatement) -> bool:
+        # NOT [ON] EXCEPTION clause (ON is optional here too)
+        t1, i1 = peek_past_noise(token_stream, 1)
+        if t1 and token_value_upper(t1) == "ON":
+            t2, _ = peek_past_noise(token_stream, i1 + 1)
+        else:
+            t2 = t1
+        if not (t2 and token_value_upper(t2) == "EXCEPTION"):
+            return False
+        token_stream.consume()  # NOT
+        skip_whitespace(token_stream)
+        if token_value_upper(token_stream.peek()) == "ON":
+            token_stream.consume()  # ON
+            skip_whitespace(token_stream)
+        token_stream.consume()  # EXCEPTION
+        self._parse_handler_body(token_stream, stmt, "not_on_exception")
+        return True
+
+    def _phrase_end_call(self, token_stream: ITokenStream, stmt: CallStatement) -> bool:
+        token_stream.consume()  # consume END-CALL
+        return False
+
+    _PHRASE_HANDLERS: ClassVar[
+        dict[str, Callable[["CallStatementParser", ITokenStream, CallStatement], bool]]
+    ] = {
+        "USING": _phrase_using,
+        "RETURNING": _phrase_returning,
+        "GIVING": _phrase_giving,
+        "EXCEPTION": _phrase_bare_handler,
+        "OVERFLOW": _phrase_bare_handler,
+        "ON": _phrase_on,
+        "NOT": _phrase_not,
+        "END-CALL": _phrase_end_call,
+    }
+
+    def _parse_handler_body(
+        self, token_stream: ITokenStream, stmt: CallStatement, attr: str
+    ) -> None:
+        """Parse an exception/overflow handler body into *attr* and attach
+        its statements as children of *stmt*."""
+        nested = self._parse_nested_stmts(
+            token_stream, stop_at={"ON", "NOT", "END-CALL"}
+        )
+        self._set_handler(token_stream, stmt, attr, nested)
+        for _nested_stmt in nested or []:
+            stmt.add_child(_nested_stmt)
 
     _HANDLER_PHRASES = {
         "on_exception": "ON EXCEPTION",
