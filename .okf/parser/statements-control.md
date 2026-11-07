@@ -242,7 +242,8 @@ arm.
   `_warn_and_skip_handler_statement` (one warning per dropped statement, tokens
   skipped to the next boundary), mirroring the top-level recovery. Pinned by
   `tests/regression/test_call_handler_body_termination.py`.
-- **USING list** (`_parse_using_clause`): stops at `SCOPE_TERMINATORS` (never
+- **USING list** (`_parse_using_clause`, with `_ends_using_clause`,
+  `_consume_passing_mode` and `_consume_using_argument`): stops at `SCOPE_TERMINATORS` (never
   captures `END-CALL`) and at the handler words; commas are separators;
   `OMITTED` is an argument; a figurative constant (`BY CONTENT ZERO`) or a signed
   literal (`BY VALUE -7`) is one argument named by its text; `BY VALUE 100`,

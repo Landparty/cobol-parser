@@ -69,6 +69,78 @@ def _phrase_word(token: Token) -> str:
     return ""
 
 
+#: Words that end a USING list (a RETURNING / GIVING phrase or a handler).
+_USING_STOP_WORDS = ("RETURNING", "GIVING", "ON", "EXCEPTION", "OVERFLOW")
+#: Token types a USING list may continue with: a BY phrase or an argument.
+_USING_TOKEN_TYPES = frozenset(
+    {
+        TokenType.BY,
+        TokenType.USING,
+        TokenType.IDENTIFIER,
+        TokenType.STRING_LITERAL,
+        TokenType.NUMERIC_LITERAL,
+        TokenType.LEVEL_NUMBER,
+        TokenType.VALUE,
+        TokenType.OMITTED,
+        TokenType.FIGURATIVE_CONSTANT,
+        TokenType.MINUS,
+        TokenType.PLUS,
+    }
+)
+#: Token types that are one USING argument by themselves.
+_USING_PARAMETER_TOKEN_TYPES = (
+    TokenType.IDENTIFIER,
+    TokenType.STRING_LITERAL,
+    # ``BY VALUE 100`` / ``USING 100.00`` -- a numeric literal is
+    # a legal argument (the lexer classes 1-2 digit integers as
+    # LEVEL_NUMBER regardless of context).
+    TokenType.NUMERIC_LITERAL,
+    TokenType.LEVEL_NUMBER,
+    TokenType.OMITTED,
+)
+
+
+def _ends_using_clause(token: Token) -> bool:
+    """True when *token* (not a comma or period) ends a USING list."""
+    # Check for end of USING clause
+    if token.type == TokenType.IDENTIFIER and token.value:
+        val_upper = token.value.upper()
+        # A RETURNING / GIVING phrase, a handler, a statement keyword, or
+        # the scope terminator of an enclosing statement (e.g. END-READ
+        # when this CALL is an AT END clause body) ends the parameters.
+        return (
+            val_upper in _USING_STOP_WORDS
+            or val_upper in STATEMENT_KEYWORDS
+            or val_upper in SCOPE_TERMINATORS
+        )
+    # Check for statement token types
+    if token.type in STATEMENT_TOKEN_TYPES:
+        return True
+    # Check for non-parameter tokens (like NUMERIC_LITERAL), end of USING clause
+    return token.type not in _USING_TOKEN_TYPES
+
+
+def _consume_identifier_argument_tail(
+    token_stream: ITokenStream, param_name: str
+) -> str:
+    """Fold what follows an identifier argument into it."""
+    # ``ADDRESS OF x`` / ``LENGTH OF x`` argument forms, then
+    # a trailing subscript / OF-IN qualifier chain
+    # (``USING SUBSCRIPTED-DATA (4)``) -- fold them into the
+    # parameter rather than stranding them as unparsed tokens.
+    if param_name.upper() in ("ADDRESS", "LENGTH"):
+        of_tok, of_idx = peek_past_noise(token_stream, 0)
+        if of_tok and token_value_upper(of_tok) == "OF":
+            name_tok, _ = peek_past_noise(token_stream, of_idx + 1)
+            if name_tok and name_tok.type == TokenType.IDENTIFIER:
+                skip_whitespace(token_stream)
+                token_stream.consume()  # OF
+                skip_whitespace(token_stream)
+                token_stream.consume()  # identifier
+                param_name = f"{param_name.upper()} OF {name_tok.value}"
+    return consume_optional_qualifiers(token_stream, param_name)
+
+
 class CallStatementParser(IStatementParser):
     """Parser for CALL statements using IStatementParser interface."""
 
@@ -456,125 +528,100 @@ class CallStatementParser(IStatementParser):
                 token_stream.consume()
                 continue
 
-            # Check for end of USING clause
-            if token.type == TokenType.IDENTIFIER and token.value:
-                val_upper = token.value.upper()
-                if val_upper in ("RETURNING", "GIVING", "ON", "EXCEPTION", "OVERFLOW"):
-                    break
-                # Check for statement keywords
-                if val_upper in STATEMENT_KEYWORDS:
-                    break
-                # Scope terminators of an enclosing statement (e.g. END-READ
-                # when this CALL is an AT END clause body) end the parameters.
-                if val_upper in SCOPE_TERMINATORS:
-                    break
-            # Check for statement token types
-            elif token.type in STATEMENT_TOKEN_TYPES:
+            if _ends_using_clause(token):
                 break
-            # Check for non-parameter tokens (like NUMERIC_LITERAL), end of USING clause
-            elif token.type not in (
-                TokenType.BY,
-                TokenType.USING,
-            ) and token.type not in (
-                TokenType.IDENTIFIER,
-                TokenType.STRING_LITERAL,
-                TokenType.NUMERIC_LITERAL,
-                TokenType.LEVEL_NUMBER,
-                TokenType.VALUE,
-                TokenType.OMITTED,
-                TokenType.FIGURATIVE_CONSTANT,
-                TokenType.MINUS,
-                TokenType.PLUS,
+
+            current, passing_mode = self._consume_passing_mode(
+                token_stream, token, passing_mode
+            )
+            if not self._consume_using_argument(
+                token_stream, stmt, current, passing_mode
             ):
                 break
 
-            # Check for [BY] REFERENCE|CONTENT|VALUE -- only overwrites the
-            # mode established above/by a prior iteration when a mode word
-            # is actually present; otherwise passing_mode carries over
-            # unchanged (see the persistence note above the loop). BY is
-            # optional in IBM's CALL syntax (``USING CONTENT X REFERENCE Y``),
-            # as it is in the PROCEDURE DIVISION header, so a bare mode word
-            # switches the mode too rather than being taken as an argument.
-            if token.type == TokenType.BY or (
-                token.type == TokenType.IDENTIFIER
-                and token.value
-                and token.value.upper() == "BY"
-            ):
+    @staticmethod
+    def _consume_passing_mode(
+        token_stream: ITokenStream, token: Token, passing_mode: str
+    ) -> tuple[Token | None, str]:
+        """Consume an optional ``[BY] REFERENCE|CONTENT|VALUE`` at *token*;
+        return the next token and the (possibly new) passing mode."""
+        # Check for [BY] REFERENCE|CONTENT|VALUE -- only overwrites the
+        # mode established above/by a prior iteration when a mode word
+        # is actually present; otherwise passing_mode carries over
+        # unchanged (see the persistence note in _parse_using_clause). BY
+        # is optional in IBM's CALL syntax (``USING CONTENT X REFERENCE
+        # Y``), as it is in the PROCEDURE DIVISION header, so a bare mode
+        # word switches the mode too rather than being taken as an argument.
+        current: Token | None = token
+        if token.type == TokenType.BY or (
+            token.type == TokenType.IDENTIFIER
+            and token.value
+            and token.value.upper() == "BY"
+        ):
+            token_stream.consume()
+            skip_whitespace(token_stream)
+            current = token_stream.peek()
+        if current and (
+            current.type == TokenType.IDENTIFIER or current.type == TokenType.VALUE
+        ):
+            mode_val = current.value.upper() if current.value else ""
+            if mode_val in ("REFERENCE", "CONTENT", "VALUE"):
+                passing_mode = mode_val
                 token_stream.consume()
                 skip_whitespace(token_stream)
-                token = token_stream.peek()
-            if token and (
-                token.type == TokenType.IDENTIFIER or token.type == TokenType.VALUE
-            ):
-                mode_val = token.value.upper() if token.value else ""
-                if mode_val in ("REFERENCE", "CONTENT", "VALUE"):
-                    passing_mode = mode_val
-                    token_stream.consume()
-                    skip_whitespace(token_stream)
-                    token = token_stream.peek()
+                current = token_stream.peek()
+        return current, passing_mode
 
-            # ``BY CONTENT ZERO`` / ``BY VALUE -7`` -- a figurative constant
-            # or a signed numeric literal is one argument; stopping here
-            # dropped it and every argument after it.
-            if token and token.type == TokenType.FIGURATIVE_CONSTANT:
-                token_stream.consume()
-                stmt.add_using_parameter(token.value.upper(), passing_mode)
-                continue
-            if token and token.type in (TokenType.MINUS, TokenType.PLUS):
-                number = token_stream.peek(1)
-                if number is None or number.type not in (
-                    TokenType.NUMERIC_LITERAL,
-                    TokenType.LEVEL_NUMBER,
-                ):
-                    break
-                token_stream.consume()
-                token_stream.consume()
-                stmt.add_using_parameter(token.value + number.value, passing_mode)
-                continue
-
-            # Parse parameter name (OMITTED is a valid USING parameter
-            # placeholder per the COBOL grammar, not just a mode modifier).
-            if token and token.type in (
-                TokenType.IDENTIFIER,
-                TokenType.STRING_LITERAL,
-                # ``BY VALUE 100`` / ``USING 100.00`` -- a numeric literal is
-                # a legal argument (the lexer classes 1-2 digit integers as
-                # LEVEL_NUMBER regardless of context).
+    def _consume_using_argument(
+        self,
+        token_stream: ITokenStream,
+        stmt: CallStatement,
+        token: Token | None,
+        passing_mode: str,
+    ) -> bool:
+        """Consume one USING argument at *token* into *stmt*. False when no
+        argument is there, which ends the USING list."""
+        if not token:
+            return False
+        # ``BY CONTENT ZERO`` / ``BY VALUE -7`` -- a figurative constant
+        # or a signed numeric literal is one argument; stopping here
+        # dropped it and every argument after it.
+        if token.type == TokenType.FIGURATIVE_CONSTANT:
+            token_stream.consume()
+            stmt.add_using_parameter(token.value.upper(), passing_mode)
+            return True
+        if token.type in (TokenType.MINUS, TokenType.PLUS):
+            number = token_stream.peek(1)
+            if number is None or number.type not in (
                 TokenType.NUMERIC_LITERAL,
                 TokenType.LEVEL_NUMBER,
-                TokenType.OMITTED,
             ):
-                # ``FUNCTION name(args)`` is one argument (#579): left to the
-                # identifier path, FUNCTION became an argument of its own and
-                # every later one moved a position right.
-                function_arg = _consume_function_argument(token_stream)
-                if function_arg is not None:
-                    stmt.add_using_parameter(function_arg, passing_mode)
-                    continue
-                # A literal argument keeps its quotes (``BY CONTENT 'A'``
-                # is not the data item A; ``X'00'`` is not ``00``).
-                param_name = literal_operand_text(token) or "OMITTED"
-                token_stream.consume()
-                if token.type == TokenType.IDENTIFIER:
-                    # ``ADDRESS OF x`` / ``LENGTH OF x`` argument forms, then
-                    # a trailing subscript / OF-IN qualifier chain
-                    # (``USING SUBSCRIPTED-DATA (4)``) -- fold them into the
-                    # parameter rather than stranding them as unparsed tokens.
-                    if param_name.upper() in ("ADDRESS", "LENGTH"):
-                        of_tok, of_idx = peek_past_noise(token_stream, 0)
-                        if of_tok and token_value_upper(of_tok) == "OF":
-                            name_tok, _ = peek_past_noise(token_stream, of_idx + 1)
-                            if name_tok and name_tok.type == TokenType.IDENTIFIER:
-                                skip_whitespace(token_stream)
-                                token_stream.consume()  # OF
-                                skip_whitespace(token_stream)
-                                token_stream.consume()  # identifier
-                                param_name = f"{param_name.upper()} OF {name_tok.value}"
-                    param_name = consume_optional_qualifiers(token_stream, param_name)
-                stmt.add_using_parameter(param_name, passing_mode)
-            else:
-                # No parameter found, end of USING clause
-                break
+                return False
+            token_stream.consume()
+            token_stream.consume()
+            stmt.add_using_parameter(token.value + number.value, passing_mode)
+            return True
+
+        # Parse parameter name (OMITTED is a valid USING parameter
+        # placeholder per the COBOL grammar, not just a mode modifier).
+        if token.type not in _USING_PARAMETER_TOKEN_TYPES:
+            # No parameter found, end of USING clause
+            return False
+        # ``FUNCTION name(args)`` is one argument (#579): left to the
+        # identifier path, FUNCTION became an argument of its own and
+        # every later one moved a position right.
+        function_arg = _consume_function_argument(token_stream)
+        if function_arg is not None:
+            stmt.add_using_parameter(function_arg, passing_mode)
+            return True
+        # A literal argument keeps its quotes (``BY CONTENT 'A'``
+        # is not the data item A; ``X'00'`` is not ``00``).
+        param_name = literal_operand_text(token) or "OMITTED"
+        token_stream.consume()
+        if token.type == TokenType.IDENTIFIER:
+            param_name = _consume_identifier_argument_tail(token_stream, param_name)
+        stmt.add_using_parameter(param_name, passing_mode)
+        return True
 
 
 def _consume_function_argument(token_stream: ITokenStream) -> str | None:
