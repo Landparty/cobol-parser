@@ -581,6 +581,19 @@ def _present_values(entry: dict[str, Any], keys: tuple[str, ...], role: str) -> 
     return [(entry[key], role, False) for key in keys if entry.get(key)]
 
 
+def _varying_clause_roles(clause: dict[str, Any]) -> _Roles:
+    """Roles for one PERFORM VARYING / AFTER clause dict."""
+    pairs: _Roles = []
+    if clause.get("variable"):
+        pairs.append((clause["variable"], ROLE_WRITE, True))
+    for key in ("from_value", "by_value"):
+        if clause.get(key):
+            pairs.append((clause[key], ROLE_READ, True))
+    if clause.get("until_condition") is not None:
+        pairs.append((clause["until_condition"], ROLE_CONDITION, True))
+    return pairs
+
+
 class XrefAnalyzer:
     """Analyzer producing a full cross-reference listing for one program.
 
@@ -1769,113 +1782,141 @@ class XrefAnalyzer:
         (XmlJsonStatement, _xml_json_roles),
     )
 
-    def _control_statement_roles(
-        self, stmt: CobolStatement
-    ) -> list[tuple[Any, str, bool]]:
-        pairs: list[tuple[Any, str, bool]] = []
-        if isinstance(stmt, IfStatement):
-            if stmt.condition is not None:
-                pairs.append((stmt.condition, ROLE_CONDITION, True))
-        elif isinstance(stmt, EvaluateStatement):
-            # An expression-shaped subject only ever reaches `add_child()`,
-            # never `.operands` (see EvaluateStatement.add_subject), so this
-            # walk is its only coverage.
-            pairs += [(subject, ROLE_CONDITION, True) for subject in stmt.subjects]
-            clauses = list(stmt.when_clauses)
-            if stmt.default_when is not None:
-                clauses.append(stmt.default_when)
-            for clause in clauses:
-                for selector in clause.selectors:
-                    pairs.extend(self._selector_roles(selector))
-        elif isinstance(stmt, PerformStatement):
-            if stmt.target_paragraph:
-                pairs.append((stmt.target_paragraph, ROLE_PERFORM, True))
-            if stmt.thru_paragraph:
-                pairs.append((stmt.thru_paragraph, ROLE_PERFORM, True))
-            if stmt.until_condition is not None:
-                pairs.append((stmt.until_condition, ROLE_CONDITION, True))
-            if isinstance(stmt.times_count, str):
-                pairs.append((stmt.times_count, ROLE_READ, True))
-            varying = [c for c in (stmt.varying_clause,) if c] + list(
-                stmt.after_clauses
-            )
-            for varying_clause in varying:
-                if varying_clause.get("variable"):
-                    pairs.append((varying_clause["variable"], ROLE_WRITE, True))
-                for key in ("from_value", "by_value"):
-                    if varying_clause.get(key):
-                        pairs.append((varying_clause[key], ROLE_READ, True))
-                if varying_clause.get("until_condition") is not None:
-                    pairs.append(
-                        (varying_clause["until_condition"], ROLE_CONDITION, True)
-                    )
-        elif isinstance(stmt, GoStatement):
-            pairs += [(target, ROLE_GOTO, True) for target in stmt.target_paragraphs]
-            if stmt.depending_on_variable:
-                pairs.append((stmt.depending_on_variable, ROLE_READ, True))
-        elif isinstance(stmt, AlterStatement):
-            # Both halves of `ALTER x TO PROCEED TO y` name a procedure: `y`
-            # is the new jump target, `x` the paragraph whose GO TO is
-            # rewritten. Both are recorded in the procedure namespace.
-            for alteration in stmt.alterations:
-                for key in ("from_paragraph", "to_paragraph"):
-                    if alteration.get(key):
-                        pairs.append((alteration[key], ROLE_GOTO, True))
-        elif isinstance(stmt, SearchStatement):
-            if stmt.table_name:
-                pairs.append((stmt.table_name, ROLE_READ, True))
-            if stmt.varying_variable:
-                pairs.append((stmt.varying_variable, ROLE_WRITE, True))
-            for when_clause in stmt.when_clauses:
-                condition = when_clause.get("condition")
-                if condition:
-                    self._caveat(
-                        "SEARCH WHEN conditions carry only raw joined text, never a "
-                        "structural tree; their identifiers are extracted "
-                        "best-effort and are not exact"
-                    )
-                    pairs.append((str(condition), ROLE_CONDITION, False))
-        elif isinstance(stmt, (SortStatement, MergeStatement)):
-            file_name = getattr(stmt, "file_name", None)
-            if file_name:
-                pairs.append((file_name, ROLE_FILE_OPERATION, True))
-            for attr in ("using_files", "giving_files"):
-                for name in getattr(stmt, attr, None) or []:
-                    pairs.append((name, ROLE_FILE_OPERATION, True))
-            for sort_key in getattr(stmt, "keys", None) or []:
-                if sort_key.get("field"):
-                    pairs.append((sort_key["field"], ROLE_READ, True))
-            for attr in (
-                "input_procedure",
-                "input_procedure_thru",
-                "output_procedure",
-                "output_procedure_thru",
-            ):
-                procedure = getattr(stmt, attr, None)
-                if procedure:
-                    pairs.append((procedure, ROLE_PERFORM, True))
-        elif isinstance(stmt, CallStatement):
-            for parameter in stmt.using_parameters:
-                if parameter.name:
-                    # BY CONTENT / BY VALUE hand the callee a copy: the
-                    # caller's item is read and can never be written back.
-                    # Only BY REFERENCE (the default) may go either way.
-                    mode = (parameter.passing_mode or "REFERENCE").upper()
-                    by_copy = mode in ("CONTENT", "VALUE")
-                    role = ROLE_READ if by_copy else ROLE_CALL_ARGUMENT
-                    pairs.append((parameter.name, role, True))
-            for attr in ("returning_parameter", "giving_parameter"):
-                value = getattr(stmt, attr, None)
-                if value:
-                    pairs.append((value, ROLE_WRITE, True))
-            if stmt.is_dynamic and stmt.called_program:
-                pairs.append((stmt.called_program, ROLE_READ, True))
-        elif isinstance(stmt, EntryStatement):
-            pairs += [
-                (parameter, ROLE_CALL_ARGUMENT, True)
-                for parameter in stmt.using_parameters
-            ]
+    def _control_statement_roles(self, stmt: CobolStatement) -> _Roles:
+        """Roles for the control-flow and inter-program verbs: the first
+        ``_CONTROL_ROLE_HANDLERS`` entry whose class *stmt* is an instance
+        of."""
+        for klass, handler in self._CONTROL_ROLE_HANDLERS:
+            if isinstance(stmt, klass):
+                return handler(self, stmt)
+        return []
+
+    def _if_roles(self, stmt: IfStatement) -> _Roles:
+        if stmt.condition is not None:
+            return [(stmt.condition, ROLE_CONDITION, True)]
+        return []
+
+    def _evaluate_roles(self, stmt: EvaluateStatement) -> _Roles:
+        # An expression-shaped subject only ever reaches `add_child()`,
+        # never `.operands` (see EvaluateStatement.add_subject), so this
+        # walk is its only coverage.
+        pairs: _Roles = [(subject, ROLE_CONDITION, True) for subject in stmt.subjects]
+        clauses = list(stmt.when_clauses)
+        if stmt.default_when is not None:
+            clauses.append(stmt.default_when)
+        for clause in clauses:
+            for selector in clause.selectors:
+                pairs.extend(self._selector_roles(selector))
         return pairs
+
+    def _perform_roles(self, stmt: PerformStatement) -> _Roles:
+        pairs: _Roles = []
+        if stmt.target_paragraph:
+            pairs.append((stmt.target_paragraph, ROLE_PERFORM, True))
+        if stmt.thru_paragraph:
+            pairs.append((stmt.thru_paragraph, ROLE_PERFORM, True))
+        if stmt.until_condition is not None:
+            pairs.append((stmt.until_condition, ROLE_CONDITION, True))
+        if isinstance(stmt.times_count, str):
+            pairs.append((stmt.times_count, ROLE_READ, True))
+        varying = [c for c in (stmt.varying_clause,) if c] + list(stmt.after_clauses)
+        for varying_clause in varying:
+            pairs += _varying_clause_roles(varying_clause)
+        return pairs
+
+    def _go_roles(self, stmt: GoStatement) -> _Roles:
+        pairs: _Roles = [(target, ROLE_GOTO, True) for target in stmt.target_paragraphs]
+        if stmt.depending_on_variable:
+            pairs.append((stmt.depending_on_variable, ROLE_READ, True))
+        return pairs
+
+    def _alter_roles(self, stmt: AlterStatement) -> _Roles:
+        # Both halves of `ALTER x TO PROCEED TO y` name a procedure: `y`
+        # is the new jump target, `x` the paragraph whose GO TO is
+        # rewritten. Both are recorded in the procedure namespace.
+        return [
+            (alteration[key], ROLE_GOTO, True)
+            for alteration in stmt.alterations
+            for key in ("from_paragraph", "to_paragraph")
+            if alteration.get(key)
+        ]
+
+    def _search_roles(self, stmt: SearchStatement) -> _Roles:
+        pairs: _Roles = []
+        if stmt.table_name:
+            pairs.append((stmt.table_name, ROLE_READ, True))
+        if stmt.varying_variable:
+            pairs.append((stmt.varying_variable, ROLE_WRITE, True))
+        for when_clause in stmt.when_clauses:
+            condition = when_clause.get("condition")
+            if condition:
+                self._caveat(
+                    "SEARCH WHEN conditions carry only raw joined text, never a "
+                    "structural tree; their identifiers are extracted "
+                    "best-effort and are not exact"
+                )
+                pairs.append((str(condition), ROLE_CONDITION, False))
+        return pairs
+
+    def _sort_merge_roles(self, stmt: CobolStatement) -> _Roles:
+        pairs: _Roles = []
+        file_name = getattr(stmt, "file_name", None)
+        if file_name:
+            pairs.append((file_name, ROLE_FILE_OPERATION, True))
+        for attr in ("using_files", "giving_files"):
+            for name in getattr(stmt, attr, None) or []:
+                pairs.append((name, ROLE_FILE_OPERATION, True))
+        for sort_key in getattr(stmt, "keys", None) or []:
+            if sort_key.get("field"):
+                pairs.append((sort_key["field"], ROLE_READ, True))
+        for attr in (
+            "input_procedure",
+            "input_procedure_thru",
+            "output_procedure",
+            "output_procedure_thru",
+        ):
+            procedure = getattr(stmt, attr, None)
+            if procedure:
+                pairs.append((procedure, ROLE_PERFORM, True))
+        return pairs
+
+    def _call_roles(self, stmt: CallStatement) -> _Roles:
+        pairs: _Roles = []
+        for parameter in stmt.using_parameters:
+            if parameter.name:
+                # BY CONTENT / BY VALUE hand the callee a copy: the
+                # caller's item is read and can never be written back.
+                # Only BY REFERENCE (the default) may go either way.
+                mode = (parameter.passing_mode or "REFERENCE").upper()
+                by_copy = mode in ("CONTENT", "VALUE")
+                role = ROLE_READ if by_copy else ROLE_CALL_ARGUMENT
+                pairs.append((parameter.name, role, True))
+        for attr in ("returning_parameter", "giving_parameter"):
+            value = getattr(stmt, attr, None)
+            if value:
+                pairs.append((value, ROLE_WRITE, True))
+        if stmt.is_dynamic and stmt.called_program:
+            pairs.append((stmt.called_program, ROLE_READ, True))
+        return pairs
+
+    def _entry_roles(self, stmt: EntryStatement) -> _Roles:
+        return [
+            (parameter, ROLE_CALL_ARGUMENT, True) for parameter in stmt.using_parameters
+        ]
+
+    _CONTROL_ROLE_HANDLERS: ClassVar[
+        tuple[tuple[type | tuple[type, ...], _RoleHandler], ...]
+    ] = (
+        (IfStatement, _if_roles),
+        (EvaluateStatement, _evaluate_roles),
+        (PerformStatement, _perform_roles),
+        (GoStatement, _go_roles),
+        (AlterStatement, _alter_roles),
+        (SearchStatement, _search_roles),
+        ((SortStatement, MergeStatement), _sort_merge_roles),
+        (CallStatement, _call_roles),
+        (EntryStatement, _entry_roles),
+    )
 
     def _selector_roles(self, selector: dict[str, Any]) -> list[tuple[Any, str, bool]]:
         """Roles for one EVALUATE WHEN selector dict.

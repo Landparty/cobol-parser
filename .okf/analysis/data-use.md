@@ -369,7 +369,8 @@ read/write role; `program_signature.py` grades LINKAGE directions and
 the per-family mappers; `_data_statement_roles` dispatches through
 `_DATA_ROLE_HANDLERS`, an ordered `(statement class, _<verb>_roles method)`
 table where the first `isinstance` match wins (so a subclass row must precede
-its base's). A new verb mapping is one method plus one row.
+its base's). `_control_statement_roles` does the same through
+`_CONTROL_ROLE_HANDLERS`. A new verb mapping is one method plus one row.
 
 * **Arithmetic.** With GIVING, only the GIVING/REMAINDER items are `write`; the
   TO/FROM operand is `read` (`SUBTRACT A FROM B GIVING C` does not write B).
