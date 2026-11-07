@@ -272,6 +272,18 @@ OKF_MAP = [
     ("cobolparser/scan.py", [".okf/batch.md"]),
     ("cobolparser/_facts_cache.py", [".okf/batch.md"]),
     ("cobolparser/cli/", [".okf/cli.md"]),
+    # cli/parse.py is the entry point and top-level parser; the subcommands
+    # live in cli/commands/ (one module per area) on top of cli/_common.py.
+    ("cobolparser/cli/_common.py", [".okf/cli.md"]),
+    ("cobolparser/cli/commands/", [".okf/cli.md"]),
+    (
+        "cobolparser/cli/commands/analyze.py",
+        [".okf/cli.md", ".okf/analysis/data-use.md"],
+    ),
+    (
+        "cobolparser/cli/commands/data.py",
+        [".okf/cli.md", ".okf/generators/fixtures.md"],
+    ),
     ("cobolparser/config/", [".okf/cli.md"]),
     ("cobolparser/mcp/", [".okf/mcp.md"]),
     ("cobolparser/__main__.py", [".okf/cli.md"]),

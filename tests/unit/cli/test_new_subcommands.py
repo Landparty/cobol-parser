@@ -14,17 +14,19 @@ from unittest.mock import patch
 import pytest
 
 from cobolparser import __version__
-from cobolparser.cli.parse import (
-    _build_parser,
+from cobolparser.cli._common import _json_out
+from cobolparser.cli.commands.analyze import (
+    ANALYZERS,
     _cmd_data_items,
     _cmd_ims_dli,
-    _cmd_io_sequence,
     _cmd_language_env,
-    _cmd_linkage_check,
-    _cmd_move_type_check,
-    _json_out,
-    main,
 )
+from cobolparser.cli.parse import _build_parser, main
+
+# Registry-built handlers (see commands/analyze.py ANALYZERS).
+_cmd_io_sequence = ANALYZERS["io-sequence"].run
+_cmd_linkage_check = ANALYZERS["linkage-check"].run
+_cmd_move_type_check = ANALYZERS["move-type-check"].run
 
 # Fails lexing under fail-fast (ast is None): an unterminated literal.
 _UNLEXABLE = (

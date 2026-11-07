@@ -12,7 +12,7 @@ from pathlib import Path
 
 import pytest
 
-from cobolparser.cli.parse import _cmd_expand, _cmd_preprocess, _cmd_tokenize
+from cobolparser.cli.commands.source import _cmd_expand, _cmd_preprocess, _cmd_tokenize
 
 SAMPLES = Path(__file__).parents[2] / "samples"
 _SIMPLE = str(SAMPLES / "simple_calculation.cbl")

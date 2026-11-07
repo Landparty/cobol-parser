@@ -60,17 +60,27 @@ def project(tmp_path, monkeypatch):
     return tmp_path
 
 
+#: Which cli/commands/ module defines each `_cmd_<command>` stubbed below.
+_COMMAND_MODULES = {
+    "codebase_graph": "codebase",
+    "gen_data": "data",
+    "lint": "lint",
+    "parse": "source",
+}
+
+
 def run_capturing_args(argv: list[str], command: str):
     """Run main() with `_cmd_<command>` stubbed, and return the Namespace it
     would have been handed. Patching the module attribute works because
     `_build_parser()` resolves each `set_defaults(func=...)` when main()
     calls it, not at import time."""
     captured = {}
+    module = _COMMAND_MODULES[command]
 
     def fake(args):
         captured["args"] = args
 
-    with patch(f"cobolparser.cli.parse._cmd_{command}", fake):
+    with patch(f"cobolparser.cli.commands.{module}._cmd_{command}", fake):
         with patch("sys.argv", ["cobol-parser", *argv]):
             main()
     return captured["args"]
@@ -246,7 +256,7 @@ def test_abbreviated_config_flags_are_rejected(project, capsys, spelling, side):
         if side == "before"
         else ["lint", "PROG.cbl", *spelling]
     )
-    with patch("cobolparser.cli.parse._cmd_lint") as cmd:
+    with patch("cobolparser.cli.commands.lint._cmd_lint") as cmd:
         with patch("sys.argv", ["cobol-parser", *argv]):
             with pytest.raises(SystemExit) as exc:
                 main()

@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pytest
 
-from cobolparser.cli.parse import _cmd_jcl
+from cobolparser.cli.commands.jcl import _cmd_jcl
 from cobolparser.jcl import parse_jcl
 from cobolparser.preprocess.models import CopybookSearchPath
 from cobolparser.preprocess.path_resolver import PathResolver, find_copybook_file

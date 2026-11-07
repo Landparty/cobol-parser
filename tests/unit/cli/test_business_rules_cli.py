@@ -12,7 +12,8 @@ import argparse
 import json
 from pathlib import Path
 
-from cobolparser.cli.parse import _build_parser, _cmd_business_rules, main
+from cobolparser.cli.commands.analyze import _cmd_business_rules
+from cobolparser.cli.parse import _build_parser, main
 
 PROGRAM = """\
        IDENTIFICATION DIVISION.

@@ -11,15 +11,17 @@ from unittest.mock import patch
 
 import pytest
 
-from cobolparser.cli.parse import (
+from cobolparser.cli._common import _read_source
+from cobolparser.cli.commands.analyze import (
+    ANALYZERS,
     _cmd_analyze,
-    _cmd_dead_code,
     _cmd_program_flow,
-    _read_source,
-    _resolve_path,
-    main,
 )
+from cobolparser.cli.commands.source import _resolve_path
+from cobolparser.cli.parse import main
 from cobolparser.parser import parse_cobol
+
+_cmd_dead_code = ANALYZERS["dead-code"].run
 
 # Fails lexing under fail-fast (ast is None): an unterminated literal.
 _UNLEXABLE = (

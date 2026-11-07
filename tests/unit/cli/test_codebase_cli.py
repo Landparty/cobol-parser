@@ -16,13 +16,13 @@ from pathlib import Path
 
 import pytest
 
-from cobolparser.cli.parse import (
-    _build_parser,
+from cobolparser.cli.commands.analyze import _cmd_xref
+from cobolparser.cli.commands.codebase import (
     _cmd_codebase_graph,
     _cmd_copybook_impact,
     _cmd_diff,
-    _cmd_xref,
 )
+from cobolparser.cli.parse import _build_parser
 
 MAINPGM = """       IDENTIFICATION DIVISION.
        PROGRAM-ID. MAINPGM.

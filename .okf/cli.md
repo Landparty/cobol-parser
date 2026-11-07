@@ -10,8 +10,9 @@ timestamp: 2026-10-15T00:00:00Z
 
 The `cobol-parser` command: <!-- okf:gen cli-subcommand-count -->41<!-- /okf:gen --> subcommands that parse, tokenize, preprocess,
 expand, analyze, generate/decode/compare record data for, and graph COBOL
-(plus one for JCL and one for the LE catalogue), all built with `argparse` in
-`cobolparser/cli/parse.py`, and the `cobol.yml` project config every
+(plus one for JCL and one for the LE catalogue), all built with `argparse`
+(top-level parser in `cobolparser/cli/parse.py`, subcommands in
+`cobolparser/cli/commands/`), and the `cobol.yml` project config every
 subcommand reads. Start with the [subcommand reference](#subcommand-reference)
 table (every flag and default), then [Exit codes](#exit-codes) and
 [Shared flags](#shared-flags); per-subcommand behaviour follows by family.
@@ -34,10 +35,31 @@ console script (`[project.scripts]` → `cobolparser.cli:main`, which
 cobolparser.cli.coverage` is a **separate** program (see
 [IO coverage tools](#io-coverage-tools-cobolparserclicoveragepy)).
 
-**Source:** `cli/parse.py` (per subcommand a `_build_<name>_parser()` and a
-`_cmd_<name>()`, assembled in `_build_parser()`), `cli/_project_config.py`
-(the `cobol.yml` → argv merge), `cli/coverage.py`, `cobolparser/config/`
-(`project.py` schema + discovery, `_yaml.py` reader).
+**Source:** `cli/parse.py` is the entry point only: `_SUBCOMMANDS`,
+`_build_parser()` (adds every subcommand, in the order the reference table
+below lists them) and `main()`. Each subcommand is a `_build_<name>_parser()`
+plus a `_cmd_<name>()` in one module of `cli/commands/`:
+
+| Module | Subcommands |
+|---|---|
+| `commands/source.py` | `parse` (and its AST `path` resolution), `batch`, `tokenize`, `preprocess`, `expand` |
+| `commands/data.py` | `gen-data`, `decode`, `compare`, `gen-fixtures` |
+| `commands/analyze.py` | the single-file analyzers: the `ANALYZERS` table (flag set **A**) plus `unused-variables`, `program-flow`, `redundancy`, `business-rules`, `le-info` |
+| `commands/lint.py` | `lint` (single/many files, baselines, GitHub/SARIF/summary output) |
+| `commands/lineage.py` | `lineage`, `field-impact`, `widen-check` |
+| `commands/codebase.py` | `scan`, `diff`, `codebase-graph`, `copybook-impact`, `call-check` |
+| `commands/jcl.py` | `jcl` |
+| `commands/project.py` | `config`, `mcp` |
+
+`cli/_common.py` holds what they share: the common flag helpers
+(`_add_copybook_args`, `_add_source_format_args`, ...), `_read_source`, the
+parse-then-guard path (`_do_parse` → `_parse_result_or_fail` /
+`_parse_or_fail`, `--program` selection), the output functions (`_json_out`,
+`_emit_report`, `_identification`, `_text_out`, `_verbatim_out`) and `_fail`.
+A command module imports from `_common`, never from another command module.
+Also `cli/_project_config.py` (the `cobol.yml` → argv merge),
+`cli/coverage.py`, `cobolparser/config/` (`project.py` schema + discovery,
+`_yaml.py` reader).
 
 `cobol-parser --help` prints the subcommands grouped by task (`cli/_help.py`
 `COMMAND_GROUPS`, rendered by `TopLevelParser.format_help()` instead of
@@ -45,11 +67,19 @@ argparse's flat `{parse,batch,...}` block), then a quick start, the exit
 codes and where defaults come from. Every registered subcommand must sit in
 exactly one group (`tests/unit/cli/test_cli_help_overview.py`), so a new one
 needs a line there too. `<name> --help` shows flags,
-defaults and runnable examples. **Adding a single-file analyzer:** call `_build_analyzer_parser(subparsers,
-name, help, func, profiling=..., examples=...)` in `_build_parser()` (the
-standard flag set **A**; `examples` is required and becomes the `--help`
-epilog — hand-built parsers set `epilog=` themselves) and emit through
-`_emit_report(..., ast=ast)` so the output is identified and origin-stamped.
+defaults and runnable examples. **Adding a single-file analyzer:** add an
+`AnalyzerCommand(help=..., examples=..., profiling=...)` entry to
+`ANALYZERS` in `cli/commands/analyze.py` and an `_add_analyzer(subparsers,
+"name")` line at its place in `_build_parser()`. Both build through
+`_build_analyzer_parser` (the standard flag set **A**; `examples` is required
+and becomes the `--help` epilog — hand-built parsers set `epilog=`
+themselves). An analyzer that only parses, runs one method and prints
+`report.to_dict()` needs no handler: `analyzer=("module", "Class",
+"method")` (module under `cobolparser.analysis`) does it (`dead-code`,
+`complexity`, `io-sequence`, `move-type-check`, `linkage-check`,
+`dclgen-check`, `sql-cics-check`). Anything more takes `handler=_cmd_<name>`,
+which emits through `_emit_report(..., ast=ast)` so the output is identified
+and origin-stamped.
 
 **`main()`:**
 
@@ -170,7 +200,7 @@ nothing.
 
 ## Output identification
 
-Every output identifies its source (`_identification()` in `cli/parse.py`;
+Every output identifies its source (`_identification()` in `cli/_common.py`;
 pinned by `tests/unit/cli/test_output_identification.py`):
 
 * **JSON documents** start with `"source_file"` (the path as given). Parsing
