@@ -352,6 +352,11 @@ Remember both implementations must change together, and the checked-in
 (multi-line + forced pure-Python-loop variants).
 
 **PICTURE.**
+- Structure: `parse_picture_clause` keeps its scan state in a `_PictureScan`
+  and loops `_picture_ends_before` (outside parentheses: the gap rule, the
+  terminating period, terminator keywords, COMP types) then
+  `_collect_picture_token` (pattern tokens, edit symbols, an interior decimal
+  point, parentheses, comma, semicolon; a NEWLINE goes to `_picture_line_break`).
 - The pattern loop collects symbol tokens including `DIVIDE_OP` / `MULTIPLY_OP`
   (what `/` and `*` lex to) -- not the `DIVIDE` / `MULTIPLY` *statement* token
   types, which would stop `PIC 99/99/99` at `"99"` and `PIC $***,**9.99` at `"$"`

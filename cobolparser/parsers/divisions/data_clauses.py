@@ -410,6 +410,29 @@ def _clause_table(
     return table
 
 
+class _PictureScan:
+    """The state ``parse_picture_clause`` carries from token to token."""
+
+    __slots__ = ("parts", "paren_depth", "currency_symbols", "prev_token")
+
+    def __init__(self) -> None:
+        self.parts: list[str] = []
+        self.paren_depth = 0  # Track parenthesis nesting
+        self.currency_symbols: set[str] = set()
+        # The last token collected into the pattern on the current line.
+        # A PICTURE character-string has no embedded spaces, so a word that
+        # sits on the same line as the pattern but *after a gap* is the
+        # next clause (or a stray word), never more picture: ``PIC X(3)
+        # VALUES ARE 'ABC'`` used to glue ``VALUES`` on (``X(3)VALUES``,
+        # sized 0) and ``PIC X(3) FOO`` read as ``X(3)FOO``. The keyword
+        # list (``_PICTURE_TERMINATOR_KEYWORDS``) still ends the scan early
+        # for known clause words; the gap rule is what catches the ones it
+        # does not list. Reset at a line break so a pattern continued on
+        # the next line (which ``_picture_line_break`` tolerates) is
+        # unaffected.
+        self.prev_token: Token | None = None
+
+
 class DataItemClauseParser:
     """Parses a single data-description entry and its clauses.
 
@@ -1867,113 +1890,120 @@ class DataItemClauseParser:
             token_stream.consume()
             self._skip_newlines(token_stream)
 
-        pattern_parts = []
-        paren_depth = 0  # Track parenthesis nesting
-        currency_symbols: set[str] = set()
-        # The last token collected into the pattern on the current line.
-        # A PICTURE character-string has no embedded spaces, so a word that
-        # sits on the same line as the pattern but *after a gap* is the
-        # next clause (or a stray word), never more picture: ``PIC X(3)
-        # VALUES ARE 'ABC'`` used to glue ``VALUES`` on (``X(3)VALUES``,
-        # sized 0) and ``PIC X(3) FOO`` read as ``X(3)FOO``. The keyword
-        # list above still ends the scan early for known clause words; the
-        # gap rule is what catches the ones it does not list. Reset at a
-        # line break so a pattern continued on the next line (which the
-        # NEWLINE branch below tolerates) is unaffected.
-        prev_token: Token | None = None
-
+        scan = _PictureScan()
         while not token_stream.is_empty():
             token = token_stream.peek()
             if not token:
                 break
-
             # Stop at specific keywords when outside parentheses
-            if paren_depth == 0:
-                if (
-                    token.type in _PICTURE_PATTERN_TOKEN_TYPES
-                    and prev_token is not None
-                    and _follows_gap(prev_token, token)
-                ):
-                    break
-                if token.type == TokenType.PERIOD:
-                    # An interior '.' is an editing decimal point and stays in
-                    # the pattern; the terminating period ends the clause.
-                    if self._period_is_picture_decimal(token, token_stream.peek(1)):
-                        pattern_parts.append(".")
-                        token_stream.consume()
-                        prev_token = token
-                        continue
-                    break
-                # Stop at keywords that follow picture clause
-                if token.value and token.value.upper() in _PICTURE_TERMINATOR_KEYWORDS:
-                    break
-                # Also stop at COMP token types
-                if token.type in _COMP_TOKEN_TYPES:
-                    break
-
-            # Collect picture pattern tokens
-            if token.type in _PICTURE_PATTERN_TOKEN_TYPES:
-                # All these token types can be part of a picture pattern.
-                # A numeric literal's value is canonical (``9,9`` under
-                # DECIMAL-POINT IS COMMA reads ``9.9``); the picture wants
-                # the characters as written.
-                token_value = (
-                    token.raw_value
-                    if token.type == TokenType.NUMERIC_LITERAL and token.raw_value
-                    else token.value
-                )
-                if paren_depth == 0 and token_value.endswith("."):
-                    pattern_parts.append(token_value[:-1])
-                    token_stream.consume()
-                    break
-                pattern_parts.append(token_value)
-                token_stream.consume()
-            # Editing symbols emitted as their own token types ($ + - * /)
-            elif token.type in _PICTURE_SYMBOL_TOKEN_TYPES:
-                pattern_parts.append(token.value)
-                if token.type == TokenType.CURRENCY and token.value != "$":
-                    # A SPECIAL-NAMES CURRENCY SIGN symbol (the lexer only
-                    # emits a non-``$`` CURRENCY token for a declared one).
-                    currency_symbols.add(token.value)
-                token_stream.consume()
-            elif token.value == "(":
-                pattern_parts.append(token.value)
-                paren_depth += 1
-                token_stream.consume()
-            elif token.value == ")":
-                pattern_parts.append(token.value)
-                paren_depth -= 1
-                token_stream.consume()
-            elif token.value == ",":
-                # An editing comma (``ZZ,ZZ9``) is always followed by more
-                # pattern; a comma followed by a clause word, the period or
-                # a line break is the NIST-style clause separator (``PIC X,
-                # VALUE 'A'``) and must not be glued onto the pattern.
-                if paren_depth == 0 and self._comma_ends_picture(token_stream):
-                    token_stream.consume()
-                    break
-                pattern_parts.append(token.value)
-                token_stream.consume()
-            elif token.type == TokenType.SEMICOLON and paren_depth == 0:
-                # ``PIC S999999; OCCURS 10 TIMES`` (NIST NC245A)
-                token_stream.consume()
+            if scan.paren_depth == 0 and self._picture_ends_before(
+                token_stream, token, scan.prev_token
+            ):
                 break
-            elif token.type == TokenType.NEWLINE:
-                if paren_depth == 0:
-                    next_item_token = self._picture_clause_next_item_token(token_stream)
-                    if next_item_token is not None:
-                        self._warn_picture_clause_missing_terminator(next_item_token)
-                        break
-                token_stream.consume()
-                prev_token = None
-                continue
-            else:
+            if not self._collect_picture_token(token_stream, token, scan):
                 break
-            prev_token = token
 
-        self._picture_currency_symbols = frozenset(currency_symbols)
-        result = "".join(pattern_parts) if pattern_parts else None
+        self._picture_currency_symbols = frozenset(scan.currency_symbols)
+        result = "".join(scan.parts) if scan.parts else None
         return result
+
+    def _picture_ends_before(
+        self, token_stream: ITokenStream, token: Token, prev_token: Token | None
+    ) -> bool:
+        """True when *token* (outside parentheses, not consumed) ends the
+        picture pattern rather than continuing it."""
+        if (
+            token.type in _PICTURE_PATTERN_TOKEN_TYPES
+            and prev_token is not None
+            and _follows_gap(prev_token, token)
+        ):
+            return True
+        if token.type == TokenType.PERIOD:
+            # An interior '.' is an editing decimal point and stays in the
+            # pattern (``_collect_picture_token`` appends it); the
+            # terminating period ends the clause.
+            return not self._period_is_picture_decimal(token, token_stream.peek(1))
+        # Stop at keywords that follow picture clause
+        if token.value and token.value.upper() in _PICTURE_TERMINATOR_KEYWORDS:
+            return True
+        # Also stop at COMP token types
+        return token.type in _COMP_TOKEN_TYPES
+
+    def _collect_picture_token(
+        self, token_stream: ITokenStream, token: Token, scan: "_PictureScan"
+    ) -> bool:
+        """Consume *token* into the pattern held by *scan*. False when the
+        pattern ends here (the token may or may not have been consumed)."""
+        tok_type = token.type
+        # Collect picture pattern tokens
+        if tok_type in _PICTURE_PATTERN_TOKEN_TYPES:
+            # All these token types can be part of a picture pattern.
+            # A numeric literal's value is canonical (``9,9`` under
+            # DECIMAL-POINT IS COMMA reads ``9.9``); the picture wants
+            # the characters as written.
+            token_value = (
+                token.raw_value
+                if tok_type == TokenType.NUMERIC_LITERAL and token.raw_value
+                else token.value
+            )
+            if scan.paren_depth == 0 and token_value.endswith("."):
+                scan.parts.append(token_value[:-1])
+                token_stream.consume()
+                return False
+            scan.parts.append(token_value)
+            token_stream.consume()
+        # Editing symbols emitted as their own token types ($ + - * /)
+        elif tok_type in _PICTURE_SYMBOL_TOKEN_TYPES:
+            scan.parts.append(token.value)
+            if tok_type == TokenType.CURRENCY and token.value != "$":
+                # A SPECIAL-NAMES CURRENCY SIGN symbol (the lexer only
+                # emits a non-``$`` CURRENCY token for a declared one).
+                scan.currency_symbols.add(token.value)
+            token_stream.consume()
+        elif tok_type == TokenType.PERIOD and scan.paren_depth == 0:
+            # Only reached for an interior editing decimal point:
+            # ``_picture_ends_before`` stops at the terminating period.
+            scan.parts.append(".")
+            token_stream.consume()
+        elif token.value in ("(", ")"):
+            scan.parts.append(token.value)
+            scan.paren_depth += 1 if token.value == "(" else -1
+            token_stream.consume()
+        elif token.value == ",":
+            # An editing comma (``ZZ,ZZ9``) is always followed by more
+            # pattern; a comma followed by a clause word, the period or
+            # a line break is the NIST-style clause separator (``PIC X,
+            # VALUE 'A'``) and must not be glued onto the pattern.
+            if scan.paren_depth == 0 and self._comma_ends_picture(token_stream):
+                token_stream.consume()
+                return False
+            scan.parts.append(token.value)
+            token_stream.consume()
+        elif tok_type == TokenType.SEMICOLON and scan.paren_depth == 0:
+            # ``PIC S999999; OCCURS 10 TIMES`` (NIST NC245A)
+            token_stream.consume()
+            return False
+        elif tok_type == TokenType.NEWLINE:
+            return self._picture_line_break(token_stream, scan)
+        else:
+            return False
+        scan.prev_token = token
+        return True
+
+    def _picture_line_break(
+        self, token_stream: ITokenStream, scan: "_PictureScan"
+    ) -> bool:
+        """A NEWLINE inside the pattern: the pattern may continue on the next
+        line, unless that line opens the next data item. False when it ends
+        the pattern (NEWLINE left unconsumed)."""
+        if scan.paren_depth == 0:
+            next_item_token = self._picture_clause_next_item_token(token_stream)
+            if next_item_token is not None:
+                self._warn_picture_clause_missing_terminator(next_item_token)
+                return False
+        token_stream.consume()
+        scan.prev_token = None
+        return True
 
     @staticmethod
     def _comma_ends_picture(token_stream: ITokenStream) -> bool:
