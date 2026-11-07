@@ -285,6 +285,8 @@ OKF_MAP = [
         [".okf/cli.md", ".okf/generators/fixtures.md"],
     ),
     ("cobolparser/config/", [".okf/cli.md"]),
+    # The tool modules (CobolTools mixins, the JCL tools), one per area.
+    ("cobolparser/mcp/tools/", [".okf/mcp.md"]),
     ("cobolparser/mcp/", [".okf/mcp.md"]),
     ("cobolparser/__main__.py", [".okf/cli.md"]),
     (

@@ -77,7 +77,7 @@ def slice_field(
         raise ToolError("direction must be backward or forward")
     response = Response()
     parsed = workspace.program(file)
-    from .tools import _carry_parse_caveats
+    from .tools.common import _carry_parse_caveats
 
     _carry_parse_caveats(parsed, response)
     unit = parsed.unit(program, response)
@@ -318,7 +318,7 @@ def _by_role(rows: list[dict[str, Any]]) -> dict[str, int]:
 
 def _statements_by_line(unit: CobolProgram) -> dict[int, Any]:
     """The innermost statement starting on each parsed line of *unit*."""
-    from .tools import _own_statements
+    from .tools.common import _own_statements
 
     by_line: dict[int, Any] = {}
     for statement in _own_statements(unit):

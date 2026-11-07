@@ -291,7 +291,7 @@ def _file_records(unit: Any) -> dict[str, str]:
 def _storage_aliases(tools: CobolTools, claim: dict[str, Any]) -> _Storage:
     """Field O's storage (see :class:`_Storage`)."""
     from .envelope import Response
-    from .tools import _layout_for, _layout_index
+    from .tools.structure import _layout_for, _layout_index
 
     wanted = _norm(claim.get("object")).replace(" IN ", " OF ")
     try:
@@ -395,7 +395,7 @@ def _record_io_writes(
     Returns (sure, possible) rows like :func:`_writes`' with ``via``."""
     from .envelope import Response
     from .navigation import _procedure_of, statement_verb
-    from .tools import _own_statements
+    from .tools.common import _own_statements
 
     if storage.unit is None or not storage.placed:
         return [], []

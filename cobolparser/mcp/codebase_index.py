@@ -378,7 +378,7 @@ def _build_lineage(workspace: Workspace) -> tuple[LineageIndex, dict[str, Stamp]
         )
     # The libraries the JCL tools expand from too: proc_path folders first,
     # then PROCLIB-named folders, JCLLIB-named folders and .prc / .proc ones.
-    from .jcl_tools import jcllib_directories, procedure_libraries
+    from .tools.jcl_index import jcllib_directories, procedure_libraries
 
     libraries = procedure_libraries(workspace)
     # A .jcl member of a procedure library is a procedure, not a job.
@@ -516,7 +516,7 @@ def _debt(parsed: ParsedProgram, unit: CobolProgram, redundancy: Any) -> Any:
     """The health score, sharing the flow graph and redundancy report the
     other tools already computed (the same key as ``program_brief``'s)."""
     from ..analysis.technical_debt import TechnicalDebtAnalyzer
-    from .tools import _flow
+    from .tools.common import _flow
 
     return TechnicalDebtAnalyzer().analyze(
         unit, flow_report=_flow(parsed, unit), redundancy_report=redundancy
@@ -625,7 +625,7 @@ def unit_services(unit: Any) -> list[str]:
     """The services a COBOL unit requests itself: ``CICS``, ``DB2 SQL``,
     ``IMS`` (EXEC DLI or a CALL to a DL/I interface), the vocabulary of a
     PL/I or assembler source's ``services``."""
-    from .tools import _own_statements
+    from .tools.common import _own_statements
 
     found: set[str] = set()
     for statement in _own_statements(unit):
@@ -646,7 +646,7 @@ def unit_services(unit: Any) -> list[str]:
 def unit_commarea(unit: Any) -> bool:
     """Whether the unit's LINKAGE SECTION declares DFHCOMMAREA: a program
     CICS LINKs or XCTLs to, whether or not it issues EXEC CICS itself."""
-    from .tools import _walk_data_items
+    from .tools.structure import _walk_data_items
 
     return any(
         found.section == "LINKAGE" and found.item.name.upper() == "DFHCOMMAREA"
@@ -683,7 +683,7 @@ class RunsAs:
 
     def jcl(self) -> set[str]:
         if self._jcl is None:
-            from .jcl_tools import programs_run_by_jcl
+            from .tools.jcl_index import programs_run_by_jcl
 
             self._jcl = programs_run_by_jcl(self.workspace)
         return self._jcl

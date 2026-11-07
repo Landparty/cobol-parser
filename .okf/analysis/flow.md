@@ -354,7 +354,7 @@ CFG-shape question with a much wider blast radius (flowcharts,
 `ScenarioPlanner` arm reachability, `TechnicalDebtAnalyzer`'s
 unreachable-node smell), so the two modules are allowed to disagree. A
 consumer answering "can this paragraph run?" must ask `DeadCodeAnalyzer`:
-the MCP tools do (`_reachability()` in `mcp/tools.py`, issue #486).
+the MCP tools do (`_reachability()` in `mcp/tools/common.py`, issue #486).
 
 ## ProgramFlowAnalyzer
 
