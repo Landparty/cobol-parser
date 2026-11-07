@@ -1435,7 +1435,41 @@ class DataItemClauseParser:
         :class:`OccursClause` to *data_item* when a table size was captured.
         """
         occurs = OccursClause(location)
+        min_count, max_count, unbounded = self._read_occurs_minimum(token_stream)
+        max_count, unbounded = self._read_occurs_maximum(
+            token_stream, min_count, max_count, unbounded
+        )
 
+        # Skip optional TIMES keyword (may be preceded by newlines)
+        self._skip_clause_separators(token_stream)
+        nxt = token_stream.peek()
+        if nxt and nxt.value and nxt.value.upper() == "TIMES":
+            token_stream.consume()
+
+        depending_var = self._read_occurs_depending_on(token_stream, occurs)
+        self._parse_occurs_phrases(token_stream, occurs)
+
+        if unbounded:
+            occurs.is_unbounded = True
+            occurs.set_variable_occurs(min_count, None, depending_var)
+            data_item.set_occurs_clause(occurs)
+            return
+
+        if depending_var:
+            occurs.set_variable_occurs(min_count, max_count, depending_var)
+        else:
+            occurs.set_fixed_occurs(max_count or 0)
+
+        if occurs.max_times is not None:
+            data_item.set_occurs_clause(occurs)
+
+    def _read_occurs_minimum(
+        self, token_stream: ITokenStream
+    ) -> tuple[int, int | None, bool]:
+        """Read the first (minimum or fixed) count, or ``UNBOUNDED``.
+
+        Returns ``(min_count, max_count, unbounded)``.
+        """
         # Read first (minimum or fixed) count. The count may sit on the
         # line after OCCURS (a long data name pushing OCCURS to the end of
         # its 72-column line is routine in real decks) -- without crossing
@@ -1458,17 +1492,11 @@ class DataItemClauseParser:
         # Peeked without consuming layout: the count read below keeps its
         # own line-crossing guard, which a consumed newline would defeat.
         first = self._peek_next_meaningful(token_stream, offset=0)
-        unbounded = bool(
-            first is not None and (first.value or "").upper() == "UNBOUNDED"
-        )
-        if unbounded:
+        if first is not None and (first.value or "").upper() == "UNBOUNDED":
             self._skip_clause_separators(token_stream)
             token_stream.consume()
-            min_count = 1
-            max_count = None
-        count_token, count_offset = (
-            (None, 0) if unbounded else self._peek_count_token(token_stream)
-        )
+            return 1, None, True
+        count_token, count_offset = self._peek_count_token(token_stream)
         if count_token is not None:
             try:
                 min_count = int(count_token.value)
@@ -1477,61 +1505,74 @@ class DataItemClauseParser:
                 pass
             for _ in range(count_offset + 1):
                 token_stream.consume()
+        return min_count, max_count, False
 
+    def _read_occurs_maximum(
+        self,
+        token_stream: ITokenStream,
+        min_count: int,
+        max_count: int | None,
+        unbounded: bool,
+    ) -> tuple[int | None, bool]:
+        """Read an optional ``TO max`` / ``TO UNBOUNDED``; returns the
+        updated ``(max_count, unbounded)``."""
         # Variable OCCURS: OCCURS min TO max [TIMES] DEPENDING ON var
         # (TO and the max count may each start a continuation line too;
         # the max-count read carries the same crossing guard as the first)
         self._skip_clause_separators(token_stream)
         nxt = token_stream.peek()
-        if nxt and nxt.value and nxt.value.upper() == "TO":
-            token_stream.consume()  # consume TO
-            # ``OCCURS min TO UNBOUNDED`` (Enterprise COBOL 6.x): no declared
-            # maximum, the same as the bare ``OCCURS UNBOUNDED`` form above.
-            after_to = self._peek_next_meaningful(token_stream, offset=0)
-            if after_to is not None and (after_to.value or "").upper() == "UNBOUNDED":
-                self._skip_clause_separators(token_stream)
-                token_stream.consume()
-                unbounded = True
-                max_count = None
-                max_token, max_offset = None, 0
-            else:
-                max_token, max_offset = self._peek_count_token(token_stream)
-            if max_token is not None:
-                try:
-                    max_count = int(max_token.value)
-                except (TypeError, ValueError):
-                    max_count = min_count
-                for _ in range(max_offset + 1):
-                    token_stream.consume()
-
-        # Skip optional TIMES keyword (may be preceded by newlines)
-        self._skip_clause_separators(token_stream)
-        nxt = token_stream.peek()
-        if nxt and nxt.value and nxt.value.upper() == "TIMES":
+        if not (nxt and nxt.value and nxt.value.upper() == "TO"):
+            return max_count, unbounded
+        token_stream.consume()  # consume TO
+        # ``OCCURS min TO UNBOUNDED`` (Enterprise COBOL 6.x): no declared
+        # maximum, the same as the bare ``OCCURS UNBOUNDED`` form above.
+        after_to = self._peek_next_meaningful(token_stream, offset=0)
+        if after_to is not None and (after_to.value or "").upper() == "UNBOUNDED":
+            self._skip_clause_separators(token_stream)
             token_stream.consume()
+            return None, True
+        max_token, max_offset = self._peek_count_token(token_stream)
+        if max_token is not None:
+            try:
+                max_count = int(max_token.value)
+            except (TypeError, ValueError):
+                max_count = min_count
+            for _ in range(max_offset + 1):
+                token_stream.consume()
+        return max_count, unbounded
 
+    def _read_occurs_depending_on(
+        self, token_stream: ITokenStream, occurs: OccursClause
+    ) -> str | None:
+        """Read an optional ``DEPENDING [ON] var [OF qualifier ...]``;
+        returns the variable (qualifiers go on *occurs*)."""
         # DEPENDING ON clause (ON and the variable may each start a
         # continuation line; the variable read requires an IDENTIFIER, so
         # crossing the break can never swallow a level number)
-        depending_var = None
         self._skip_clause_separators(token_stream)
         nxt = token_stream.peek()
-        if nxt and nxt.value and nxt.value.upper() == "DEPENDING":
-            token_stream.consume()  # consume DEPENDING
-            self._skip_clause_separators(token_stream)
-            on_token = token_stream.peek()
-            if on_token and on_token.value and on_token.value.upper() == "ON":
-                token_stream.consume()  # consume ON
-            self._skip_clause_separators(token_stream)
-            dep_token = token_stream.peek()
-            if dep_token and dep_token.type == TokenType.IDENTIFIER:
-                depending_var = dep_token.value
-                token_stream.consume()
-                # ``DEPENDING ON CNT OF CTL``: the qualifiers used to stop
-                # the walk, so every KEY / INDEXED BY after them was
-                # dropped as an unparsed token.
-                occurs.depending_on_qualifiers = self._consume_qualifiers(token_stream)
+        if not (nxt and nxt.value and nxt.value.upper() == "DEPENDING"):
+            return None
+        token_stream.consume()  # consume DEPENDING
+        self._skip_clause_separators(token_stream)
+        on_token = token_stream.peek()
+        if on_token and on_token.value and on_token.value.upper() == "ON":
+            token_stream.consume()  # consume ON
+        self._skip_clause_separators(token_stream)
+        dep_token = token_stream.peek()
+        if not (dep_token and dep_token.type == TokenType.IDENTIFIER):
+            return None
+        token_stream.consume()
+        # ``DEPENDING ON CNT OF CTL``: the qualifiers used to stop
+        # the walk, so every KEY / INDEXED BY after them was
+        # dropped as an unparsed token.
+        occurs.depending_on_qualifiers = self._consume_qualifiers(token_stream)
+        return dep_token.value
 
+    def _parse_occurs_phrases(
+        self, token_stream: ITokenStream, occurs: OccursClause
+    ) -> None:
+        """Parse the KEY and INDEXED BY phrases that follow the counts."""
         # ASCENDING / DESCENDING KEY IS key-1 [key-2 ...] phrases (may
         # repeat) and the INDEXED BY phrase, in either order: IBM accepts
         # ``INDEXED BY IX ASCENDING KEY K`` as well as the standard order
@@ -1547,20 +1588,6 @@ class DataItemClauseParser:
                 self._parse_occurs_indexed_by(token_stream, occurs)
             else:
                 break
-
-        if unbounded:
-            occurs.is_unbounded = True
-            occurs.set_variable_occurs(min_count, None, depending_var)
-            data_item.set_occurs_clause(occurs)
-            return
-
-        if depending_var:
-            occurs.set_variable_occurs(min_count, max_count, depending_var)
-        else:
-            occurs.set_fixed_occurs(max_count or 0)
-
-        if occurs.max_times is not None:
-            data_item.set_occurs_clause(occurs)
 
     def _parse_occurs_key_phrase(
         self, token_stream: Any, occurs: Any, direction: str

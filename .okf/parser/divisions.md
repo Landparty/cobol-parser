@@ -424,6 +424,10 @@ suite: `tests/regression/test_value_all_clause.py`.
   `_parse_object_reference`).
 
 **OCCURS (`_parse_occurs_clause`, mirrored in `_data_fast.pyx`).**
+- Structure: `_parse_occurs_clause` reads the counts (`_read_occurs_minimum`,
+  `_read_occurs_maximum` for `TO max` / `TO UNBOUNDED`), the optional `TIMES`,
+  `_read_occurs_depending_on`, then the KEY / INDEXED BY loop
+  (`_parse_occurs_phrases`), and attaches the clause.
 - Parses `{ASCENDING|DESCENDING} KEY [IS] k1 [k2 ...]` (repeatable) and
   `INDEXED BY` in one loop, in either order and interleaved (IBM accepts
   `INDEXED BY IX ASCENDING KEY K`); both name lists stop at `ASCENDING` /
