@@ -64,6 +64,7 @@ Report origins after copybook expansion: [analysis/lint.md](analysis/lint.md).
 | `program_flow/` | `ProgramFlowAnalyzer`, `FlowEdgeType`, `LEADING_SENTENCES_NODE` | [flow](analysis/flow.md) |
 | `dead_code.py` | `DeadCodeAnalyzer`, `DeadCodeReport`, `DeadCodeItem` | [flow](analysis/flow.md) |
 | `input_dependence.py` | `InputDependenceAnalyzer`, `InputDependenceReport`, `Decision`, `UnreachableResult` | [flow](analysis/flow.md#inputdependenceanalyzer) |
+| `_values.py` | `ValuePass` (the value pass behind `InputDependenceAnalyzer`) | [flow](analysis/flow.md#inputdependenceanalyzer) |
 | `recursion_risk.py` | `RecursionRiskAnalyzer` | [flow](analysis/flow.md) |
 | `complexity.py` | `ComplexityAnalyzer`, `ComplexityThresholds` | [flow](analysis/flow.md) |
 | `redundancy.py` | `RedundancyAnalyzer` (clone groups, paragraph fingerprints) | [flow](analysis/flow.md) |
