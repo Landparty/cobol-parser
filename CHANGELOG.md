@@ -548,6 +548,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Documentation
 
+* Branch-gap tests through the public parse API for RD clauses, SET, IF,
+  XML/JSON GENERATE/PARSE, PROCEDURE DIVISION boundaries and level-88/66
+  entries (total coverage 93.23% -> 93.42%). Eight parser bugs they found are
+  pinned as strict xfails and listed in `reports/open-findings.md`.
+
 * `MemoryConfiguration` says what it does: only `max_error_count` is
   enforced; `max_memory_mb`, `enable_streaming` and `chunk_size_kb` are
   advisory.

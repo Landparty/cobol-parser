@@ -14,6 +14,40 @@ finds something, add it here** (with the audit's ID), not only in the audit.
 
 ## Open
 
+### Parser bugs pinned as strict xfails (found 2026-11-06)
+
+Each has an `xfail(strict=True)` test in the named file under `tests/unit/`;
+fixing one turns its test into an XPASS failure, so remove the mark with the fix.
+
+- **Shared dispatch cache makes results order-dependent** (`core/registry.py`,
+  not pinned: depends on test order). `ProcedureDivisionParser._SHARED_REGISTRY`
+  is shared by every `CobolParser`; its cache key skips layout tokens while
+  `matches()` looks a bounded distance ahead, so an earlier parse of
+  `XML <newline> GENERATE` makes a later comment-padded one succeed, and the
+  reverse order poisons it. **Highest priority of this list.**
+- `XmlJsonStatementParser.matches` looks only 5 tokens past XML/JSON: a block
+  of comment lines before GENERATE/PARSE drops the statement, and GENERATE is
+  then parsed as Report Writer GENERATE (`test_xml_json_parser_branches.py`).
+- XML/JSON takes the sentence period as a missing operand, FROM item or
+  PROCESSING PROCEDURE name, reports nothing, and swallows the next paragraph
+  header as clause text (3 cases, same file).
+- A paragraph name whose period is on the next line (`P2` / `.`) is not a
+  header: P2 is dropped and its statements join the previous paragraph
+  (`test_procedure_boundary_branches.py`).
+- `SetStatementParser._starts_another_group` looks at most 24 tokens ahead: a
+  later group with more targets is dropped as "Unparsed tokens"
+  (`test_set_parser_branches.py`).
+- Level-88 with a misspelt VALUE (`88 A1 VALU 'Y'.`) drops the value list
+  silently; a level-88 value list without its period swallows the next
+  entry's level number and loses that entry; `66 R1 B.` (no RENAMES) vanishes
+  with no warning (`test_data_special_entry_branches.py`).
+- `IF X = THEN` yields a COMPARISON with `right_operand` `None` and no error
+  (`test_if_parser_branches.py`).
+- Seen on malformed input, not pinned: `88 X VALUE 1 WHEN SET TO TRUE 2.`
+  turns `2` into a level-02 item; `IF X = 1 GARBAGE ELSE GARBAGE2.` makes
+  GARBAGE2 a paragraph; `XML PARSE X PROCESSING WS-IX` records `PROCESSING`
+  as a clause item.
+
 ### Performance
 
 - **COPY-strip runs its full scan on files with no COPY statement**
@@ -75,8 +109,7 @@ finds something, add it here** (with the audit's ID), not only in the audit.
 - **542 function-local imports**, several commented as avoiding a circular
   import (09-27 §4.11): latent cycles between models, analysis, plugins and
   generators.
-- **M17 — DATA/ENVIRONMENT-division branch coverage.** Re-measured
-  2026-11-06: see "Coverage" below.
+- **M17 — DATA/ENVIRONMENT-division branch coverage**: see "Coverage" below.
 - `XrefAnalyzer._visit_statement_tree` walks `.children` rather than the
   canonical `iter_clause_bodies()`. Correct today (every clause body is a
   child); move it onto the canonical walker when next touched.
@@ -93,10 +126,19 @@ finds something, add it here** (with the audit's ID), not only in the audit.
 
 ## Coverage
 
-Measured on 2026-11-06 at the branch that removed the Cython accelerators
-(there is now only one build, so the old "measure on pure Python" caveat no
-longer applies): see the numbers recorded with that change in
-`.okf/log.md`'s 2026-11-06 tech-debt entry.
+Measured 2026-11-06 (one pure-Python build; the old "measure without the
+Cython extensions" caveat is gone with them): **93.42%** combined
+line+branch, 89.03% pure branch ratio, against the 90% floor.
+
+- **M17:** `parsers/divisions/data.py` 13 missing lines, 27/198 missing
+  branches (92.71%); `parsers/divisions/environment.py` 4 missing lines, 5/36
+  missing branches (92.11%). Both well down from the 2026-07-09 counts
+  (86 and 69 missing branches); keep it open only as a watch item.
+- Weakest parser modules after this pass: `procedure_boundaries` 86.7%,
+  `if_parser` 88.9%; nearly all their remaining misses are end-of-stream
+  guards unreachable through the public API (the lexer always ends with
+  EOF). Next weakest: `search_parser` 85.6%, `open_parser` 85.7%,
+  `initialize_inspect_parsers` 87.9%, `identification` 88.3%.
 
 ---
 
