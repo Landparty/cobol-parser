@@ -121,14 +121,34 @@ class ScanOptions:
     #: a scan with the same options gets that scan's report back without
     #: being parsed. None (the default) caches nothing.
     cache_dir: str | None = None
+    #: Per-file wall-clock limit, enforced by :func:`scan_files`: a file
+    #: still being scanned after this many seconds has its worker process
+    #: terminated and becomes a failure (``error="timed out after N s
+    #: ..."``); the rest of the scan carries on. With it set every file runs
+    #: in a worker process, even at ``workers=1``. :func:`scan_one` alone
+    #: does not enforce it. None (the default) = no limit.
+    timeout_seconds: float | None = None
+    #: Files larger than this many bytes on disk are not read; each becomes
+    #: a failure (``error="skipped: file is N bytes, ..."``). Checked by
+    #: :func:`scan_one`, before the cache. None (the default) = no limit.
+    max_file_bytes: int | None = None
 
     def cache_settings(self) -> tuple[Any, ...]:
-        """Every option that changes a file's report (not the cache itself)."""
+        """Every option that changes a file's report (not the cache itself).
+
+        The limits are left out: a file they stop is a failure, a failure
+        is never cached, so they cannot change a stored report (and adding
+        them did not invalidate caches written before they existed).
+        """
         return tuple(
             (name, getattr(self, name))
             for name in self.__dataclass_fields__
-            if name != "cache_dir"
+            if name not in _NOT_CACHE_SETTINGS
         )
+
+
+#: ``ScanOptions`` fields that never change a cached (successful) report.
+_NOT_CACHE_SETTINGS = frozenset({"cache_dir", "timeout_seconds", "max_file_bytes"})
 
 
 @dataclass
@@ -381,7 +401,14 @@ def scan_one(path: str, options: ScanOptions) -> FileScan:
 
     With :attr:`ScanOptions.cache_dir`, a file nothing it depends on has
     changed in is answered from the cache, and a fresh report is stored.
+    :attr:`ScanOptions.max_file_bytes` is checked first, so an oversize file
+    is neither read nor served from the cache.
     """
+    from ._file_limits import oversize_reason
+
+    oversize = oversize_reason(path, options.max_file_bytes)
+    if oversize is not None:
+        return FileScan(path=path, error=oversize)
     if not options.cache_dir:
         return _scan_one(path, options)
     from ._facts_cache import FactsCache, directory_stamps, stamp
@@ -622,6 +649,30 @@ def _scan_one_packed(args: tuple[str, ScanOptions]) -> FileScan:
     return scan_one(*args)
 
 
+def _warm_scan_worker(options: ScanOptions) -> None:
+    """A per-file-timeout worker's warm-up: parse a tiny program and run
+    the requested analyzers on it, so their lazy imports and first-use
+    set-up are not charged to the first real file's deadline."""
+    from .batch import _WARMUP_PROGRAM
+
+    result = _parse(_WARMUP_PROGRAM, "<warm-up>", options)
+    if result.ast is None:
+        return
+    for unit, depth in _units_with_depth(result.ast):
+        _scan_unit(unit, depth, options)
+    if "lint" in options.analyzers:
+        from .analysis import lint  # noqa: F401
+
+
+def _scan_limit_failure(path_list: list[str]) -> Any:
+    """``run_with_timeouts``' *failure* callback: the file's ``error``."""
+
+    def failure(index: int, reason: str) -> FileScan:
+        return FileScan(path=path_list[index], error=reason)
+
+    return failure
+
+
 # ---------------------------------------------------------------------------
 # Many files
 # ---------------------------------------------------------------------------
@@ -642,19 +693,32 @@ def scan_files(
         workers: Worker processes. ``None`` uses ``os.cpu_count()``. ``1``
             takes a sequential path with no pool at all, which is what makes
             this testable and debuggable (a traceback from a worker process
-            is a pickled string; one from here is a stack).
+            is a pickled string; one from here is a stack) -- unless
+            :attr:`ScanOptions.timeout_seconds` is set, which runs every
+            file in one of *workers* worker processes it can terminate.
         executor: A pre-created pool to reuse. The caller owns its lifecycle.
+            Cannot be combined with :attr:`ScanOptions.timeout_seconds`.
 
     Returns:
         A :class:`ScanReport` whose ``files`` are in the input order.
 
     Raises:
-        ValueError: If *workers* is not >= 1, or an unknown analyzer is named.
+        ValueError: If *workers* is not >= 1, an unknown analyzer is named, a
+            limit is not positive, or a timeout is combined with *executor*.
     """
+    from ._file_limits import run_with_timeouts, validate_limits
+
     if workers is not None and workers <= 0:
         raise ValueError("workers must be >= 1 or None")
 
     opts = options or ScanOptions()
+    validate_limits(opts.timeout_seconds, opts.max_file_bytes)
+    if opts.timeout_seconds is not None and executor is not None:
+        raise ValueError(
+            "ScanOptions.timeout_seconds cannot be combined with executor: a "
+            "worker of a caller-owned pool cannot be terminated without "
+            "breaking the pool"
+        )
     unknown = [name for name in opts.analyzers if name not in ANALYZERS]
     if unknown:
         raise ValueError(
@@ -668,6 +732,18 @@ def scan_files(
 
     args = [(p, opts) for p in path_list]
     resolved_workers = workers if workers is not None else (os.cpu_count() or 1)
+
+    if opts.timeout_seconds is not None:
+        files = run_with_timeouts(
+            scan_one,
+            args,
+            timeout_seconds=opts.timeout_seconds,
+            workers=resolved_workers,
+            failure=_scan_limit_failure(path_list),
+            warmup=_warm_scan_worker,
+            warmup_args=(opts,),
+        )
+        return ScanReport(options=opts, files=files)
 
     if executor is None and resolved_workers == 1:
         return ScanReport(options=opts, files=[scan_one(p, opts) for p in path_list])

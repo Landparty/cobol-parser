@@ -7,7 +7,7 @@ Three tools read the same file:
 
 | Tool | Reads |
 |------|-------|
-| `cobol-parser` CLI | `version`, `project:`, `data:`, `lint:` |
+| `cobol-parser` CLI | `version`, `project:`, `data:`, `lint:` (`limits:` is read by the library API only, so far) |
 | `mockymock` CLI | `project.copybook_path`, `project.seed`, `mockymock:` |
 | COBOL Analyzer (VS Code) | `project.copybook_path`, and passes the file to the CLI it spawns |
 
@@ -186,6 +186,27 @@ Like every key, these fill a flag by name wherever a subcommand has it.
 `call-check` and `widen-check` have `--min-severity` and `--fail-on` too, so
 `fail_on: error` here makes them exit 3 on an error finding as well as
 `lint`. Pass `--fail-on never` on the command line to opt one run out.
+
+### `limits:` — per-file caps for multi-file runs
+
+So one hostile or pathological file cannot stall a whole portfolio run.
+Both keys are optional; leaving one out means no limit.
+
+| Key | Type | Meaning |
+|-----|------|---------|
+| `timeout_seconds` | number greater than 0 | a file still being parsed or analyzed after this many seconds is stopped (its worker process is terminated) and reported as a failure, `timed out after N s`; the other files carry on |
+| `max_file_bytes` | integer greater than 0 | a program file larger than this on disk is not read; it is reported as a failure, `skipped: file is N bytes, ...` |
+
+```yaml
+limits:
+  timeout_seconds: 60
+  max_file_bytes: 20000000      # 20 MB
+```
+
+They are loaded into `ProjectConfig.limits` and are the values the library's
+`parse_files`, `parse_files_with_copybooks` (`timeout_seconds=`,
+`max_file_bytes=`) and `ScanOptions` take. The `batch` and `scan`
+subcommands do not read them yet.
 
 ### `mockymock:` and `analyzer:`
 
