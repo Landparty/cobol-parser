@@ -311,24 +311,6 @@ class TestRedefinesClause:
         assert rd is not None
         assert rd.redefines == "WS-ORIGINAL"
 
-    def test_redefines_target_on_next_line_pure_python_loop(self, monkeypatch):
-        # The Cython fast path and the pure-Python clause loop are separate
-        # implementations; force the pure-Python one so both are covered
-        # regardless of whether the extension is compiled.
-        import cobolparser.parsers.divisions.data_clauses as dc
-
-        monkeypatch.setattr(dc, "_HAS_DATA_FAST", False)
-        src = _wrap(
-            "01  WS-ORIGINAL PIC X(4).\n"
-            "01  WS-REDEFINED REDEFINES\n"
-            "    WS-ORIGINAL PIC 9(4).\n"
-        )
-        result = _assert_parsed(src)
-        items = result.ast.find_all_by_type("DataItem")
-        rd = next((i for i in items if i.name == "WS-REDEFINED"), None)
-        assert rd is not None
-        assert rd.redefines == "WS-ORIGINAL"
-
 
 # ---------------------------------------------------------------------------
 # FILLER items

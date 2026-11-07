@@ -330,10 +330,8 @@ IDENTIFICATION_END_COL = 80  # 73-80 identification area end (inclusive, 1-based
 # single source of truth for every site that classifies indicator characters
 # -- normalize_fixed_format below, copy_statement_parser.is_comment_line,
 # source_format.detect_fixed_format, and lexer._fixed_format_comment_tokens all
-# derive from these sets (the Cython mirror _preprocess_fast.pyx repeats the
-# literals by design, like the rest of its body -- keep it in sync when
-# extending these). The next shop convention from the corpus goes here, not
-# into another hand-maintained per-site tuple.
+# derive from these sets. The next shop convention from the corpus goes here,
+# not into another hand-maintained per-site tuple.
 COMMENT_INDICATORS = frozenset({"*", "/"})  # unconditional: comment / page eject
 DEBUG_INDICATORS = frozenset({"D", "d"})  # debug lines (flag-gated in normalize)
 VERSION_TAG_INDICATORS = frozenset({"V", "v"})  # version tags (flag-gated too)

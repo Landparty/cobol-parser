@@ -26,10 +26,8 @@ from cobolparser.generators.data.errors import ProgramLayoutError
 from cobolparser.generators.data.program_layout import ProgramLayoutIndex
 from cobolparser.generators.program_fixtures import ProgramFixtureGenerator
 
-# Resolved relative to this file rather than the process cwd: cibuildwheel's
-# test-command runs pytest against the installed wheel from a directory that
-# isn't the repo root, so a cwd-relative "tests/samples/..." string silently
-# resolves to nothing there even though it works under `pytest tests/`.
+# Resolved relative to this file rather than the process cwd, so the tests
+# also work when pytest runs from a directory that isn't the repo root.
 _SAMPLES_DIR = Path(__file__).resolve().parent.parent / "samples"
 
 FILE_OPERATIONS = str(_SAMPLES_DIR / "file_operations.cbl")

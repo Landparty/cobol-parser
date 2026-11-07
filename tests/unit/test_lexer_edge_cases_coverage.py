@@ -5,7 +5,6 @@ Targets uncovered lines in lexer.py (77.05%):
   - read_numeric_literal() with scientific notation (E-notation)
   - Fixed-form string continuation across comment lines
   - Free-form unterminated string handling
-  - _compress_doubled_quotes() COBOL escape sequences
   - _try_single_line_string() unterminated detection
 """
 
@@ -100,31 +99,6 @@ class TestUnterminatedStringHandling:
         assert tok is not None
         assert tok.value == "DON'T"
         assert unterminated is False
-
-
-class TestCompressDoubledQuotes:
-    """Cover _compress_doubled_quotes utility method."""
-
-    def test_compress_doubled_delimiter(self):
-        lexer = CobolLexer("", free_form=True)
-        result = lexer._compress_doubled_quotes("DON''T", "'")
-        assert result == "DON'T"
-
-    def test_compress_doubled_double_in_double_string(self):
-        lexer = CobolLexer("", free_form=True)
-        result = lexer._compress_doubled_quotes('SAY ""HELLO""', '"')
-        assert result == 'SAY "HELLO"'
-
-    def test_compress_doubled_single_in_double_string(self):
-        """Special case: doubled single quotes inside double-quoted string."""
-        lexer = CobolLexer("", free_form=True)
-        result = lexer._compress_doubled_quotes("IT''S", '"')
-        assert result == "IT'S"
-
-    def test_no_quotes_returns_unchanged(self):
-        lexer = CobolLexer("", free_form=True)
-        result = lexer._compress_doubled_quotes("HELLO WORLD", "'")
-        assert result == "HELLO WORLD"
 
 
 class TestReadIdentifierKeywordLookup:

@@ -117,7 +117,7 @@ env.bak/
 venv.bak/
 
 # uv-managed build env, created ad hoc by mocky-mock-vscode-extension's
-# scripts/install-local.js --local-deps to rebuild the Cython extensions;
+# scripts/install-local.js --local-deps;
 # this repo is not otherwise uv-managed
 uv.lock
 

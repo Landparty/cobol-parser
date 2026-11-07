@@ -47,8 +47,6 @@ Usage Example:
 
 # NOTE: keep this file a thin re-export stub. Implementation belongs in
 # _normalize.py (or another private sibling), not here.
-from cobolparser._accel import accelerators_enabled
-
 from ._normalize import (
     ALL_COMMENT_INDICATORS,
     COMMENT_INDICATORS,
@@ -111,22 +109,3 @@ from .copybook_expander import (  # noqa: E402
     parse_cobol_with_expansion,
     set_file_cache_size,
 )
-
-# ---------------------------------------------------------------------------
-# Optional Cython fast path for normalize_fixed_format.
-# The pure-Python implementation is the default; the compiled one is used only
-# under COBOLPARSER_ACCEL=1 (see cobolparser._accel), and even then falls back
-# silently when not compiled.
-# ---------------------------------------------------------------------------
-# Keep the pure-Python implementation reachable under a private name even when
-# the Cython extension overrides the public one (mirrors lexer._CobolLexerPure),
-# so both code paths can be exercised by the test suite.
-_normalize_fixed_format_pure = normalize_fixed_format
-
-if accelerators_enabled():
-    try:
-        from cobolparser._preprocess_fast import (  # type: ignore[import-not-found,no-redef]
-            normalize_fixed_format,
-        )
-    except ImportError:
-        pass  # pure-Python normalize_fixed_format defined above is used

@@ -1,7 +1,8 @@
 """
 Plugins module - Enhanced features and configuration support.
 
-This module provides the enhanced functionality including memory management,
+This module provides parser configuration (``MemoryConfiguration``, whose
+memory fields are advisory and not enforced -- only ``max_error_count`` is),
 serialization configuration, error recovery modes, and plugin architecture.
 """
 

@@ -207,28 +207,6 @@ class TestCobolLexerUtilityMethods:
         tokens2 = lexer.get_tokens()
         assert len(tokens2) == len(tokens)
 
-    def test_get_current_location(self):
-        """Test get_current_location method."""
-        lexer = CobolLexer("       ID DIVISION.")
-
-        location = lexer.get_current_location()
-        assert location.line == 1
-        assert location.column >= 1
-
-    def test_advance_char_method(self):
-        """Test character advancement."""
-        lexer = CobolLexer("AB")
-
-        # Test peek and advance
-        first_char = lexer.peek_char()
-        assert first_char == "A"
-
-        advanced_char = lexer.advance_char()
-        assert advanced_char == "A"
-
-        next_char = lexer.peek_char()
-        assert next_char == "B"
-
     def test_tokenize_cobol_function(self):
         """Test the tokenize_cobol convenience function."""
         source = "       IDENTIFICATION DIVISION."

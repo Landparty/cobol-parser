@@ -8,8 +8,8 @@ timestamp: 2026-10-15T00:00:00Z
 
 # Preprocessing
 
-`cobolparser/preprocess/` (plus `_lines.py`, `_source_directive.py` and the
-optional Cython mirror `_preprocess_fast.pyx` at the package root) is
+`cobolparser/preprocess/` (plus `_lines.py` and `_source_directive.py` at the
+package root) is
 everything done to source text before `CobolLexer` sees it. Entry points:
 `normalize_fixed_format`, `detect_fixed_format` / `normalize_with_recovery`,
 `expand_copybooks` / `parse_cobol_with_expansion`, and the in-parser passes
@@ -133,7 +133,7 @@ filled only with `preserve_source_locations=True`), `statistics`
 
 | File | Responsibility |
 |------|---------------|
-| `preprocess/__init__.py` | **Re-export stub only, no implementation.** Re-exports `_normalize.py` (incl. the column constants `DEFAULT_SEQ_COL_END` / `INDICATOR_COL` / `TEXT_START_COL` / `TEXT_END_COL` / `IDENTIFICATION_END_COL`) and `copybook_expander.py`'s public functions. Swaps in the Cython `normalize_fixed_format` only when `accelerators_enabled()` (`COBOLPARSER_ACCEL=1` at import) and it is built; `_normalize_fixed_format_pure` always names the Python one |
+| `preprocess/__init__.py` | **Re-export stub only, no implementation.** Re-exports `_normalize.py` (incl. the column constants `DEFAULT_SEQ_COL_END` / `INDICATOR_COL` / `TEXT_START_COL` / `TEXT_END_COL` / `IDENTIFICATION_END_COL`) and `copybook_expander.py`'s public functions |
 | `preprocess/_normalize.py` | `normalize_fixed_format`, `strip_compiler_directives`, `preprocess_conditional_compilation` (with the `_ConditionParser` / `_evaluate_condition` constant-condition evaluator), `validate_copybook_content`, `validate_level_numbers`, the column / indicator constants, `ID_DIVISION_HEADER_RE`, plus the `PreprocessingError` hierarchy. Every name is importable from `cobolparser.preprocess` |
 | `preprocess/source_format.py` | `detect_fixed_format` (see [Fixed-format detection](#fixed-format-detection); alias `cobolparser.parser._detect_fixed_format`), `normalize_with_recovery` (normalize + unterminated-literal retry, shared by `CobolParser` and the lexer's `_tokenize_source`), `debug_line_numbers`; re-exports `free_format_flags` |
 | `preprocess/copybook_expander.py` | `expand_copybooks`, `parse_cobol_with_expansion`, `warn_dropped_debug_lines`; recursive inlining (`_expand_source_recursive`) with cycle detection, encoding detection (`detect_encoding` / `convert_to_utf8`), validation, LRU file cache (`clear_file_cache` / `set_file_cache_size` / `get_file_cache_stats`), the re-pad / width fitter (`_fit_fixed_format_width`) and the source map |
@@ -142,8 +142,7 @@ filled only with `preserve_source_locations=True`), `statistics`
 | `preprocess/path_resolver.py` | `PathResolver` (three-tier lookup), `find_copybook_file`, `get_available_copybooks`, `suggest_similar_copybooks`, `validate_path_within_directory` -- see [Copybook path resolution](#copybook-path-resolution) |
 | `preprocess/models.py` | `CopybookExpansion`, `CopyStatement`, `CopybookSearchPath`, `ExpansionStatistics`, `ExpansionContext` (per-expansion stack, byte budget, content/origin cache, `debug_lines`), `ReplacingClause`, `SuppressClause`, `SourceLocationMap` |
 | `_lines.py` (package root) | `split_source_lines(text, keepends=False)` -- the one line splitter for source text (`\n` / `\r\n` / `\r` only) |
-| `_source_directive.py` (package root) | `source_format_directive(text)` (`"FIXED"` / `"FREE"` / `None` for a `>>SOURCE [FORMAT] [IS] ...` record) and `free_format_flags(lines, indicator_position=6)`. Dependency-free so the `.pyx` can import it |
-| `_preprocess_fast.pyx` / `.c` (package root) | Cython mirror of `normalize_fixed_format` (same signature, byte-identical output and warnings). Built only under `COBOLPARSER_ACCEL=1 python setup.py build_ext --inplace`, used only with `COBOLPARSER_ACCEL=1` at run time. Cannot import `preprocess` (circular), so it mirrors the indicator constants as literals -- extend both together |
+| `_source_directive.py` (package root) | `source_format_directive(text)` (`"FIXED"` / `"FREE"` / `None` for a `>>SOURCE [FORMAT] [IS] ...` record) and `free_format_flags(lines, indicator_position=6)`. Dependency-free so the lexer and `preprocess` can both import it without a cycle |
 
 ## Line-count invariant and record boundaries
 
@@ -171,8 +170,7 @@ file -- the most important invariant in this area. How each pass keeps it:
   and the COPY splice's tail line (see [The COPY splice](#the-copy-splice)),
   and the source map accounts for both.
 
-Pinned by `tests/regression/test_normalize_line_number_preservation.py`
-(also checks Cython/pure parity).
+Pinned by `tests/regression/test_normalize_line_number_preservation.py`.
 
 **A line is a record, nothing else.** `split_source_lines` (`_lines.py`)
 splits on `\n` / `\r\n` / `\r` only and is otherwise `splitlines`-shaped.
@@ -180,7 +178,7 @@ splits on `\n` / `\r\n` / `\r` only and is otherwise `splitlines`-shaped.
 U+2028/2029 and `\x1c`-`\x1e`, so a page eject inside a comment (`*\x0c`) or
 a cp1252 `…` decoded through latin-1 would shift every later line number.
 `parse_cobol`, `CobolParser`, `detect_fixed_format`, `CobolLexer.__init__`,
-`normalize_fixed_format` (string form, pure and Cython),
+`normalize_fixed_format` (string form),
 `preprocess_conditional_compilation`, `strip_compiler_directives`,
 `validate_copybook_content` and the expander's line counts all use it. The
 member passes in `copy_statement_parser.py` (`normalize_continuation_lines`,
@@ -211,11 +209,6 @@ record. Raises `ValueError` for a literal still open on the last code line
 unless `merge_continued_literals=False`. `warnings`, when a list, collects the
 column-72 overflow diagnostics.
 
-The optional Cython `_preprocess_fast` mirrors this function line for line;
-any change to the normalizer must be made in both (and the indicator
-constants extended in both). `_normalize_fixed_format_pure` always names the
-Python one so tests can compare both.
-
 ### Comment, debug and version-tag lines
 
 The column-7 indicator characters live in one place, `_normalize.py`:
@@ -224,7 +217,7 @@ The column-7 indicator characters live in one place, `_normalize.py`:
 (re-exported from `cobolparser.preprocess`). Consumers:
 `normalize_fixed_format`, `copy_statement_parser.is_comment_line`,
 `source_format.detect_fixed_format`, `lexer._fixed_format_comment_tokens`
-(deferred import). `_preprocess_fast.pyx` keeps mirrored literals.
+(deferred import).
 
 * `*` / `/` lines are always comments.
 * `D` / `d` lines are comments when `debug_lines_as_comments` (default
@@ -283,7 +276,7 @@ continued line's last non-blank character, **without an intervening space**:
   with no space; a space would leave a free-standing `.` that the lexer reads
   as a terminator. Pinned by `tests/regression/test_continued_literal_normalization.py`.
 
-Further rules (all mirrored in the Cython path):
+Further rules:
 
 * **Trailing blanks of an open literal are part of it**: a line is
   `rstrip()`-ped only once no literal is open at its end (`VALUE "ABC   ` +
@@ -296,7 +289,7 @@ Further rules (all mirrored in the Cython path):
   with short-record pieces must follow the column-72 rule.
 * **The continuation is the next line that is neither comment nor blank**,
   whatever is continued: the comment and blank branches look ahead
-  (`_continuation_follows`, cached; `_next_code_line` in Cython) and defer the
+  (`_continuation_follows`, cached) and defer the
   placeholder when a `-` record follows, so `MOVE WS-CO` / `* note` /
   `-    UNT TO X.` gives `WS-COUNT`.
 * **Quote in column 72 + continuation starting `''`** is one doubled quote in
@@ -318,7 +311,7 @@ parser for this. Both paths accept the flag identically.
 
 ### `>>SOURCE FORMAT` inside a fixed-format file
 
-`normalize_fixed_format` (and the Cython mirror, which must agree) recognises
+`normalize_fixed_format` recognises
 `>>SOURCE [FORMAT] [IS] {FREE|FIXED}` (`_source_directive.py`) from column 7
 to 72 of a fixed record, or anywhere on a free line. The directive record
 becomes a blank line; each free-format line is passed through whole as its
@@ -351,7 +344,7 @@ numeric sequence number, with `dropped = line[72:].rstrip()` and
   `content_len <= 80`.
 * **Rule 2 (word boundary)** otherwise warns when `content_len > 80`.
 
-Messages (`n` = 1-based physical line; pure and Cython byte-identical):
+Messages (`n` = 1-based physical line):
 rule 1 `f"Line {n}: content beyond column {TEXT_END_COL} was dropped mid-token: {dropped!r}"`;
 rule 2 `f"Line {n}: content beyond column {TEXT_END_COL} was dropped -- line is {content_len} columns wide, past the traditional {IDENTIFICATION_END_COL}-column identification-area width: {dropped!r}"`.
 
@@ -381,14 +374,6 @@ every entry as actionable. Pinned by
 `tests/regression/test_normalize_column_overflow_warning.py` (incl.
 multi-line fast/pure parity) and
 `tests/regression/test_fixed_format_word_boundary_overflow.py` (end-to-end).
-
-### Regenerating the Cython mirror
-
-`COBOLPARSER_ACCEL=1 python setup.py build_ext --inplace` re-cythonizes the
-`.pyx` when Cython is installed and rewrites the checked-in `.c` (the current
-one was generated with Cython 3.3.0); both files are committed together.
-Without `COBOLPARSER_ACCEL=1` at run time the built `*.so` is ignored (pure
-Python is the default), so coverage measures correctly with it left in place.
 
 ## Fixed-format detection
 
@@ -629,7 +614,7 @@ exponentially on unterminated REPLACING).
 
 ### REPLACING
 
-`apply_replacing_clauses` (`copy_statement_parser.py`, no Cython mirror)
+`apply_replacing_clauses` (`copy_statement_parser.py`)
 scans the member's whole text in one pass (lines joined with `\n`):
 
 * **Operands.** `CopyStatementLexer._read_replacing_operand` reads
@@ -1019,7 +1004,7 @@ are also importable from `path_resolver`.
 
 ## See also
 
-* [lexer.md](lexer.md) — consumes output of `normalize_fixed_format`; `_fixed_format_comment_tokens`, `mask_comment_entries`, the Cython lexer
+* [lexer.md](lexer.md) — consumes output of `normalize_fixed_format`; `_fixed_format_comment_tokens`, `mask_comment_entries`
 * [parser.md](parser.md) — `CobolParser._preprocess_source` runs the in-parser passes (Pipeline above)
 * [batch.md](batch.md) — `parse_files_with_copybooks` and `scan` with copybook expansion
 * [cli.md](cli.md) — `preprocess` / `expand` subcommands, `--copybook-path`, `--define`, `--debug-lines`, `--source-format`, `cobol.yml`

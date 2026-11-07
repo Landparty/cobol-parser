@@ -4,25 +4,11 @@ Collaborator of :class:`~cobolparser.parsers.divisions.data.DataDivisionParser`:
 parses one data-description entry (``level-number data-name [clauses].``) and
 each of its clauses (PICTURE, VALUE, USAGE, SIGN, SYNCHRONIZED, JUSTIFIED,
 BLANK WHEN ZERO, EXTERNAL, GLOBAL, REDEFINES, OCCURS).
-
-The optional Cython fast path (``cobolparser._data_fast``) accelerates the
-clause dispatch loop; it calls back into the parser's
-``_parse_picture_clause`` / ``_parse_value_clause`` / ``_parse_usage_clause``
-methods, which the ``DataDivisionParser`` keeps as stable delegating wrappers
-around this class — so the compiled extension's callback surface is unchanged.
-
-That extension is compiled separately from this module and can therefore be
-older than it. It is only looked for under ``COBOLPARSER_ACCEL=1``; when it
-is, ``_data_fast_usable`` probes the compiled helper once at import
-and disables the fast path (with a warning naming the rebuild) when it does not
-match, so a stale binary costs speed rather than correctness.
 """
 
-import logging
 from collections.abc import Callable, Iterable
 from typing import Any, ClassVar
 
-from cobolparser._accel import accelerators_enabled
 from cobolparser._literals import quote_literal
 from cobolparser._storage import FIXED_SIZE_USAGES, is_known_usage
 from cobolparser.core.interfaces import ITokenStream
@@ -30,8 +16,6 @@ from cobolparser.lexer import Token, TokenType
 from cobolparser.models.ast_base import SourceLocation
 from cobolparser.models.data_items import CobolDataItem, OccursClause, PictureClause
 from cobolparser.parsers.statements._utils import peek_past_noise
-
-logger = logging.getLogger(__name__)
 
 # Constants for COMP/COMPUTATIONAL usage keywords and token types.
 # These appear in multiple parsing methods; keeping them in one place avoids
@@ -53,8 +37,7 @@ _COMP_KEYWORDS: frozenset[str] = frozenset(
         "BINARY",
         "PACKED-DECIMAL",
         # COBOL 2002 usages, which may also be written without the USAGE
-        # keyword (``05 X BINARY-LONG.``), #524. ``_data_fast`` receives
-        # this set as an argument, so both clause loops accept them.
+        # keyword (``05 X BINARY-LONG.``), #524.
         "FLOAT-SHORT",
         "FLOAT-LONG",
         *FIXED_SIZE_USAGES,
@@ -287,73 +270,6 @@ def data_entry_ending_header(token_stream: ITokenStream, offset: int = 0) -> str
     return None
 
 
-# Number of positional arguments ``parse_data_item`` passes to the compiled
-# clause helper. Keep in sync with the call site below; ``_data_fast_usable``
-# checks the compiled extension against it at import time.
-_DATA_FAST_ARG_COUNT = 20
-
-
-def _data_fast_usable(helper: Any) -> bool:
-    """True if the compiled clause helper matches this module's call site.
-
-    ``_data_fast`` is compiled separately from this module, so the two can
-    drift out of step: a stale in-place ``.so``, a cached ``build/`` tree, or
-    an installed wheel built from an older revision all leave a binary whose
-    signature no longer matches the call in :meth:`parse_data_item`. Because
-    that call is unconditional and positional, the drift used to surface as a
-    ``TypeError`` raised from the middle of every data-description entry,
-    which the division loop recorded as a generic error and recovered from by
-    abandoning the division — so a *build* problem degraded every program with
-    a DATA DIVISION to a near-empty AST instead of naming its own cause.
-
-    Probing costs one call: with an empty token list the helper's clause loop
-    never runs, so it returns its ``pos`` argument without reading any other
-    parameter (hence the ``None`` placeholders). That validates arity, which
-    is the drift that actually happens — parameters get appended as the fast
-    path grows. It cannot detect a same-arity extension whose parameters were
-    reordered; nothing cheap can, and that has never been the failure mode.
-    """
-    probe_args = [[], 0] + [None] * (_DATA_FAST_ARG_COUNT - 2)
-    try:
-        return bool(helper(*probe_args) == 0)
-    except Exception:
-        return False
-
-
-# Optional Cython acceleration for the picture-clause inner loop. The
-# pure-Python implementation in ``parse_picture_clause`` below remains
-# the authoritative behaviour; we only delegate when the extension is
-# available and the token stream is the standard ``TokenStream`` (so we
-# can safely poke its underlying token list and cursor). Off by default: the
-# extension is looked for only under COBOLPARSER_ACCEL=1 (cobolparser._accel).
-try:
-    if not accelerators_enabled():
-        raise ImportError("Cython accelerators not enabled")
-    from cobolparser._data_fast import (  # type: ignore[import-not-found]
-        parse_data_item_clauses_fast as _fast_data_item_clauses,
-    )
-except ImportError:
-    _fast_data_item_clauses = None
-    _HAS_DATA_FAST = False
-else:
-    _HAS_DATA_FAST = _data_fast_usable(_fast_data_item_clauses)
-    if not _HAS_DATA_FAST:
-        _fast_data_item_clauses = None
-        # Logged, not ``warnings.warn``-ed. This runs at module import, and
-        # under ``-W error`` / ``PYTHONWARNINGS=error`` / a pytest
-        # ``filterwarnings = error`` a warning here would turn a stale build
-        # into an ``import cobolparser`` failure -- the exact inversion of
-        # this guard's purpose, and strictly worse than the bug it fixes.
-        logger.warning(
-            "cobolparser._data_fast does not match this version of "
-            "cobolparser and has been disabled; parsing falls back to the "
-            "pure-Python path (same results, slower). Rebuild the extension "
-            "with `COBOLPARSER_ACCEL=1 python setup.py build_ext --inplace`, "
-            "or reinstall cobolparser, to restore it, or unset "
-            "COBOLPARSER_ACCEL to silence this."
-        )
-
-
 def literal_source(token: Token) -> str:
     """A STRING_LITERAL token rendered back as COBOL source text.
 
@@ -437,8 +353,7 @@ class DataItemClauseParser:
     """Parses a single data-description entry and its clauses.
 
     Holds a back-reference to the owning :class:`DataDivisionParser` so
-    warnings reach the host parser's warning channel and so the Cython fast
-    path can call back through the parser's stable wrapper methods.
+    warnings reach the host parser's warning channel.
     """
 
     def __init__(self, parser: Any) -> None:
@@ -450,8 +365,7 @@ class DataItemClauseParser:
         self._parser = parser
         # Non-``$`` currency symbols (``CURRENCY SIGN IS '£'``) the most
         # recent parse_picture_clause() collected; read by
-        # _picture_clause() right after, on both the pure-Python and the
-        # Cython data-item paths.
+        # _picture_clause() right after.
         self._picture_currency_symbols: frozenset[str] = frozenset()
 
     def _picture_clause(self, pattern: str, location: SourceLocation) -> PictureClause:
@@ -514,9 +428,6 @@ class DataItemClauseParser:
         if implicit_filler:
             data_item.is_filler = True
 
-        if _HAS_DATA_FAST:
-            self._run_fast_clause_loop(token_stream, data_item, location)
-
         self._parse_clauses(token_stream, data_item, location, report_group)
         return data_item
 
@@ -567,56 +478,6 @@ class DataItemClauseParser:
         # Outside a report group, an entry with no data-name is FILLER
         # with the word omitted (``05 PIC X(3).``).
         return f"ANONYMOUS-{level}-{location.line}", not report_group
-
-    def _run_fast_clause_loop(
-        self,
-        token_stream: ITokenStream,
-        data_item: CobolDataItem,
-        location: SourceLocation,
-    ) -> None:
-        """Drive the common-clause loop in Cython (``_HAS_DATA_FAST`` only).
-
-        VALUE and USAGE clauses call back into the Python helpers below via
-        ``parser_self``. The fast helper handles only the hot clauses
-        (PICTURE, VALUE, USAGE, COMP, REDEFINES, OCCURS) and bails back
-        on any clause it does not recognize (SIGN, SYNCHRONIZED,
-        JUSTIFIED, BLANK, POINTER, EXTERNAL, GLOBAL, ...). The caller then
-        runs the pure-Python loop (:meth:`_parse_clauses`), which is the
-        single source of truth for those clauses -- so the two
-        implementations can never drift on the rarer clauses.
-        """
-        tokens_list = getattr(token_stream, "_tokens", None)
-        if tokens_list is None:
-            return
-        new_pos = _fast_data_item_clauses(
-            tokens_list,
-            token_stream._pos,  # type: ignore[attr-defined]
-            data_item,
-            location,
-            self._parser,
-            token_stream,
-            _PICTURE_TERMINATOR_KEYWORDS,
-            _PICTURE_PATTERN_TOKEN_TYPES,
-            _COMP_KEYWORDS,
-            _COMP_TOKEN_TYPES,
-            _DIVISION_TOKEN_TYPES,
-            self._picture_clause,
-            OccursClause,
-            TokenType.PERIOD,
-            TokenType.LEVEL_NUMBER,
-            TokenType.IDENTIFIER,
-            TokenType.NUMERIC_LITERAL,
-            TokenType.NEWLINE,
-            TokenType.COMMA,
-            TokenType.SEMICOLON,
-        )
-        token_stream._pos = new_pos  # type: ignore[attr-defined]
-        # No early return in the caller: the Python loop finishes any
-        # clauses the fast helper handed back.
-        #
-        # The argument list above is positional and must stay
-        # _DATA_FAST_ARG_COUNT long; the import-time probe checks the
-        # compiled extension against that count.
 
     def _parse_clauses(
         self,
@@ -873,8 +734,7 @@ class DataItemClauseParser:
         report_group: bool,
     ) -> None:
         # ``BINARY-LONG [SIGNED|UNSIGNED]`` written without the USAGE
-        # keyword: the sign does not change the width (#524). The fast
-        # clause loop hands this word back here, so one branch serves both.
+        # keyword: the sign does not change the width (#524).
         if (data_item.usage or "").upper().startswith("BINARY-"):
             token_stream.consume()
         else:
@@ -1871,13 +1731,10 @@ class DataItemClauseParser:
         """Parse PICTURE clause pattern.
 
         Returns the picture pattern string (e.g., 'X(10)', '9(5)', '9(7)V99',
-        'ZZ,ZZ9.99-', '$$$,$$9.99'). This is the single implementation used by
-        both the pure-Python and Cython-accelerated data-item paths; the fast
-        clause loop delegates here so the two can never drift.
+        'ZZ,ZZ9.99-', '$$$,$$9.99').
         """
         # Optional IS: PICTURE IS <pattern> / PIC IS <pattern>. Consumed
-        # here (rather than by callers) so both the pure-Python and
-        # Cython-accelerated dispatch loops get it via this shared method.
+        # here (rather than by callers) so every caller gets it.
         # Previously unhandled: the pattern-token dispatch below has no
         # branch for TokenType.IS, so an unconsumed IS fell straight
         # through to the caller's clause loop, which (seeing no picture

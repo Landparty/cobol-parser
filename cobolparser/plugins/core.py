@@ -30,7 +30,7 @@ class DialectType(Enum):
 
 @dataclass
 class MemoryConfiguration:
-    """Configuration for memory management during parsing.
+    """Parser limits: the recorded-error cap, plus advisory memory fields.
 
     .. warning::
         ``max_memory_mb``, ``enable_streaming`` and ``chunk_size_kb`` are
@@ -103,7 +103,11 @@ class UnterminatedStringError(LexerError):
 
 
 class MemoryLimitExceededError(ParseError):
-    """Exception when memory usage exceeds configured limits."""
+    """Exception when memory usage exceeds configured limits.
+
+    Never raised by the parser today: ``MemoryConfiguration.max_memory_mb`` is
+    not enforced. Kept as public API.
+    """
 
     def __init__(self, current_mb: float, limit_mb: int):
         message = f"Memory usage {current_mb:.1f}MB exceeds limit of {limit_mb}MB"

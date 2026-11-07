@@ -14,18 +14,20 @@ Usage:
 
 import argparse
 import json
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
 
 def create_baseline_record() -> dict[str, Any]:
     """Create a baseline record for IO ticket tracking."""
+    # Naive UTC, so the strings keep their historical (offset-free) format.
+    now = datetime.now(UTC).replace(tzinfo=None)
     return {
-        "timestamp": datetime.utcnow().isoformat(),
-        "week": datetime.utcnow().strftime("%Y-W%W"),
+        "timestamp": now.isoformat(),
+        "week": now.strftime("%Y-W%W"),
         "baseline_io_tickets": 0,  # Placeholder for actual tracking
-        "baseline_date": datetime.utcnow().isoformat(),
+        "baseline_date": now.isoformat(),
         "description": "Baseline ticket count for IO-related parser issues",
         "notes": "This metric supports SC-004: achieve 40% reduction in IO parsing support tickets by end of feature",
         "tracking_enabled": True,

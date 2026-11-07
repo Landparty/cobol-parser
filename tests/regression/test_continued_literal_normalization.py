@@ -16,11 +16,7 @@ terminator, truncating the MOVE. See NIST ``NC205A.CBL``.
 import pytest
 
 from cobolparser import parse_cobol
-
-# The pure-Python implementation, kept reachable even when the Cython
-# ``_preprocess_fast`` extension overrides the public name (mirrors
-# ``cobolparser.lexer._CobolLexerPure``).
-from cobolparser.preprocess import _normalize_fixed_format_pure, normalize_fixed_format
+from cobolparser.preprocess import normalize_fixed_format
 
 # ``-999.777`` written one character per continuation line, exactly as it
 # appears in NIST NC205A. Column 7 ('-') marks each continuation line.
@@ -64,11 +60,7 @@ def _move_line(text: str) -> str:
     return lines[0]
 
 
-@pytest.mark.parametrize(
-    "normalize",
-    [normalize_fixed_format, _normalize_fixed_format_pure],
-    ids=["active", "pure"],
-)
+@pytest.mark.parametrize("normalize", [normalize_fixed_format])
 def test_numeric_continued_literal_joins_without_spaces(normalize):
     """``-999.777`` split over continuation lines rejoins with no interior
     spaces and no free-standing period."""
@@ -80,11 +72,7 @@ def test_numeric_continued_literal_joins_without_spaces(normalize):
     assert ". " not in move_line.split("CONT-B")[0]
 
 
-@pytest.mark.parametrize(
-    "normalize",
-    [normalize_fixed_format, _normalize_fixed_format_pure],
-    ids=["active", "pure"],
-)
+@pytest.mark.parametrize("normalize", [normalize_fixed_format])
 def test_alphanumeric_continued_literal_joins_without_spaces(normalize):
     """An alphanumeric literal split with '-' rejoins into one token."""
     text = normalize(ALPHA_CONT_LINES)

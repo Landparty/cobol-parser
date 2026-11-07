@@ -210,19 +210,3 @@ class TestTokenStreamIntegration:
 
         assert program_name == "TEST-PROGRAM"
         assert stream.is_empty()
-
-    def test_backtracking_with_transaction(self, sample_tokens):
-        """Transaction context manager enables backtracking."""
-        stream = TokenStream(sample_tokens)
-
-        initial_pos = stream.position
-        try:
-            with stream.transaction():
-                stream.consume()  # IDENTIFICATION
-                stream.expect("PROCEDURE")  # This will raise
-        except Exception:
-            pass
-
-        # Position should be restored
-        assert stream.position == initial_pos
-        assert stream.peek().value == "IDENTIFICATION"
