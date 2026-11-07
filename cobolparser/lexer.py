@@ -15,7 +15,6 @@ import sys
 from dataclasses import dataclass, field
 from enum import IntEnum, auto
 
-from ._accel import accelerators_enabled
 from ._lines import split_source_lines
 from ._literals import is_quoted_literal
 from .models.ast_base import SourceLocation
@@ -331,7 +330,6 @@ class TokenType(IntEnum):
     LOCK = auto()
     SHARING = auto()
     WITH = auto()
-    ALL = auto()
     OTHER = auto()
     NO = auto()
     READ_ONLY = auto()
@@ -620,7 +618,7 @@ _LEVEL_NUMBER_2DIGIT_RE = re.compile(r"^\d{2}$")
 _LEVEL_NUMBER_1_2DIGIT_RE = re.compile(r"^\d{1,2}$")
 
 
-class _CobolLexerPure:
+class CobolLexer:
     """COBOL lexical analyzer with support for multiple dialects.
 
     This lexer handles the complexities of COBOL tokenization including:
@@ -974,9 +972,6 @@ class _CobolLexerPure:
         self.filename = filename
         self.dialect = dialect
         self.lines = split_source_lines(source)
-        self.current_line = 0
-        self.current_column = 0
-        self.current_pos = 0
         self.tokens: list[Token] = []
         self.errors: list[LexerError] = []
         self.warnings: list[str] = []
@@ -1042,162 +1037,6 @@ class _CobolLexerPure:
             True if word is a figurative constant, False otherwise
         """
         return word.upper().strip() in self.FIGURATIVE_CONSTANTS
-
-    def get_current_location(self) -> SourceLocation:
-        """Get current source location."""
-        return SourceLocation(self.current_line + 1, self.current_column + 1, 1)
-
-    def peek_char(self, offset: int = 0) -> str | None:
-        """Peek at character at current position + offset."""
-        pos = self.current_pos + offset
-        if pos >= len(self.source):
-            return None
-        return self.source[pos]
-
-    def advance_char(self) -> str | None:
-        """Advance to next character and return it."""
-        if self.current_pos >= len(self.source):
-            return None
-
-        char = self.source[self.current_pos]
-        self.current_pos += 1
-
-        if char == "\n":
-            self.current_line += 1
-            self.current_column = 0
-        else:
-            self.current_column += 1
-
-        return char
-
-    def skip_whitespace(self) -> None:
-        """Skip whitespace characters except newlines."""
-        while True:
-            char = self.peek_char()
-            if char is None or char not in " \t\r":
-                break
-            self.advance_char()
-
-    def read_string_literal(self, quote_char: str) -> Token:
-        """Read a string literal enclosed in quotes or apostrophes, with COBOL multi-line support."""
-        start_location = self.get_current_location()
-        # Accumulate characters into a list and join once. ``s += c`` in a
-        # loop is amortised O(n) only when the interpreter can prove the
-        # string has refcount 1 — fragile, and worst-case O(n²) on long
-        # literals. Lists give us a guaranteed O(n) construction.
-        chars: list[str] = []
-        self.advance_char()  # Skip opening quote
-
-        while True:
-            char = self.peek_char()
-            if char is None:
-                # Unterminated string - add error
-                self.errors.append(
-                    LexerError(
-                        "Unterminated string literal",
-                        start_location,
-                        quote_char + "".join(chars),
-                    )
-                )
-                break
-
-            if char == quote_char:
-                self.advance_char()  # Skip closing quote
-                # Check for doubled quote (escape sequence)
-                if self.peek_char() == quote_char:
-                    chars.append(quote_char)
-                    self.advance_char()
-                else:
-                    break
-            else:
-                chars.append(char)
-                self.advance_char()
-
-        return Token(
-            TokenType.STRING_LITERAL, "".join(chars), start_location, quote=quote_char
-        )
-
-    def read_numeric_literal(self) -> Token:
-        """Read a numeric literal (integer or decimal)."""
-        start_location = self.get_current_location()
-        # See ``read_string_literal`` for the rationale on list+join vs ``+=``.
-        chars: list[str] = []
-        has_decimal = False
-        has_exponent = False
-        has_digit = False
-
-        while True:
-            char = self.peek_char()
-            if char is None:
-                break
-
-            if char.isdigit():
-                chars.append(char)
-                has_digit = True
-                self.advance_char()
-            elif char == "." and not has_decimal and not has_exponent:
-                has_decimal = True
-                chars.append(char)
-                self.advance_char()
-            elif char in "Ee" and has_digit and not has_exponent:
-                # Scientific notation: require at least one digit before E.
-                has_exponent = True
-                chars.append(char)
-                self.advance_char()
-                next_char = self.peek_char()
-                if next_char and next_char in "+-":
-                    chars.append(next_char)
-                    self.advance_char()
-            else:
-                break
-
-        return Token(TokenType.NUMERIC_LITERAL, "".join(chars), start_location)
-
-    def read_identifier(self) -> Token:
-        """Read an identifier or keyword."""
-        start_location = self.get_current_location()
-        chars = []
-
-        while True:
-            char = self.peek_char()
-            if char is None:
-                break
-
-            if char.isalnum() or char in "-_":
-                chars.append(char)
-                self.advance_char()
-            else:
-                break
-
-        value = "".join(chars)
-
-        # Check if it's a keyword
-        upper_value = sys.intern(value.upper())
-        if upper_value in self.KEYWORDS:
-            token_type = self.KEYWORDS[upper_value]
-        elif upper_value in self.FIGURATIVE_CONSTANTS:
-            token_type = TokenType.FIGURATIVE_CONSTANT
-        elif _LEVEL_NUM_RE.match(value):  # Level numbers 01-99
-            token_type = TokenType.LEVEL_NUMBER
-        else:
-            token_type = TokenType.IDENTIFIER
-
-        return Token(token_type, value, start_location)
-
-    def read_comment(self) -> Token:
-        """Read a comment (line starting with * in column 7 or inline)."""
-        start_location = self.get_current_location()
-        chars = []
-
-        # Read until end of line
-        while True:
-            char = self.peek_char()
-            if char is None or char == "\n":
-                break
-            chars.append(char)
-            self.advance_char()
-
-        return Token(TokenType.COMMENT, "".join(chars), start_location)
 
     def handle_cobol_line_format(self, line: str, line_num: int) -> list[Token]:
         """Handle COBOL fixed-format line structure.
@@ -1895,41 +1734,6 @@ class _CobolLexerPure:
         # Not closed on this line - check if this could be a multi-line string
         return None, pos, True
 
-    def _compress_doubled_quotes(self, text: str, quote_char: str) -> str:
-        """Compress doubled quotes in string content (COBOL escape sequence).
-
-        In COBOL, doubled quotes of the same type as the delimiter represent a single quote.
-        Additionally, for continuation line compatibility, doubled single quotes are also
-        compressed to single quotes when inside double-quoted strings.
-        """
-        if '"' not in text and "'" not in text:
-            return text
-
-        result = []
-        i = 0
-        while i < len(text):
-            # Check for doubled delimiter quotes (standard COBOL escaping)
-            if (
-                text[i] == quote_char
-                and i + 1 < len(text)
-                and text[i + 1] == quote_char
-            ):
-                result.append(quote_char)
-                i += 2
-            # Special case: compress doubled single quotes in double-quoted strings (continuation compatibility)
-            elif (
-                quote_char == '"'
-                and text[i] == "'"
-                and i + 1 < len(text)
-                and text[i + 1] == "'"
-            ):
-                result.append("'")
-                i += 2
-            else:
-                result.append(text[i])
-                i += 1
-        return "".join(result)
-
     def _continue_multiline_string(
         self, program_text: str, line_num: int
     ) -> tuple[bool, list[Token]]:
@@ -2176,8 +1980,9 @@ class _CobolLexerPure:
         # Process line by line: fixed-format or free-form
         for line_num, line in enumerate(self.lines):
             if self.free_form:
-                # In free-form, treat entire line (minus trailing newline) as program text starting column 1
-                program_text = line.rstrip("\n")
+                # In free-form, treat the entire line as program text starting
+                # at column 1 (``self.lines`` holds no line terminators).
+                program_text = line
                 if comment_entries and line_num in comment_entries:
                     tokens = self._comment_entry_line_tokens(
                         program_text, line_num, 1, comment_entries[line_num]
@@ -2203,11 +2008,10 @@ class _CobolLexerPure:
         return self.tokens
 
     def _post_tokenize(self) -> None:
-        """Token-list post-passes shared by the pure-Python and Cython paths.
+        """Token-list post-passes run once by ``tokenize()``.
 
-        Both ``tokenize()`` implementations call this once, after the EOF
-        token is appended; it rewrites ``self.tokens`` in place (the Cython
-        path returns the same list object).
+        Called after the EOF token is appended; it rewrites ``self.tokens``
+        in place.
         """
         self._merge_concatenated_literals()
         self._merge_numeric_procedure_names()
@@ -2368,7 +2172,7 @@ class _CobolLexerPure:
         pos = token.location.column - 2
         seen_amp = False
         while True:
-            line = lines[line_idx].rstrip("\n")
+            line = lines[line_idx]
             pos = min(pos, len(line) - 1)
             while pos >= lo:
                 ch = line[pos]
@@ -2399,7 +2203,6 @@ class _CobolLexerPure:
         fixed-format comment line (``*`` or ``/`` in column 7) has no
         program text at all.
         """
-        line = line.rstrip("\n")
         if not self.free_form and len(line) > _FF_INDICATOR:
             if line[_FF_INDICATOR] in "*/":
                 return lo
@@ -2840,8 +2643,7 @@ class _CobolLexerPure:
         PICTURE currency symbol. Otherwise a declared currency symbol
         (``CURRENCY SIGN IS 'EUR' WITH PICTURE SYMBOL '#'``) becomes CURRENCY.
 
-        A single linear pass, shared verbatim by the Cython fast path, which
-        inherits this method.
+        A single linear pass.
         """
         tokens = self.tokens
         if not any(t.type in self._STRAY_TYPES for t in tokens):
@@ -2999,7 +2801,7 @@ def _fixed_format_comment_tokens(
         else ALL_COMMENT_INDICATORS - DEBUG_INDICATORS
     )
 
-    physical = [raw.rstrip("\n").expandtabs(8) for raw in physical_lines]
+    physical = [raw.expandtabs(8) for raw in physical_lines]
     # Lines after ``>>SOURCE FORMAT IS FREE`` have no indicator column: a
     # ``D``/``*``/``/`` that merely happens to sit in column 7 of a free line
     # (``    ADD A TO B``) is code, which the normalizer passed through whole.
@@ -3218,20 +3020,3 @@ def tokenize_cobol(
         raise errors[0]
 
     return tokens
-
-
-# ---------------------------------------------------------------------------
-# Optional Cython fast path – opt-in drop-in for CobolLexer.
-# The Cython subclass is defined in _lexer_fast.pyx and overrides the three
-# innermost hot-path methods. The pure-Python class is the default; the
-# compiled one is used only under COBOLPARSER_ACCEL=1 (see cobolparser._accel),
-# and even then falls back silently if the extension was not compiled.
-# ---------------------------------------------------------------------------
-CobolLexer = _CobolLexerPure
-if accelerators_enabled():
-    try:
-        from cobolparser._lexer_fast import (  # type: ignore[import-not-found,no-redef]
-            CobolLexer,
-        )
-    except ImportError:
-        pass

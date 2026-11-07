@@ -29,18 +29,15 @@ from pathlib import Path
 #      same-named module beside it -- "cobolparser/parsers/" never matched
 #      "cobolparser/parser.py", so the parse orchestrator changed for months
 #      without ever asking for an OKF update. Every module gets its own entry.
-#   2. Every non-test .py/.pyx file under cobolparser/ must match at least one
+#   2. Every non-test .py file under cobolparser/ must match at least one
 #      prefix. tests/test_okf_staleness_map.py enforces that, so a new
 #      package (the way cobolparser/jcl/ arrived) cannot land undocumented.
 OKF_MAP = [
     ("cobolparser/lexer.py", [".okf/lexer.md"]),
-    ("cobolparser/_lexer_fast.pyx", [".okf/lexer.md"]),
-    ("cobolparser/_accel.py", [".okf/lexer.md", ".okf/parser/orchestration.md"]),
     ("cobolparser/_literals.py", [".okf/lexer.md", ".okf/parser/statements.md"]),
     ("cobolparser/_lines.py", [".okf/lexer.md", ".okf/preprocessing.md"]),
     ("cobolparser/_source_directive.py", [".okf/preprocessing.md"]),
     ("cobolparser/preprocess/", [".okf/preprocessing.md"]),
-    ("cobolparser/_preprocess_fast.pyx", [".okf/preprocessing.md"]),
     ("cobolparser/parser.py", [".okf/parser/orchestration.md"]),
     ("cobolparser/_errors.py", [".okf/parser/orchestration.md"]),
     ("cobolparser/profiling.py", [".okf/parser/orchestration.md"]),
@@ -178,7 +175,6 @@ OKF_MAP = [
         [".okf/parser/statements-io.md"],
     ),
     ("cobolparser/models/", [".okf/ast-models.md"]),
-    ("cobolparser/_data_fast.pyx", [".okf/ast-models.md", ".okf/parser/divisions.md"]),
     (
         "cobolparser/_storage.py",
         [".okf/ast-models.md", ".okf/generators/record-data.md"],

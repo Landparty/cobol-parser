@@ -1,8 +1,6 @@
 """Regression tests for the 2026-09-09 preprocessing/lexer review findings.
 
-One test class per finding. Every normalize_fixed_format test runs against
-both the pure-Python implementation and whichever implementation the package
-exposes (the Cython accelerator when compiled, the same function otherwise).
+One test class per finding.
 """
 
 from __future__ import annotations
@@ -21,9 +19,8 @@ from cobolparser import (
     parse_cobol_with_expansion,
     tokenize_cobol,
 )
-from cobolparser.lexer import TokenType, _CobolLexerPure
+from cobolparser.lexer import CobolLexer, TokenType
 from cobolparser.preprocess import (
-    _normalize_fixed_format_pure,
     normalize_fixed_format,
     preprocess_conditional_compilation,
 )
@@ -33,10 +30,7 @@ from cobolparser.preprocess.copy_statement_parser import (
 )
 from cobolparser.preprocess.replace_statement import _ReplaceScanner
 
-NORMALIZERS = [
-    pytest.param(_normalize_fixed_format_pure, id="pure"),
-    pytest.param(normalize_fixed_format, id="package"),
-]
+NORMALIZERS = [pytest.param(normalize_fixed_format, id="normalize")]
 
 
 def _prog(*body: str) -> str:
@@ -554,9 +548,9 @@ class TestFinding11Minor:
         assert normalize(src) == normalize(src.splitlines())
 
     def test_unterminated_typed_literal_warns_in_free_form(self):
-        plain = _CobolLexerPure('MOVE "AB TO X', free_form=True)
+        plain = CobolLexer('MOVE "AB TO X', free_form=True)
         plain.tokenize()
-        typed = _CobolLexerPure('MOVE X"AB TO X', free_form=True)
+        typed = CobolLexer('MOVE X"AB TO X', free_form=True)
         typed.tokenize()
         assert typed.get_errors() == []
         assert len(typed.get_warnings()) == 1

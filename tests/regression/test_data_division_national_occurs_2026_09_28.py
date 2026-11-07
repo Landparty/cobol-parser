@@ -11,14 +11,11 @@
    NATIONAL`` was dropped, leaving its children DISPLAY.
 3. ``OCCURS ... DEPENDING ON CNT OF CTL``: the qualifier stopped the OCCURS
    walk, so every ASCENDING/DESCENDING KEY and INDEXED BY after it was
-   dropped. Covered on both the pure-Python and the Cython clause loop.
+   dropped.
 4. ``USAGE PROCEDURE-POINTER`` is 8 bytes on IBM Enterprise COBOL (was 4);
    ``USAGE OBJECT REFERENCE`` is a 4-byte address (was 0).
 """
 
-import pytest
-
-import cobolparser.parsers.divisions.data_clauses as data_clauses
 from cobolparser import parse_cobol
 from cobolparser._storage import storage_size
 from cobolparser.generators.data import (
@@ -56,17 +53,8 @@ def _item(result, name: str):
     raise AssertionError(f"no data item {name}")
 
 
-@pytest.fixture(params=["fast", "pure"])
-def clause_loop(request, monkeypatch):
-    """Run each test through the Cython clause loop (when built) and the
-    pure-Python one."""
-    if request.param == "pure":
-        monkeypatch.setattr(data_clauses, "_HAS_DATA_FAST", False)
-    return request.param
-
-
 class TestBareUsageWords:
-    def test_bare_national_is_the_usage_not_part_of_the_picture(self, clause_loop):
+    def test_bare_national_is_the_usage_not_part_of_the_picture(self):
         result = _parse(
             "       01  REC.\n"
             "           05  A  PIC N(5) NATIONAL.\n"
@@ -82,7 +70,7 @@ class TestBareUsageWords:
         assert b.usage == "NATIONAL"
         assert b.value_clause == "12"
 
-    def test_bare_display_1_and_is_national(self, clause_loop):
+    def test_bare_display_1_and_is_national(self):
         result = _parse(
             "       01  REC.\n"
             "           05  G1  PIC G(5) DISPLAY-1.\n"
@@ -92,7 +80,7 @@ class TestBareUsageWords:
         assert _item(result, "G1").usage == "DISPLAY-1"
         assert _item(result, "N1").usage == "NATIONAL"
 
-    def test_bare_utf8(self, clause_loop):
+    def test_bare_utf8(self):
         result = _parse("       01  U1  PIC U(4) UTF-8.\n")
         assert result.warnings == []
         u1 = _item(result, "U1")
@@ -101,7 +89,7 @@ class TestBareUsageWords:
 
 
 class TestNationalData:
-    def test_pic_n_implies_usage_national(self, clause_loop):
+    def test_pic_n_implies_usage_national(self):
         result = _parse(
             "       01  REC.\n"
             "           05  A  PIC N(5).\n"
@@ -118,11 +106,11 @@ class TestNationalData:
         assert _item(result, "C").usage == "DISPLAY"
         assert _item(result, "D").usage == "DISPLAY-1"
 
-    def test_explicit_usage_on_pic_n_still_wins(self, clause_loop):
+    def test_explicit_usage_on_pic_n_still_wins(self):
         result = _parse("       01  A  PIC N(4) USAGE DISPLAY-1.\n")
         assert _item(result, "A").usage == "DISPLAY-1"
 
-    def test_numeric_national_is_two_bytes_per_position(self, clause_loop):
+    def test_numeric_national_is_two_bytes_per_position(self):
         result = _parse(
             "       01  REC.\n"
             "           05  A  PIC 9(5) USAGE NATIONAL.\n"
@@ -142,7 +130,7 @@ class TestNationalData:
         assert not pic.is_numeric_edited
         assert _item(result, "A").usage == "NATIONAL"
 
-    def test_group_usage_national(self, clause_loop):
+    def test_group_usage_national(self):
         result = _parse(
             "       01  GRP GROUP-USAGE IS NATIONAL.\n"
             "           05  GA  PIC N(3).\n"
@@ -207,7 +195,7 @@ class TestOccursQualifiedDependingOn:
         "           05  CNT      PIC 9(2).\n"
     )
 
-    def test_keys_and_indexes_survive_a_qualified_counter(self, clause_loop):
+    def test_keys_and_indexes_survive_a_qualified_counter(self):
         result = _parse(self.SOURCE)
         assert result.warnings == []
         occurs = _item(result, "TBL").occurs_clause
@@ -221,7 +209,7 @@ class TestOccursQualifiedDependingOn:
         assert occurs.index_names == ["IX1", "IX2"]
         assert occurs.to_dict()["depending_on_qualifiers"] == ["CTL"]
 
-    def test_unqualified_counter_serializes_no_qualifiers(self, clause_loop):
+    def test_unqualified_counter_serializes_no_qualifiers(self):
         result = _parse(
             "       01  REC.\n"
             "           05  N  PIC 9.\n"
@@ -235,7 +223,7 @@ class TestOccursQualifiedDependingOn:
 
 
 class TestAddressUsageSizes:
-    def test_procedure_pointer_is_a_doubleword(self, clause_loop):
+    def test_procedure_pointer_is_a_doubleword(self):
         result = _parse(
             "       01  REC.\n"
             "           05  P1  USAGE PROCEDURE-POINTER.\n"

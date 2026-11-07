@@ -1,9 +1,8 @@
 """Recognising the ``>>SOURCE FORMAT`` compiler directive.
 
-Shared by the pure-Python fixed-format normalizer and its Cython mirror
-(``_preprocess_fast.pyx``), which cannot import from ``preprocess`` (circular
-import), so it lives in a dependency-free module of its own -- the same
-reason ``_lines.py`` does.
+Shared by the fixed-format normalizer and the lexer, which cannot import
+from ``preprocess`` at module level (circular import), so it lives in a
+dependency-free module of its own -- the same reason ``_lines.py`` does.
 
 IBM Enterprise COBOL::
 

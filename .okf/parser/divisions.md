@@ -1,7 +1,7 @@
 ---
 type: Module
 title: Division parsers
-description: The IDENTIFICATION / ENVIRONMENT / DATA / PROCEDURE division parsers in cobolparser/parsers/divisions/ and their collaborators -- SELECT and SPECIAL-NAMES, data-item clauses (PICTURE/VALUE/USAGE/OCCURS/...), FD/SD/RD entries, level-88/66, the _data_fast callback contract, and the PROCEDURE DIVISION dispatch loop, paragraph boundaries and unsupported-verb recovery.
+description: The IDENTIFICATION / ENVIRONMENT / DATA / PROCEDURE division parsers in cobolparser/parsers/divisions/ and their collaborators -- SELECT and SPECIAL-NAMES, data-item clauses (PICTURE/VALUE/USAGE/OCCURS/...), FD/SD/RD entries, level-88/66, and the PROCEDURE DIVISION dispatch loop, paragraph boundaries and unsupported-verb recovery.
 tags: [parser, division, data-division, procedure-division, select, occurs, picture]
 timestamp: 2026-10-15T00:00:00Z
 ---
@@ -24,7 +24,6 @@ Individual statement parsers are in [statements.md](statements.md).
 - [IDENTIFICATION DIVISION](#identification-division)
 - [ENVIRONMENT DIVISION](#environment-division)
 - [DATA DIVISION](#data-division)
-- [The `_data_fast` contract](#the-_data_fast-contract)
 - [PROCEDURE DIVISION](#procedure-division)
 - [See also](#see-also)
 
@@ -38,8 +37,8 @@ Individual statement parsers are in [statements.md](statements.md).
 | `environment.py` | ENVIRONMENT DIVISION — division scan + AST node; section/SELECT parsing delegated to the two `environment_*.py` collaborators below |
 | `environment_sections.py` | `ConfigurationSectionParser` (CONFIGURATION SECTION + SPECIAL-NAMES) and `InputOutputSectionParser` (INPUT-OUTPUT SECTION + FILE-CONTROL) |
 | `environment_select.py` | `SelectClauseParser` — SELECT statement + all clause parsers (ASSIGN/ORGANIZATION/ACCESS/KEY/STATUS/ALTERNATE/PADDING/RESERVE/SHARING/LOCK/PASSWORD) and `SelectStatement` node construction |
-| `data.py` | DATA DIVISION — section scan, level-number hierarchy, AST node; entry parsing delegated to the three `data_*.py` collaborators below. `_build_data_hierarchy` ends with `propagate_group_usage_and_sign()`: a group's USAGE / SIGN is pushed onto subordinates with none of their own (IBM rule). Explicitness is `CobolDataItem.usage_explicit`, set by `set_usage()` — which both the pure-Python and `_data_fast` clause loops call |
-| `data_clauses.py` | `DataItemClauseParser` — data-item entries + PICTURE/VALUE/USAGE/OCCURS/... clauses; owns the optional `_data_fast` Cython fast-path invocation |
+| `data.py` | DATA DIVISION — section scan, level-number hierarchy, AST node; entry parsing delegated to the three `data_*.py` collaborators below. `_build_data_hierarchy` ends with `propagate_group_usage_and_sign()`: a group's USAGE / SIGN is pushed onto subordinates with none of their own (IBM rule). Explicitness is `CobolDataItem.usage_explicit`, set by `set_usage()`, which the clause loop calls |
+| `data_clauses.py` | `DataItemClauseParser` — data-item entries + PICTURE/VALUE/USAGE/OCCURS/... clauses |
 | `data_file_description.py` | `FileDescriptionClauseParser` — FD/SD file-description clause capture (BLOCK/RECORD/LABEL/...) |
 | `data_report_description.py` | `ReportDescriptionClauseParser` — REPORT SECTION `RD` clause capture (CODE/CONTROLS/PAGE LIMIT/HEADING/FIRST-LAST DETAIL/FOOTING/GLOBAL) |
 | `data_special_entries.py` | `SpecialEntryParser` — level-88 condition names (each value's literal kind in `ConditionNameItem.value_kinds`), level-66 RENAMES, data-division EXEC SQL blocks |
@@ -70,8 +69,7 @@ Individual statement parsers are in [statements.md](statements.md).
   stopped only at `.`, so a period-less SELECT ate `DATA DIVISION` (the whole
   DATA DIVISION lost) or the next `SELECT`; the data-item loop stopped only at
   DIVISION tokens, so `01 A PIC X` + `LINKAGE SECTION.` put every LINKAGE item
-  in WORKING-STORAGE -- all with `success=True`. `_data_fast` needs no change:
-  it hands any token it does not handle back to the Python loop.
+  in WORKING-STORAGE -- all with `success=True`.
 - **Container locations.** Each `CobolSection` / `CobolParagraph` carries the
   location of its *own* header token, never the division's `start_location`:
   `environment.py`'s `_parse_configuration_section`,
@@ -340,16 +338,13 @@ all do. `_parse_value_clause` also consumes an optional `IS` and a
 `MINUS`/`PLUS` sign token before the literal (`VALUE IS -5`). Regression
 suite: `tests/regression/test_numeric_value_clause.py`.
 
-**Multi-line clauses (`data_clauses.py` + `_data_fast.pyx`):** the lexer
+**Multi-line clauses (`data_clauses.py`):** the lexer
 emits NEWLINE tokens, so any clause reader that peeks for an operand after
 consuming a keyword must skip NEWLINEs first or a line break between keyword
 and operand silently drops the operand. REDEFINES does this via
-`_skip_newlines` (pure Python) and an inline newline-skip loop (Cython) —
-the same pattern the OCCURS sub-clauses (TIMES/DEPENDING/KEY/INDEXED) use.
-Remember both implementations must change together, and the checked-in
-`_data_fast.c` must be regenerated (Cython 3.2.4). Regression cases:
-`tests/unit/test_data_division_branches.py::TestRedefinesClause`
-(multi-line + forced pure-Python-loop variants).
+`_skip_newlines` -- the same pattern the OCCURS sub-clauses
+(TIMES/DEPENDING/KEY/INDEXED) use. Regression cases:
+`tests/unit/test_data_division_branches.py::TestRedefinesClause`.
 
 **PICTURE.**
 - The pattern loop collects symbol tokens including `DIVIDE_OP` / `MULTIPLY_OP`
@@ -357,8 +352,7 @@ Remember both implementations must change together, and the checked-in
   types, which would stop `PIC 99/99/99` at `"99"` and `PIC $***,**9.99` at `"$"`
   and spawn phantom level-99 items.
 - It stops at `_PICTURE_TERMINATOR_KEYWORDS` (report clause words, `VOLATILE`,
-  `BYTE-LENGTH`, `DYNAMIC`, `OBJECT`, `NATIONAL`, `UTF-8`, ...; the Cython path
-  receives the same frozenset) and at a word that sits on the pattern's line
+  `BYTE-LENGTH`, `DYNAMIC`, `OBJECT`, `NATIONAL`, `UTF-8`, ...) and at a word that sits on the pattern's line
   *after a gap* (`_follows_gap`, column arithmetic on the previous pattern
   token): a character-string has no embedded spaces, so `PIC X(3) VALUES ARE
   'ABC'` / `PIC X(3) FOO` must not become `X(3)VALUES` / `X(3)FOO`. The stray
@@ -376,8 +370,7 @@ Remember both implementations must change together, and the checked-in
   merged into the previous pattern (`"9(08)05bariable"`). The common trigger is
   a period in column 73+ cut off by fixed-format extraction -- a hard compile
   error in GnuCOBOL too, so the column-8-72 extraction is right and the warning
-  is the fix. The `_data_fast` path calls back into this Python method, so both
-  builds behave the same. Pinned by
+  is the fix. Pinned by
   `tests/regression/test_picture_clause_missing_terminator.py`.
 - Sizing (`models/data_items.py::PictureClause`): `N` / `N(n)` counts one
   position per `N` (no DBCS byte-doubling); `U` (`_PIC_UTF8_RE`) is one byte per
@@ -397,8 +390,7 @@ suite: `tests/regression/test_value_all_clause.py`.
   `data_clauses.literal_source()`: `raw_value` for a typed literal (`X"..."`,
   `Z"..."`, `N"..."`, ...; `VALUE X"4142"` stays `X"4142"`) and
   `_literals.quote_literal(value)` otherwise (doubling an embedded delimiter, see
-  [statements.md](statements.md)). The `_data_fast` path delegates VALUE to this
-  helper.
+  [statements.md](statements.md)).
 
 **USAGE.**
 - `parse_usage_clause` warns `Unsupported USAGE 'X' ...` for an IDENTIFIER
@@ -423,7 +415,7 @@ suite: `tests/regression/test_value_all_clause.py`.
 - `[USAGE] [IS] OBJECT REFERENCE [[FACTORY OF] class]` (`_at_object_reference`,
   `_parse_object_reference`).
 
-**OCCURS (`_parse_occurs_clause`, mirrored in `_data_fast.pyx`).**
+**OCCURS (`_parse_occurs_clause`).**
 - Parses `{ASCENDING|DESCENDING} KEY [IS] k1 [k2 ...]` (repeatable) and
   `INDEXED BY` in one loop, in either order and interleaved (IBM accepts
   `INDEXED BY IX ASCENDING KEY K`); both name lists stop at `ASCENDING` /
@@ -431,21 +423,21 @@ suite: `tests/regression/test_value_all_clause.py`.
   index loop took `ASCENDING` as an index name and dropped the key
   (`OccursClause.key_clauses` / `index_names`, see
   [ast-models.md](../ast-models.md)). Commas in both name lists are separators;
-  the `.pyx` compares the COMMA token *type* (`comma_type` parameter), never the
-  value `","`, which a `','` literal would match. Qualified KEY names (`KEY IS K1
+  the COMMA token *type* is compared, never the value `","`, which a `','`
+  literal would match. Qualified KEY names (`KEY IS K1
   OF T`) keep the bare name.
 - Line splits: NEWLINEs are skipped before the count, before `TO`, before the
   max, between `INDEXED` and `BY`, and before `ON` and the variable of
   `DEPENDING ON` (the variable must be an IDENTIFIER, so crossing a line can
   never swallow a level number).
-- **Count guard** (`_peek_count_token` / `_peek_count_pos` in `.pyx`): a
+- **Count guard** (`_peek_count_token`): a
   NUMERIC_LITERAL is always the count; a LEVEL_NUMBER on the same line is the
   count; a LEVEL_NUMBER reached only by crossing a line break counts only when
   the token after it continues the OCCURS clause
   (TIMES/TO/DEPENDING/INDEXED/ASCENDING/DESCENDING/PIC). Otherwise a malformed
   `OCCURS` with no count would take the next item's level number as the table
   size and delete that item. Applies to the first count and the `TO` max.
-- `DEPENDING ON CNT OF CTL [IN ...]`: `_consume_qualifiers` (pure and Cython)
+- `DEPENDING ON CNT OF CTL [IN ...]`: `_consume_qualifiers`
   reads the chain into `OccursClause.depending_on_qualifiers`; `depending_on`
   stays the bare name (generators match counters by bare name).
 - `OCCURS UNBOUNDED DEPENDING ON` (peeked with `_peek_next_meaningful(offset=0)`
@@ -492,40 +484,12 @@ suite: `tests/regression/test_value_all_clause.py`.
 but attaches no parse context, so a missing `END-EXEC` there is not reported (the
 PROCEDURE DIVISION caller reports it -- see [statements-io.md](statements-io.md)).
 
-## The `_data_fast` contract
+## Delegating wrappers
 
-- **Callback surface.** `DataDivisionParser` keeps `_parse_picture_clause` /
-  `_parse_value_clause` / `_parse_usage_clause` (and `_parse_data_item`) as
-  delegating wrappers with their historical names and signatures — the compiled
-  `_data_fast` extension receives the division parser as `parser_self` and calls
-  those three back by name. New clause logic goes in `DataItemClauseParser`; the
-  wrappers must stay.
-- **Arity guard.** The other half of the contract is the 20-argument positional
-  call (`_DATA_FAST_ARG_COUNT = 20`) `parse_data_item` makes into
-  `parse_data_item_clauses_fast`. A stale *build* (in-place `.so` older than the
-  tree, cached `build/`, an installed wheel shadowing the source) still imports
-  fine, then raises `TypeError` in every data-description entry, which the broad
-  `except Exception` in `parser.py` turns into the loss of the DATA *and*
-  PROCEDURE divisions. `_data_fast_usable()` probes the helper once at import
-  (empty token list -> it returns `pos` untouched) and, on mismatch, sets
-  `_HAS_DATA_FAST = False` and names the rebuild via `logger.warning` (never
-  `warnings.warn` — at import time that breaks `import cobolparser` under
-  `-W error`). **Adding a parameter to `parse_data_item_clauses_fast` means
-  updating `_DATA_FAST_ARG_COUNT` alongside the call site.** Full mechanics in
-  [lexer.md](../lexer.md) ("Signature-drift guard");
-  `tests/regression/test_data_fast_signature_drift.py`.
-- **Opt-in only.** The extension is looked for only under `COBOLPARSER_ACCEL=1`
-  ([orchestration.md](orchestration.md)), so the probe and its warning run only
-  then. The drift tests reload `data_clauses` with the variable set
-  (`_accel_opted_in()`), and `test_extension_is_ignored_without_the_opt_in` pins
-  that a default import never touches the binary.
-- **Both loops change together.** A clause rule implemented in both the pure
-  loop and `_data_fast.pyx` must change in both, with the checked-in `.c`
-  regenerated. The Cython loop hands unknown clauses, report clause words, bare
-  usage words, `SIGN`, `OCCURS UNBOUNDED` / `n TO UNBOUNDED`, and `USAGE [IS]
-  OBJECT` back to the pure-Python loop, which is the single implementation for
-  them. The CI coverage job runs pure Python only; a fast-path-only bug shows up
-  only in the extension-built matrix.
+`DataDivisionParser` keeps `_parse_picture_clause` / `_parse_value_clause` /
+`_parse_usage_clause` (and `_parse_data_item`) as delegating wrappers with their
+historical names and signatures; new clause logic goes in
+`DataItemClauseParser`.
 
 ## PROCEDURE DIVISION
 
@@ -603,5 +567,5 @@ PROCEDURE DIVISION caller reports it -- see [statements-io.md](statements-io.md)
 - [orchestration.md](orchestration.md) — `CobolParser`, the pipeline, multi-unit programs
 - [statements.md](statements.md) — statement dispatch, shared helpers, boundary invariants
 - [../ast-models.md](../ast-models.md) — `CobolDataItem`, `OccursClause`, `SelectStatement` fields
-- [../lexer.md](../lexer.md) — `LEVEL_NUMBER`, `COMMENT_ENTRY`, `_data_fast` drift guard
+- [../lexer.md](../lexer.md) — `LEVEL_NUMBER`, `COMMENT_ENTRY`
 - [history](../history/parser.md) — archived dated notes behind these rules

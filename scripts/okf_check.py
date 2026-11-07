@@ -372,8 +372,6 @@ def check_imports(path: Path, text: str) -> list[Problem]:
         try:
             module = importlib.import_module(module_name)
         except Exception as exc:  # noqa: BLE001 -- report any import failure
-            if resolve_dotted(module_name) is None:
-                continue  # an optional compiled extension; its .pyx exists
             problems.append(
                 Problem(path, line, "import", f"cannot import {module_name}: {exc}")
             )
@@ -427,12 +425,6 @@ def resolve_dotted(dotted: str) -> str | None:
             return f"importing {'.'.join(parts[:i])} raised {exc!r}"
         index = i
         break
-    if module is None or index < len(parts):
-        # An optional compiled extension (``cobolparser._lexer_fast``) is not
-        # importable in a default, pure-Python install; its source is enough.
-        pyx = REPO_ROOT.joinpath(*parts).with_suffix(".pyx")
-        if pyx.exists():
-            return None
     if module is None:
         return "no importable module prefix"
     obj: object = module
@@ -585,7 +577,6 @@ def defined_symbols() -> set[str]:
             *(REPO_ROOT / "tests").rglob("*.py"),
             *(REPO_ROOT / "scripts").rglob("*.py"),
             *(REPO_ROOT / "tools").rglob("*.py"),
-            REPO_ROOT / "setup.py",
         ]
         for source in sources:
             try:
@@ -609,14 +600,6 @@ def defined_symbols() -> set[str]:
                     names.add(node.target.id)
                 elif isinstance(node, ast.alias):
                     names.add(node.asname or node.name.split(".")[-1])
-        for source in (REPO_ROOT / "cobolparser").rglob("*.pyx"):
-            names.update(
-                re.findall(
-                    r"^\s*(?:cpdef|cdef|def|class)\s+(?:\w+\s+)*?(\w+)\s*[(:]",
-                    source.read_text(encoding="utf-8"),
-                    re.M,
-                )
-            )
         _SYMBOLS = names
     return _SYMBOLS
 

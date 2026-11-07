@@ -40,12 +40,14 @@ jobs:
       - run: pip install "mypy==1.20.0"
       - run: mypy cobolparser/
 
-  # Full suite on every Python version for pushes to main, the nightly run and
-  # manual dispatch. On a PR only 3.13 runs the full suite; 3.11/3.12 run a
-  # fast smoke subset (lexer, all samples, fixture generation).
-  build:
+  # Full suite, with the 90% coverage floor (pyproject.toml's addopts), on
+  # every supported Python. The library is pure Python, so coverage sees every
+  # line. `-p no:randomly` keeps a failure reproducible from the log; `-n auto`
+  # keeps the job near two minutes.
+  test:
     runs-on: ubuntu-latest
     strategy:
+      fail-fast: false
       matrix:
         python-version: ["3.11", "3.12", "3.13"]
     steps:
@@ -54,46 +56,5 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
           cache: pip
-      - run: pip install setuptools
-      - run: pip install -e ".[dev,fast]"
-      # COBOLPARSER_ACCEL=1 opts in at both ends: setup.py compiles the
-      # extensions only under it, and they are used only under it (pure
-      # Python is the default backend; see cobolparser/_accel.py).
-      - run: COBOLPARSER_ACCEL=1 python setup.py build_ext --inplace
-      # The suite runs here, after build_ext, so it exercises the Cython
-      # extensions rather than the pure-Python fallback -- CI used to build
-      # them and never run a line through them. `-p no:randomly` keeps a
-      # failure reproducible from the log; `-n auto` keeps the job near two
-      # minutes.
-      #
-      # --no-cov here, and the floor enforced in the `coverage` job below
-      # instead: coverage.py cannot see into a compiled Cython extension, so
-      # once build_ext has run the pure-Python bodies it shadows read as
-      # unexecuted. Measured 2026-09-07 on the same suite: 54.32% with the
-      # extensions built, 91.76% without. Gating here would fail on the build
-      # step rather than on the code. Same reasoning as the cibuildwheel
-      # test-command's --no-cov in pyproject.toml.
-      - run: >-
-          COBOLPARSER_ACCEL=1 python -m pytest
-          ${{ (github.event_name == 'pull_request' && matrix.python-version != '3.13')
-          && 'tests/unit/test_lexer.py tests/test_all_samples.py tests/unit/test_program_fixtures.py'
-          || 'tests/' }}
-          -q -p no:randomly -n auto --no-cov
-
-  # Where the 90% floor is actually enforced: the pure-Python backend (the
-  # default), so coverage.py can see every line the extensions would
-  # otherwise hide. Nothing is compiled without COBOLPARSER_ACCEL=1, and
-  # COBOLPARSER_SKIP_EXT=1 is kept as a belt-and-braces opt-out.
-  coverage:
-    if: github.event_name != 'push'
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.13"
-          cache: pip
-      - run: pip install setuptools
-      - run: COBOLPARSER_SKIP_EXT=1 pip install -e ".[dev]"
-      # --cov-fail-under=90 comes from pyproject.toml's addopts.
+      - run: pip install -e ".[dev]"
       - run: python -m pytest tests/ -q -p no:randomly -n auto

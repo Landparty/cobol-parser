@@ -14,10 +14,8 @@ The lexer now emits each comment-entry line as one COMMENT_ENTRY token, and
 the IDENTIFICATION DIVISION parser stores the text as written.
 """
 
-import pytest
-
 from cobolparser import parse_cobol
-from cobolparser.lexer import CobolLexer, TokenType, _CobolLexerPure
+from cobolparser.lexer import CobolLexer, TokenType
 from cobolparser.plugins.core import ErrorRecoveryMode
 
 
@@ -92,9 +90,7 @@ def test_free_form_comment_entry() -> None:
     assert meta["date_written"] == "2024/03/31"
 
 
-@pytest.mark.parametrize("lexer_cls", [_CobolLexerPure, CobolLexer])
-def test_lexer_emits_comment_entry_tokens(lexer_cls) -> None:
-    # The Cython lexer (when built) must agree with the pure-Python one.
+def test_lexer_emits_comment_entry_tokens() -> None:
     text = (
         "IDENTIFICATION DIVISION.\n"
         "PROGRAM-ID. X.\n"
@@ -103,7 +99,7 @@ def test_lexer_emits_comment_entry_tokens(lexer_cls) -> None:
         "PROCEDURE DIVISION.\n"
         "    DISPLAY 'O''K'.\n"
     )
-    lexer = lexer_cls(text, free_form=True)
+    lexer = CobolLexer(text, free_form=True)
     tokens = lexer.tokenize()
     assert lexer.get_warnings() == []
     assert not lexer.get_errors()
@@ -116,5 +112,5 @@ def test_lexer_emits_comment_entry_tokens(lexer_cls) -> None:
 
 def test_comment_entry_keyword_outside_identification_is_program_text() -> None:
     text = "PROCEDURE DIVISION.\nREMARKS. DISPLAY 'X'.\n"
-    tokens = _CobolLexerPure(text, free_form=True).tokenize()
+    tokens = CobolLexer(text, free_form=True).tokenize()
     assert not [t for t in tokens if t.type == TokenType.COMMENT_ENTRY]

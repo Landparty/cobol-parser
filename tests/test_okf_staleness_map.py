@@ -25,7 +25,7 @@ from okf_staleness_check import OKF_MAP, _get_okf_files  # noqa: E402
 
 
 def _tracked_source_files() -> list[str]:
-    """Every tracked .py/.pyx file under ``cobolparser/``."""
+    """Every tracked .py file under ``cobolparser/``."""
     out = subprocess.run(
         ["git", "ls-files", "cobolparser"],
         cwd=REPO_ROOT,
@@ -33,7 +33,7 @@ def _tracked_source_files() -> list[str]:
         text=True,
         check=True,
     ).stdout.split()
-    return [f for f in out if f.endswith((".py", ".pyx"))]
+    return [f for f in out if f.endswith(".py")]
 
 
 class TestOkfMapCoverage:

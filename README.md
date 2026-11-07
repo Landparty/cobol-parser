@@ -47,8 +47,7 @@ dependencies. Optional extras:
 | `mcp` | `cobol-parser mcp`, the MCP server ([docs/mcp-server.md](docs/mcp-server.md)) |
 | `jcl` | `cobol-parser jcl`, and the JCL joins in `field-impact`, `widen-check` and the MCP server |
 | `pl1`, `hlasm` | PL/I and assembler programs in the MCP server's call graph |
-| `fast` | Cython, to build the optional accelerators from source |
-| `dev`, `docs` | the test, lint and docs toolchain for working on this repo |
+| `dev` | the test, lint and type-check toolchain for working on this repo |
 
 To get the CLI on your `PATH` without a project virtualenv:
 
@@ -57,16 +56,8 @@ uv tool install cobol-parser
 uv tool install --editable .   # from a clone, picking up code changes
 ```
 
-The install is pure Python by default. The PyPI wheels also carry three
-compiled Cython accelerators (about 3x lexer throughput), used only when
-`COBOLPARSER_ACCEL=1` is set at run time. From a clone, the same variable at
-build time compiles them:
-
-```bash
-pip install -e ".[fast]"
-COBOLPARSER_ACCEL=1 python setup.py build_ext --inplace
-export COBOLPARSER_ACCEL=1
-```
+The package is pure Python: one `py3-none-any` wheel serves every platform,
+and nothing is compiled on install.
 
 ## Quick start
 
@@ -768,7 +759,7 @@ person or an AI agent loads only the file for the task at hand.
 ## Development
 
 ```bash
-pip install -e ".[dev,docs]"
+pip install -e ".[dev]"
 git config core.hooksPath .githooks              # the OKF pre-commit check
 
 python -m pytest tests/ -q -n 4 --no-cov         # fast full run
@@ -781,9 +772,7 @@ python -m mypy cobolparser/
 ```
 
 CI runs only on manual dispatch (`.github/workflows/ci.yml` has no push or PR
-trigger), so run lint, types and the full suite locally before pushing. Measure coverage on
-the pure-Python build: with `COBOLPARSER_ACCEL=1`, coverage.py cannot see the
-code the compiled modules replace. Test layout and markers:
+trigger), so run lint, types and the full suite locally before pushing. Test layout and markers:
 [.okf/tests.md](.okf/tests.md).
 
 ## License

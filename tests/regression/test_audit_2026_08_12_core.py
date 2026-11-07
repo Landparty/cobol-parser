@@ -10,8 +10,8 @@ One test class per finding:
   which the next parse() reset in place.
 * P-B4 -- _ID_DIV_RE never matched a sequence-numbered fixed-format
   IDENTIFICATION DIVISION header.
-* P-B5 -- the compiled _lexer_fast tokenize() did not reset ``warnings``,
-  duplicating them across calls on one lexer instance.
+* P-B5 -- tokenize() did not reset ``warnings``, duplicating them across
+  calls on one lexer instance.
 * P-B6 -- PathResolver's Tier-2 directory index was last-directory-wins for
   full-filename keys but first-wins for stem keys (and Tier-3 first-wins).
 * P-D1 -- expand_copybooks() ignored a caller-supplied ``path_resolver``.
@@ -26,18 +26,13 @@ import pytest
 from cobolparser import parse_cobol
 from cobolparser.core.exceptions import TokenMismatch
 from cobolparser.core.token_stream import TokenStream
-from cobolparser.lexer import Token, TokenType, _CobolLexerPure
+from cobolparser.lexer import CobolLexer, Token, TokenType
 from cobolparser.models.ast_base import SourceLocation
 from cobolparser.parser import _ID_DIV_RE, CobolParser
 from cobolparser.preprocess import copy_statement_parser
 from cobolparser.preprocess.copybook_expander import expand_copybooks
 from cobolparser.preprocess.models import CopybookSearchPath
 from cobolparser.preprocess.path_resolver import PathResolver, find_copybook_file
-
-try:
-    from cobolparser._lexer_fast import CobolLexer as _FastLexer
-except ImportError:  # pragma: no cover - compiled extension not built
-    _FastLexer = None
 
 
 def _move_program(move_line: str) -> str:
@@ -193,12 +188,8 @@ class TestPB5LexerWarningsReset:
         assert len(first) == 1, first
         assert second == first
 
-    def test_pure_python_lexer_does_not_duplicate_warnings(self):
-        self._assert_no_duplication(_CobolLexerPure)
-
-    @pytest.mark.skipif(_FastLexer is None, reason="_lexer_fast not compiled")
-    def test_compiled_lexer_does_not_duplicate_warnings(self):
-        self._assert_no_duplication(_FastLexer)
+    def test_lexer_does_not_duplicate_warnings(self):
+        self._assert_no_duplication(CobolLexer)
 
 
 class TestPB6FirstDirectoryWins:

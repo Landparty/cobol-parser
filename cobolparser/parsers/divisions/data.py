@@ -11,8 +11,7 @@ hierarchy building, and the AST node creation. The detailed entry parsing is
 delegated to focused collaborators:
 
 - :class:`~.data_clauses.DataItemClauseParser` — data-description entries and
-  their clauses (PICTURE, VALUE, USAGE, OCCURS, ...), including the optional
-  Cython fast path
+  their clauses (PICTURE, VALUE, USAGE, OCCURS, ...)
 - :class:`~.data_file_description.FileDescriptionClauseParser` — FD/SD
   file-description clause capture
 - :class:`~.data_special_entries.SpecialEntryParser` — level-88 condition
@@ -85,8 +84,7 @@ def propagate_group_usage_and_sign(
     bytes instead of three packed ones, and every offset after it drifted.
 
     Decided after clause parsing (``usage_explicit`` is set by
-    ``CobolDataItem.set_usage``, which the pure-Python and Cython clause
-    loops both call), so the two paths cannot disagree.  Only entries with
+    ``CobolDataItem.set_usage``, which the clause loop calls).  Only entries with
     no USAGE clause of their own inherit; a subordinate group that inherits
     is re-labelled too so the AST says what the storage is, but its
     ``usage_explicit`` stays False.  SIGN is only stamped on signed numeric
@@ -811,10 +809,7 @@ class DataDivisionParser(BaseDivisionParser):
     #
     # The entry-level parsing lives in the collaborator classes (see the
     # module docstring). These wrappers keep the historical method names on
-    # the division parser itself — the Cython fast path
-    # (``cobolparser._data_fast``) calls ``_parse_picture_clause`` /
-    # ``_parse_value_clause`` / ``_parse_usage_clause`` back on this object,
-    # so those three in particular must keep their exact names/signatures.
+    # the division parser itself.
     # ------------------------------------------------------------------
 
     def _parse_data_item(

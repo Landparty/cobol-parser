@@ -8,10 +8,8 @@ and the PictureClause then flagged the symbol as invalid and mis-sized the
 floating insertion string.
 """
 
-import pytest
-
 from cobolparser import parse_cobol
-from cobolparser.lexer import CobolLexer, TokenType, _CobolLexerPure
+from cobolparser.lexer import CobolLexer, TokenType
 from cobolparser.models.ast_base import SourceLocation
 from cobolparser.models.data_items import PictureClause
 from cobolparser.plugins.core import ErrorRecoveryMode
@@ -70,10 +68,9 @@ def test_undeclared_symbol_is_dropped_with_a_warning() -> None:
     assert any("Ignored invalid character '£'" in w for w in result.warnings)
 
 
-@pytest.mark.parametrize("lexer_cls", [_CobolLexerPure, CobolLexer])
-def test_both_lexers_emit_currency_tokens(lexer_cls) -> None:
+def test_lexer_emits_currency_tokens() -> None:
     text = "SPECIAL-NAMES. CURRENCY SIGN IS '€'.\n01 A PIC €€9.\n"
-    lexer = lexer_cls(text, free_form=True)
+    lexer = CobolLexer(text, free_form=True)
     tokens = lexer.tokenize()
     assert not lexer.get_errors()
     assert [t.value for t in tokens if t.type == TokenType.CURRENCY] == ["€", "€"]

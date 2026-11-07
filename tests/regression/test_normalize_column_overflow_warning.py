@@ -23,12 +23,6 @@ in ``legacy-application/cobol/ACCTMNT.cbl`` (splits the identifier
 ``WS-PARM-DORM-DAYS`` into ``WS-PARM-DORM-D`` + dropped ``AYS``) and
 against the NIST corpus (must NOT fire there).
 
-Also pins that the Cython ``_preprocess_fast`` accelerated path stays
-behaviorally identical to the pure-Python fallback for both the returned
-text *and* the new `warnings` channel -- a divergence here means the
-compiled build silently reports different diagnostics than the
-non-accelerated build.
-
 **Word-boundary overflow (2026-08-14):** the mid-token check above requires
 columns 72 *and* 73 to both be non-blank, so it never fires when the
 overflow happens to break right after a word -- e.g. ``OCCURS 1 TO 10
@@ -101,17 +95,14 @@ shorter all-digit tails be read the same way. See
 ``TestShortIdentificationStampConvention`` below.
 """
 
-from cobolparser.preprocess import _normalize_fixed_format_pure, normalize_fixed_format
+from cobolparser.preprocess import normalize_fixed_format
 from cobolparser.preprocess._normalize import (
     MIN_ID_STAMP_EVIDENCE_LINES,
     _has_identification_stamp_convention,
     _is_numeric_id_stamp_text,
 )
 
-IMPLS = [
-    ("fast", normalize_fixed_format),
-    ("pure", _normalize_fixed_format_pure),
-]
+IMPLS = [("normalize", normalize_fixed_format)]
 
 
 class TestMidTokenOverflowWarns:
@@ -451,23 +442,6 @@ class TestShortIdentificationStampConvention:
             is False
         )
 
-    def test_fast_and_pure_agree_on_multi_line_files(self):
-        cases = [
-            self.EVIDENCE
-            + [_stamped_flush("MOVE ZEROES TO COM-HY11301-ECHEANCE-REELLE", "01641")],
-            self.EVIDENCE[:2]
-            + [_stamped_flush("MOVE ZEROES TO COM-HY11301-ECHEANCE-REELLE", "01641")],
-            self.EVIDENCE + [_stamped_flush("MOVE SPACES TO WS-PARM-DORM-D", "AYS")],
-            self.EVIDENCE + [_stamped_flush("MOVE 1 TO WS-A", "012345678")],
-        ]
-        for lines in cases:
-            fast_warnings: list[str] = []
-            pure_warnings: list[str] = []
-            fast_out = normalize_fixed_format(lines, warnings=fast_warnings)
-            pure_out = _normalize_fixed_format_pure(lines, warnings=pure_warnings)
-            assert fast_out == pure_out, lines
-            assert fast_warnings == pure_warnings, lines
-
 
 class TestSubfieldedNumericStamp:
     """A stamp whose identification field is laid out in sub-fields, so the
@@ -540,24 +514,6 @@ class TestSubfieldedNumericStamp:
         assert _is_numeric_id_stamp_text("IX2094.2") is False
         assert _is_numeric_id_stamp_text("AYS") is False
         assert _is_numeric_id_stamp_text("01636-A0") is False
-
-    def test_fast_and_pure_agree(self):
-        cases = [
-            *([line] for line in self.REPRO),
-            [_stamped_flush("MOVE ZEROES TO COM-HY11301-ECHEANCE-REELLE", "01636-A0")],
-            [_stamped_flush("MOVE 1 TO WS-A", "01636  00")],
-            [
-                *TestShortIdentificationStampConvention.EVIDENCE,
-                _stamped_flush("MOVE ZEROES TO COM-HY11301-ECHEANCE-REEL", "016 36"),
-            ],
-        ]
-        for lines in cases:
-            fast_warnings: list[str] = []
-            pure_warnings: list[str] = []
-            fast_out = normalize_fixed_format(lines, warnings=fast_warnings)
-            pure_out = _normalize_fixed_format_pure(lines, warnings=pure_warnings)
-            assert fast_out == pure_out, lines
-            assert fast_warnings == pure_warnings, lines
 
 
 class TestWordBoundaryOverflowWarns:
@@ -654,25 +610,3 @@ class TestFastAndPureParity:
         " " * 7 + "01  WS-BANNER PIC X(40) VALUE " + "'" + "*" * 32 + "'" + ".",
         " " * 65 + "A" * 7 + ".B",
     ]
-
-    def test_fast_and_pure_produce_identical_warnings(self):
-        for line in self.CASES:
-            fast_warnings: list[str] = []
-            pure_warnings: list[str] = []
-            fast_out = normalize_fixed_format([line], warnings=fast_warnings)
-            pure_out = _normalize_fixed_format_pure([line], warnings=pure_warnings)
-            assert fast_out == pure_out, line
-            assert fast_warnings == pure_warnings, line
-
-    def test_fast_and_pure_agree_with_debug_lines_as_comments_false(self):
-        line = "      D" + "Z" * 66
-        fast_warnings: list[str] = []
-        pure_warnings: list[str] = []
-        fast_out = normalize_fixed_format(
-            [line], warnings=fast_warnings, debug_lines_as_comments=False
-        )
-        pure_out = _normalize_fixed_format_pure(
-            [line], warnings=pure_warnings, debug_lines_as_comments=False
-        )
-        assert fast_out == pure_out
-        assert fast_warnings == pure_warnings

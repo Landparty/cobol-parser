@@ -1,7 +1,7 @@
 ---
 type: Module
 title: Parser orchestration
-description: CobolParser / parse_cobol / ParseResult, the source-text passes before lexing, multi-unit compilation units, core/ infrastructure (TokenStream, StatementParserRegistry, ASTNodeFactory, interfaces, exceptions, _errors.py), plugins/core.py configuration, the _accel.py opt-in and profiling.py.
+description: CobolParser / parse_cobol / ParseResult, the source-text passes before lexing, multi-unit compilation units, core/ infrastructure (TokenStream, StatementParserRegistry, ASTNodeFactory, interfaces, exceptions, _errors.py), plugins/core.py configuration and profiling.py.
 tags: [parser, parse-result, token-stream, registry, configuration, profiling]
 timestamp: 2026-10-15T00:00:00Z
 ---
@@ -13,7 +13,7 @@ entry points (`parse_cobol`, `CobolParser.parse` / `.parse_file`), the
 line-count-preserving source passes it runs before lexing, how one source member
 with several program units becomes one `CobolProgram` tree, and the shared
 infrastructure every division and statement parser sits on (`core/`,
-`plugins/core.py`, `_errors.py`, `_accel.py`, `profiling.py`). Start with
+`plugins/core.py`, `_errors.py`, `profiling.py`). Start with
 [Public API](#public-api) and [Pipeline](#pipeline); the division and statement
 parsers themselves are in [divisions.md](divisions.md) and
 [statements.md](statements.md).
@@ -28,7 +28,6 @@ parsers themselves are in [divisions.md](divisions.md) and
 - [Multi-unit compilation units](#multi-unit-compilation-units)
 - [Core infrastructure](#core-infrastructure)
 - [Configuration classes](#configuration-classes)
-- [Accelerator opt-in](#accelerator-opt-in)
 - [Profiling](#profiling)
 - [See also](#see-also)
 
@@ -44,7 +43,7 @@ result: ParseResult = parse_cobol(source, filename="prog.cob")
 # enable_profiling=True returns (ParseResult, ProfilingResult) -- see Profiling
 
 # Configurable
-config = MemoryConfiguration(max_memory_mb=256)
+config = MemoryConfiguration(max_error_count=100)  # only this field is enforced
 parser = CobolParser(
     memory_config=config,
     error_recovery=ErrorRecoveryMode.COLLECT_ALL,
@@ -128,6 +127,17 @@ parsers record a non-fatal error without dropping their node through
 `_utils.get_parse_context(stream)` + `report_parse_error` (see
 [statements.md](statements.md)).
 
+**Unexpected exceptions.** A non-`ParseError` exception escaping a division
+parser (or `parse_program()`'s outer loop) is recorded as `Division parsing
+error: <Type>: <message>`, and one escaping `_parse_core` as `Parser error:
+<Type>: <message>`, both built by `CobolParser._unexpected_error()`: the
+location is the exception's own (`line_number`/`column`, or a `location` with
+`line`/`column`) when it carries one, else the token the stream is positioned
+at, and line 1 column 1 only when neither exists; the original exception is
+chained as `__cause__`. `_parse_core` resets `self.stream` first, so an error
+raised before tokenizing never borrows a previous parse's position. Pinned by
+`tests/regression/test_unexpected_error_location.py`.
+
 `warnings` is the **"recognized but degraded"** channel, and the parser's central
 invariant is that `errors == []` and `warnings == []` together mean a complete
 AST: any construct the parser recognizes but cannot represent must leave a
@@ -180,7 +190,7 @@ adds the node, names the unit from `program_id` / `unit_kind`).
 `tokens_processed` statistic keep them). A `*>` floating comment can end any
 line, including one that breaks a data description entry between a clause
 keyword and its operand (`OCCURS 10 TIMES *> note` / `INDEXED BY IX.`). Every
-DATA DIVISION sub-clause reader, pure and in `_data_fast`, skips NEWLINE but not
+DATA DIVISION sub-clause reader skips NEWLINE but not
 COMMENT, so filtering once at the stream is what keeps those readers correct;
 do not reintroduce COMMENT tokens into the stream.
 
@@ -322,20 +332,6 @@ All in `cobolparser/plugins/core.py` (re-exported by `cobolparser.plugins`).
 
 Also defined there: `LexerError` -> `UnterminatedStringError`, and
 `MemoryLimitExceededError` (all `ParseError` subclasses).
-
-## Accelerator opt-in
-
-`cobolparser/_accel.py`. Pure Python is the default backend.
-`cobolparser._accel.accelerators_enabled()` is true only when
-`COBOLPARSER_ACCEL` is `1`/`true`/`yes`/`on`; it is re-read on every call
-(not cached) so a test can flip it and reload a module. Each module that
-owns a fast path (`lexer.py`, the preprocessor, `parsers/divisions/data_clauses.py`
-for `_data_fast`) imports its compiled extension only when it returns
-true, so a built `.so` is ignored without the variable. `setup.py` reads
-the same variable itself to decide whether to compile. Parser-side
-consequence: `data_clauses._HAS_DATA_FAST` is `False` on a default import,
-and the `_data_fast` signature-drift probe only runs under the opt-in (see
-[divisions.md](divisions.md)).
 
 ## Profiling
 

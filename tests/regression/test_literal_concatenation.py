@@ -3,8 +3,8 @@
 ``"AB" & "CD"`` is the one literal ``"ABCD"`` wherever a literal may appear.
 The lexer skipped ``&`` as a separator, so a VALUE clause kept only the
 first literal (and warned about the rest) and a MOVE source read
-``"AB" "CD"``. ``CobolLexer._merge_concatenated_literals`` (shared by the
-pure-Python and Cython lexers through ``_post_tokenize``) now joins them.
+``"AB" "CD"``. ``CobolLexer._merge_concatenated_literals`` (run from
+``_post_tokenize``) now joins them.
 """
 
 from __future__ import annotations

@@ -7,8 +7,7 @@ tokens *everywhere*, which silently turned garbage COBOL (``MOVE BOGUS !!!
 TO WS-A``) into a successful parse with zero diagnostics -- the junk folded
 into the statement's operand text. A later version restored the hard error,
 which failed whole files over a box-drawing '|' in a misplaced comment.
-``CobolLexer._drop_stray_chars`` (a linear post-pass shared by the Cython
-fast path) now drops these characters outside an EXEC block and names each
+``CobolLexer._drop_stray_chars`` (a linear post-pass) now drops these characters outside an EXEC block and names each
 one in a warning: the file parses, and the junk is not silent.
 """
 
