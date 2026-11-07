@@ -305,7 +305,9 @@ class TestOtherForms:
         assert back["other_forms"]["programs"] == {"ONLINE": 1}
         assert back["other_forms"]["form"] == "EXEC DLI"
 
-    def test_counted_with_no_exec_dli_and_absent_for_a_plain_search(self, tmp_path: Path) -> None:
+    def test_counted_with_no_exec_dli_and_absent_for_a_plain_search(
+        self, tmp_path: Path
+    ) -> None:
         write(
             tmp_path,
             "cbl/BATCH.cbl",

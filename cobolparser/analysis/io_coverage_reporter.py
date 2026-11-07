@@ -10,7 +10,7 @@ Contract: contracts/io-coverage-schema.json
 import json
 import os
 from dataclasses import asdict, dataclass, field
-from datetime import datetime
+from datetime import UTC, datetime
 from enum import StrEnum
 from typing import Any
 
@@ -258,7 +258,7 @@ class IOCoverageReporter:
             IoCoverageArtifact with coverage data
         """
         artifact = IoCoverageArtifact(
-            generated_at=datetime.utcnow().isoformat() + "Z",
+            generated_at=datetime.now(UTC).replace(tzinfo=None).isoformat() + "Z",
             parser_version=self._get_parser_version(),
             total_variations=len(self.variations),
         )
@@ -284,7 +284,7 @@ class IOCoverageReporter:
                     if all(t.get("status") == "passed" for t in tests)
                     else CoverageStatus.PARTIAL.value
                 )
-                last_tested = datetime.utcnow().isoformat() + "Z"
+                last_tested = datetime.now(UTC).replace(tzinfo=None).isoformat() + "Z"
             else:
                 status = CoverageStatus.GAP.value
                 last_tested = None
