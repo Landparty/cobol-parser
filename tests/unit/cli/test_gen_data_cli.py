@@ -449,7 +449,7 @@ class TestRecordFormatFlag:
         # The parsed value is None rather than "fixed" so that
         # --record-varying can reach auto without overriding an explicit
         # --record-format fixed; what matters is what it resolves to.
-        from cobolparser.cli.parse import _encoding_options
+        from cobolparser.cli.commands.data import _encoding_options
         from cobolparser.generators.data.encoding import RecordFormat
 
         args = _build_parser().parse_args(["gen-data", TXNDATA])
@@ -457,7 +457,7 @@ class TestRecordFormatFlag:
         assert _encoding_options(args).record_format is RecordFormat.FIXED
 
     def test_a_record_varying_range_defaults_to_auto_not_fixed(self):
-        from cobolparser.cli.parse import _encoding_options
+        from cobolparser.cli.commands.data import _encoding_options
         from cobolparser.generators.data.encoding import RecordFormat
 
         args = _build_parser().parse_args(
@@ -466,7 +466,7 @@ class TestRecordFormatFlag:
         assert _encoding_options(args).record_format is RecordFormat.AUTO
 
     def test_an_explicit_fixed_still_wins_over_a_varying_range(self):
-        from cobolparser.cli.parse import _encoding_options
+        from cobolparser.cli.commands.data import _encoding_options
         from cobolparser.generators.data.encoding import RecordFormat
 
         args = _build_parser().parse_args(

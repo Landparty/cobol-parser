@@ -367,7 +367,7 @@ entry, so `gen-fixtures --strict` exits 2 rather than passing a coverage claim
 its own data contradicts. `absent`/`unknown` do not demote — they are "could
 not tell", which `unverified` already says.
 
-`cli/parse.py`'s `gen-fixtures` prints an unverified summary on **stderr**
+`cli/commands/data.py`'s `gen-fixtures` prints an unverified summary on **stderr**
 (stdout stays JSON-only — mockymock's `fixtures` contract), and mockymock's
 `generate --with-data` renders the same reasons as a `*> UNVERIFIED:` comment
 above the affected TESTCASE.

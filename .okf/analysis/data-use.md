@@ -275,7 +275,7 @@ unconditional way.
 takes an optional `copybook_item_names: set[str]` the caller computes by
 diffing `collect_declared_items()` on an *unexpanded* parse against the
 expanded one -- see the `unused-variables` CLI subcommand
-(`_parse_without_copybook_expansion` in `cli/parse.py`; `lint` reuses it via
+(`_parse_without_copybook_expansion` in `cli/commands/analyze.py`; `lint` reuses it via
 `_lint_copybook_item_names`) for the reference implementation. The expansion
 source map (`CopybookExpansion.source_location_map` /
 `ParseResult.expansion_source_map`, see

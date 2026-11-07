@@ -255,7 +255,7 @@ class TestSummaryFile:
         assert "No findings in 1 file(s)" in summary.read_text()
 
     def test_long_list_is_capped(self, repo: Path, capsys, monkeypatch) -> None:
-        monkeypatch.setattr("cobolparser.cli.parse._SUMMARY_FINDING_LIMIT", 1)
+        monkeypatch.setattr("cobolparser.cli.commands.lint._SUMMARY_FINDING_LIMIT", 1)
         summary = repo / "s.md"
         _run("src/PAY.cbl", "src/OTHER.cbl", "--summary-file", str(summary))
         assert "more (run with" in summary.read_text()

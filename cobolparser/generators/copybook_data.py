@@ -2,7 +2,7 @@
 
 The canonical home is :mod:`cobolparser.generators.data`.  This module is
 kept because `tests/unit/test_copybook_data_generator.py` and the CLI's
-lazy import in `cli/parse.py` both import from this path.
+lazy import in `cli/commands/data.py` both import from this path.
 """
 
 from __future__ import annotations
