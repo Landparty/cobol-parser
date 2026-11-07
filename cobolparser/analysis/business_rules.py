@@ -86,10 +86,12 @@ from ..models.statements.arithmetic import (
     SubtractStatement,
 )
 from ..models.statements.base import (
+    HANDLER_CLAUSE_PHRASES,
     ArithmeticExpression,
     CobolExpression,
     CobolStatement,
     FunctionCall,
+    iter_clause_bodies,
 )
 from ..models.statements.call import CallStatement
 from ..models.statements.control import (
@@ -142,24 +144,6 @@ _INPUT_ROLES = frozenset({ROLE_READ, ROLE_CONDITION, ROLE_SUBSCRIPT, "reference"
 #: Roles that count as the rule *writing* a name. A BY REFERENCE CALL
 #: argument may be either, so it is counted as both.
 _OUTPUT_ROLES = frozenset({ROLE_WRITE, ROLE_CALL_ARGUMENT})
-
-# Nested statement lists guarded by an exception/end-of-data condition, with
-# the label a guard reads as. Same attribute set ``complexity.py`` and
-# ``program_flow/scanner.py`` walk (re-derived per module, per the OKF).
-_CLAUSE_LABELS: tuple[tuple[str, str], ...] = (
-    ("at_end_clause", "AT END"),
-    ("not_at_end_clause", "NOT AT END"),
-    ("invalid_key_clause", "INVALID KEY"),
-    ("not_invalid_key_clause", "NOT INVALID KEY"),
-    ("at_eop_clause", "AT END-OF-PAGE"),
-    ("not_at_eop_clause", "NOT AT END-OF-PAGE"),
-    ("on_size_error", "ON SIZE ERROR"),
-    ("not_on_size_error", "NOT ON SIZE ERROR"),
-    ("on_overflow", "ON OVERFLOW"),
-    ("not_on_overflow", "NOT ON OVERFLOW"),
-    ("on_exception", "ON EXCEPTION"),
-    ("not_on_exception", "NOT ON EXCEPTION"),
-)
 
 #: Names that are plumbing by convention even when nothing else marks them.
 _TECHNICAL_NAME_RE = re.compile(
@@ -688,14 +672,18 @@ class BusinessRuleExtractor:
                 for target in self._invoked_procedures(stmt):
                     self._invocations.append((target, owner[0], owner[1]))
 
-            if isinstance(stmt, PerformStatement):
-                inline = getattr(stmt, "inline_statements", None) or []
-                self._walk(inline, procedure, section, guards, owner)
-            for attr, label in _CLAUSE_LABELS:
-                clause = getattr(stmt, attr, None)
-                if clause and not isinstance(stmt, SearchStatement):
+            # Inline PERFORM bodies run under the same guards; a handler body
+            # (AT END, ON SIZE ERROR, ...: the canonical handler list) adds its
+            # phrase as a guard. SEARCH's AT END is an arm of its decision.
+            for body in iter_clause_bodies(
+                stmt, include_handlers=not isinstance(stmt, SearchStatement)
+            ):
+                if body.kind == "loop":
+                    self._walk(body.statements, procedure, section, guards, owner)
+                elif body.kind == "handler":
+                    label = HANDLER_CLAUSE_PHRASES[body.attr]
                     self._walk(
-                        clause,
+                        body.statements,
                         procedure,
                         section,
                         [*guards, f"{label} ({self._statement_text(stmt)})"],

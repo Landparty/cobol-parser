@@ -567,7 +567,7 @@ class CobolProgram(ASTNode):
         if self._cached_all_statements is not None:
             return self._cached_all_statements
 
-        from .statements import CobolStatement
+        from .statements import NESTED_BODY_ATTRS, CobolStatement
 
         statements = []
         visited = set()
@@ -603,28 +603,9 @@ class CobolProgram(ASTNode):
                 for stmt in node.statements:
                     traverse(stmt)
 
-            # 3. Recurse known attribute lists (handle orphans/non-children)
-            # COBOL statements often have conditional blocks in attributes
-            orphan_attrs = [
-                "at_end_clause",
-                "not_at_end_clause",
-                "invalid_key_clause",
-                "not_invalid_key_clause",
-                "at_eop_clause",
-                "on_exception",
-                "not_on_exception",
-                "on_overflow",
-                "not_on_overflow",
-                "on_size_error",
-                "not_on_size_error",
-                "when_clauses",
-                "default_when",
-                "then_statements",
-                "else_statements",
-                "inline_statements",
-            ]
-
-            for attr in orphan_attrs:
+            # 3. Recurse every nested-body attribute (handle orphans/non-children):
+            # the one canonical list, next to the statement node classes.
+            for attr in NESTED_BODY_ATTRS:
                 if hasattr(node, attr):
                     val = getattr(node, attr)
                     if val:

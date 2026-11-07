@@ -87,9 +87,13 @@ from ..models.statements.arithmetic import (
     ComputeStatement,
     SubtractStatement,
 )
-from ..models.statements.base import CobolStatement
+from ..models.statements.base import (
+    NESTED_BODY_ATTRS,
+    CobolStatement,
+    iter_clause_bodies,
+    walk_statements,
+)
 from ..models.statements.control import (
-    EvaluateStatement,
     GoStatement,
     IfStatement,
     PerformStatement,
@@ -248,59 +252,13 @@ class BugPatternReport:
 # Statement walking
 # ---------------------------------------------------------------------------
 
-_NESTED_ATTRS = (
-    "then_statements",
-    "else_statements",
-    "inline_statements",
-    "at_end_clause",
-    "not_at_end_clause",
-    "invalid_key_clause",
-    "not_invalid_key_clause",
-    "at_eop_clause",
-    "on_exception",
-    "not_on_exception",
-    "on_overflow",
-    "not_on_overflow",
-    "on_size_error",
-    "not_on_size_error",
-)
-
 
 def _nested_lists(stmt: Any) -> Iterator[list[Any]]:
-    """Every statement list nested directly inside *stmt*."""
-    for attr in _NESTED_ATTRS:
-        value = getattr(stmt, attr, None)
-        if isinstance(value, list) and value:
-            yield value
-    if isinstance(stmt, EvaluateStatement):
-        for clause in stmt.when_clauses:
-            if clause.statements:
-                yield list(clause.statements)
-        if stmt.default_when is not None and stmt.default_when.statements:
-            yield list(stmt.default_when.statements)
-    when_clauses = getattr(stmt, "when_clauses", None)
-    if not isinstance(stmt, EvaluateStatement) and isinstance(when_clauses, list):
-        # SEARCH: WHEN clauses carry their own statement lists.
-        for clause in when_clauses:
-            statements = getattr(clause, "statements", None)
-            if isinstance(statements, list) and statements:
-                yield statements
-
-
-def walk_statements(statements: Iterable[Any]) -> Iterator[Any]:
-    """Every statement in *statements*, nested ones included, in source order."""
-    stack: list[Any] = list(reversed(list(statements)))
-    seen: set[int] = set()
-    while stack:
-        stmt = stack.pop()
-        if id(stmt) in seen:
-            continue
-        seen.add(id(stmt))
-        yield stmt
-        nested: list[Any] = []
-        for block in _nested_lists(stmt):
-            nested.extend(block)
-        stack.extend(reversed(nested))
+    """Every statement list nested directly inside *stmt* (the canonical
+    ``iter_clause_bodies``; ``walk_statements`` is re-exported from the
+    statement models)."""
+    for body in iter_clause_bodies(stmt):
+        yield body.statements
 
 
 def _procedure_statements(node: Any) -> list[Any]:
@@ -1384,7 +1342,7 @@ def _statement_strings(stmt: Any) -> Iterator[str]:
             "_"
         ):
             continue
-        if name in _NESTED_ATTRS or name in ("when_clauses", "default_when"):
+        if name in NESTED_BODY_ATTRS:
             continue
         yield from walk(value, 0)
 

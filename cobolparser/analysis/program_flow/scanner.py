@@ -12,7 +12,7 @@ from typing import Any, cast
 
 from ...models.program import CobolDivision, CobolParagraph, CobolProgram, CobolSection
 from ...models.sql_statements import ExecSQLStatement
-from ...models.statements.base import CobolExpression
+from ...models.statements.base import HANDLER_CLAUSE_ATTRS, CobolExpression
 from ...models.statements.call import CallStatement, EntryStatement
 from ...models.statements.control import (
     EvaluateStatement,
@@ -40,24 +40,12 @@ from .edges import EdgeCollector
 from .models import BranchArm, BranchNode, FlowEdge, FlowEdgeType, FlowNode
 from .statement_text import summarize_arm
 
-# Conditional clause-body attributes that may hold nested statements on IO /
-# arithmetic / STRING / ACCEPT / DISPLAY statements the ``scan()`` dispatch
-# does not special-case (XML/JSON PARSE and GENERATE are special-cased for
-# their PROCESSING PROCEDURE edge, and queue the same exception bodies there).
-_CLAUSE_BODY_ATTRS: tuple[str, ...] = (
-    "at_end_clause",
-    "not_at_end_clause",
-    "invalid_key_clause",
-    "not_invalid_key_clause",
-    "at_eop_clause",
-    "not_at_eop_clause",
-    "on_size_error",
-    "not_on_size_error",
-    "on_overflow",
-    "not_on_overflow",
-    "on_exception",
-    "not_on_exception",
-)
+# Conditional handler bodies that may hold nested statements on IO /
+# arithmetic / STRING / ACCEPT / DISPLAY / RECEIVE statements the ``scan()``
+# dispatch does not special-case (XML/JSON PARSE and GENERATE are
+# special-cased for their PROCESSING PROCEDURE edge, and queue the same
+# exception bodies there): the statement models' canonical list.
+_CLAUSE_BODY_ATTRS: tuple[str, ...] = HANDLER_CLAUSE_ATTRS
 
 
 # The flow node standing for sentences written before the PROCEDURE
@@ -640,7 +628,7 @@ class ProcedureScanner:
                 # edge, cascading into false "unreachable" reports and missing
                 # flowchart arrows.
                 clause_groups: list[tuple[list[Any], str, BranchArm | None]] = []
-                for attr in _CLAUSE_BODY_ATTRS:
+                for attr in HANDLER_CLAUSE_ATTRS:
                     clause = getattr(stmt, attr, None)
                     if isinstance(clause, list):
                         clause_groups.append((clause, source_id, arm))

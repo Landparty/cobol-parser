@@ -80,7 +80,7 @@ Report origins after copybook expansion: [analysis/lint.md](analysis/lint.md).
 | `io_diagnostics.py` | `IOErrorCode`, `IODiagnosticHelper` | [data-use](analysis/data-use.md) |
 | `crud_matrix.py` | `CRUDMatrixGenerator`, `CRUDMatrix`, `CRUDFlags` | [data-use](analysis/data-use.md) |
 | `value_tracker.py` | `DynamicCallAnalyzer` | [data-use](analysis/data-use.md) |
-| `_names.py` | `base_data_name`, `qualified_references`, `bare_names`, `callee_names`, `IDENTIFIER_TOKEN_RE`, `strip_translator_arguments`, `is_translator_function` | [data-use](analysis/data-use.md) |
+| `_names.py` | `base_data_name`, `strip_subscripts`, `strip_qualification`, `bare_item_name`, `qualified_references`, `bare_names`, `callee_names`, `IDENTIFIER_TOKEN_RE`, `strip_translator_arguments`, `is_translator_function` | [data-use](analysis/data-use.md) |
 | `_files.py` | `record_to_file_map`, `resolve_file_name`, `same_record_area_groups` | [data-use](analysis/data-use.md) |
 | `host_var_resolver.py` | `HostVariableResolver` | [sql-cics-ims](analysis/sql-cics-ims.md) |
 | `dclgen_check.py` | `DclgenChecker` | [sql-cics-ims](analysis/sql-cics-ims.md) |
@@ -88,7 +88,7 @@ Report origins after copybook expansion: [analysis/lint.md](analysis/lint.md).
 | `ims_segment_analyzer.py` | `IMSSegmentAnalyzer`, `IMSDLICall`, `IMSEntryPoint` | [sql-cics-ims](analysis/sql-cics-ims.md) |
 | `language_env_analyzer.py` | `LanguageEnvironmentAnalyzer` | [sql-cics-ims](analysis/sql-cics-ims.md) |
 | `dialects/le_signatures.py` | `le_service_signature`, `intrinsic_signature`, `catalog_to_dict` | [sql-cics-ims](analysis/sql-cics-ims.md) |
-| `bug_patterns.py` | `BugPatternAnalyzer`, `BUG_PATTERN_RULES`, `BUG_PATTERN_DESCRIPTIONS`, `walk_statements` (the seven bug-pattern lint rules) | [lint](analysis/lint.md#bug-pattern-rules) |
+| `bug_patterns.py` | `BugPatternAnalyzer`, `BUG_PATTERN_RULES`, `BUG_PATTERN_DESCRIPTIONS`, `walk_statements` (re-exported from the statement models; the seven bug-pattern lint rules) | [lint](analysis/lint.md#bug-pattern-rules) |
 | `compiler_checks.py` | `CompilerCheckAnalyzer`, `CompilerChecks`, `COMPILER_RULES`, `COMPILER_RULE_DESCRIPTIONS` (the ten compiler-check lint rules) | [lint](analysis/lint.md#compiler-check-rules) |
 | `code_patterns.py` | `CodePatternAnalyzer`, `CODE_PATTERN_RULES`, `CODE_PATTERN_DESCRIPTIONS`, `run_code_pattern` (the eight code-pattern lint rules, ideas from other COBOL linters) | [lint](analysis/lint.md#code-pattern-rules) |
 | `lint.py` | `LintAnalyzer`, `RULES`, `ALL_RULES`, `add_call_check_findings`, `add_line_length_findings`, `line_length_findings`, `filter_by_severity`, `add_parse_errors`, `apply_source_map`, `stamp_report_origins`, `fixed_format_column_offset` | [lint](analysis/lint.md) |

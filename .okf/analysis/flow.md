@@ -388,7 +388,7 @@ the program's entry; `scanner.leading_sentences()`, also used by
 `models.py` (`FlowNode`/`FlowEdge`/`FlowEdgeType`/`BranchArm`/`BranchNode`/
 `ProgramFlowReport`), `condition_text.py` / `statement_text.py` (text
 rendering, below), `scanner.py` (`ProcedureScanner`: procedure collection +
-the recursive `scan()` statement walk, `_CLAUSE_BODY_ATTRS`), `edges.py`
+the recursive `scan()` statement walk), `edges.py`
 (`EdgeCollector`: PERFORM/GO TO/CALL/SORT/MERGE/CANCEL/ALTER edge
 construction, `INTERNAL_EDGE_TYPES`/`PERFORM_EDGE_TYPES`/`GOTO_EDGE_TYPES`),
 `cycles.py` (`detect_cycles`/`classify_cycles`, an explicit-stack DFS),
@@ -429,9 +429,10 @@ orchestrator). All public names import from `cobolparser.analysis.program_flow`.
 * **Every clause body is scanned.** Unlike most analyzers (which walk
   `get_all_statements()`), the graph is built by a hand-rolled `scan()` that
   special-cases PERFORM inline blocks, CALL handlers and
-  IF/EVALUATE/SEARCH/RETURN, then iterates `_CLAUSE_BODY_ATTRS` (AT END /
-  INVALID KEY / AT EOP, ON SIZE ERROR, ON OVERFLOW, `on_exception` /
-  `not_on_exception`, ...) in a final `else`; the XML/JSON PARSE/GENERATE
+  IF/EVALUATE/SEARCH/RETURN, then iterates the statement models'
+  `HANDLER_CLAUSE_ATTRS` (AT END / INVALID KEY / AT EOP, ON SIZE ERROR, ON
+  OVERFLOW, ON EXCEPTION, RECEIVE's NO DATA / WITH DATA, ...) in a final
+  `else`; the XML/JSON PARSE/GENERATE
   branch queues its exception bodies too. An `id`-based `visited` set prevents
   double counting. A PERFORM / GO TO / CALL in a body the scan misses draws no
   edge and its target reads as unreachable. Pinned by
@@ -582,9 +583,10 @@ inline-PERFORM form does (#514) -- per target of a
 computed `GO TO ... DEPENDING ON` (an N-way branch plus the out-of-range
 fall-through, scored like an N-arm EVALUATE; a plain GO TO adds nothing and
 neither changes nesting depth) -- and per *present* exception-handling
-clause **pair** (`_CLAUSE_PAIRS`): AT END / NOT AT END, INVALID KEY / NOT
-INVALID KEY, AT EOP / NOT AT EOP, ON SIZE ERROR / NOT ON SIZE ERROR, ON
-OVERFLOW / NOT ON OVERFLOW, ON EXCEPTION / NOT ON EXCEPTION add 1 whether
+clause **pair** (the statement models' `HANDLER_CLAUSE_PAIRS`): AT END / NOT
+AT END, INVALID KEY / NOT INVALID KEY, AT EOP / NOT AT EOP, ON SIZE ERROR /
+NOT ON SIZE ERROR, ON OVERFLOW / NOT ON OVERFLOW, ON EXCEPTION / NOT ON
+EXCEPTION, NO DATA / WITH DATA (RECEIVE) add 1 whether
 one or both bodies are written -- they are the two outcomes of one test,
 as IF ... ELSE is one decision; counting each body scored the recommended
 explicit-both-outcomes style worse (#553). SEARCH's AT END adds nothing: a
@@ -602,21 +604,10 @@ external-program targets, neither of which belong in an in-program fan
 count), and a LOW/MODERATE/HIGH `rating` from `ComplexityThresholds`
 (defaults `moderate=10`/`high=20`, overridable per analysis run).
 
-**Walk mechanics.** The clause-pair attribute check (both bodies of a pair
-are walked; `at_end_clause`/`not_at_end_clause`/.../`on_exception`) is a
-local re-derivation of the same set `program_flow/scanner.py`'s
-`_CLAUSE_BODY_ATTRS` and `constraints.py`'s `_NESTED_STATEMENT_ATTRS`
-establish -- most of these are already reachable via the generic
-`.children` walk (every AST statement model wires its clause-list setters
-through `_set_clause`/explicit `add_child` calls), *except*
-`CallStatement.on_overflow`/`.on_exception`/`.not_on_exception`, which are
-never `add_child`ed (confirmed by auditing `models/statements/call.py`) --
-the one gap `scanner.py`'s own special-cased `push_sequential` dispatch for
-CALL exists to cover. Explicitly walking the full clause-attribute list on
-every visited statement (not just the CALL-specific gap) is cheap and
-matches established precedent; the `id()`-based visited-set prevents double
-counting on statement types where the attribute *is* already wired to
-`.children`.
+**Walk mechanics.** Both bodies of each present pair are walked, from
+`HANDLER_CLAUSE_PAIRS` (see [ast-models.md](../ast-models.md#nested-statement-bodies)),
+on top of the generic `.children` walk; the `id()`-based visited set
+prevents double counting where a body is also a child.
 
 **A bare SECTION reports the trivial complexity of 1** -- a bare `SECTION`
 header holds no statements of its own (same observation `dead_code.py` and
@@ -699,7 +690,7 @@ and its mode -- rounding modes are `_DETAIL_KEYWORDS`, never renamed; #517), an 
 INVALID KEY / ON SIZE ERROR / ON EXCEPTION body, `UPON`, `CORRESPONDING`, a
 STRING delimiter or the INSPECT phrase Type-1 clones. A leaf is `(type,
 operands, clauses, details)`: `clauses` fingerprints every present clause body
-(the same attributes `complexity.py`'s `_CLAUSE_PAIRS` pairs up, recursively through `_fp`, so
+(`HANDLER_CLAUSE_ATTRS`, recursively through `_fp`, so
 their statements also count towards `statement_count`), and `details` is the
 statement's `to_dict()` minus `_DETAIL_SKIP_KEYS` (position, node
 bookkeeping, what the tuple already holds, and `possible_values` -- a

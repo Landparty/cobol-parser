@@ -37,6 +37,7 @@ from ..models.statements.base import (
     CobolExpression,
     ConditionalExpression,
     LogicalExpression,
+    iter_clause_bodies,
 )
 from ..models.statements.call import CallStatement
 from ..models.statements.control import (
@@ -56,6 +57,7 @@ from ..models.statements.io import (
     IOWriteStatement,
 )
 from ..models.statements.misc import ExitStatement, GobackStatement, ReturnStatement
+from ._names import bare_item_name
 from .boundary_inventory import (
     BoundaryRef,
     BoundaryReport,
@@ -76,29 +78,11 @@ if TYPE_CHECKING:
 
 # -- statement-walk discipline ------------------------------------------------
 #
-# A local re-derivation of boundary_inventory.py's own walking discipline (in
-# turn re-derived from mockymock's `mock_surface.py`) -- this module needs its
-# own copy because it must also track each statement's *enclosing paragraph
-# name* for `BranchConstraints.parent_proc`, which `CobolProgram.
-# get_all_statements()`'s flat traversal does not preserve.
-
-_NESTED_STATEMENT_ATTRS = (
-    "then_statements",
-    "else_statements",
-    "inline_statements",
-    "at_end_clause",
-    "not_at_end_clause",
-    "invalid_key_clause",
-    "not_invalid_key_clause",
-    "at_eop_clause",
-    "not_at_eop_clause",
-    "on_exception",
-    "not_on_exception",
-    "on_overflow",
-    "not_on_overflow",
-    "on_size_error",
-    "not_on_size_error",
-)
+# Nested bodies come from the statement models' canonical
+# `iter_clause_bodies()`. This module walks them itself (`_walk_list`)
+# because it must also track each statement's *enclosing paragraph name* for
+# `BranchConstraints.parent_proc` and the chain of branch arms above it, which
+# `CobolProgram.get_all_statements()`'s flat traversal does not preserve.
 
 # Relational operator strings _conditions.py's build_condition_expression()
 # assigns to a ConditionalExpression -- see that module for the full mapping
@@ -2890,12 +2874,11 @@ def _nested_statement_lists(statement: Any) -> list[tuple[str | None, list[Any]]
     but this module does not model those as branch arms, and inventing an
     id for one would produce a path entry nothing could ever join to.
     """
-    lists: list[tuple[str | None, list[Any]]] = []
-    if isinstance(statement, IfStatement):
-        if getattr(statement, "then_statements", None):
-            lists.append(("THEN", statement.then_statements))
-        if getattr(statement, "else_statements", None):
-            lists.append(("ELSE", statement.else_statements))
+    group_of: dict[int, int] = {}
+    if isinstance(statement, EvaluateStatement):
+        # A stacked WHEN stack is one arm, owned by its last clause.
+        for index, group in enumerate(statement.when_groups(), start=1):
+            group_of[id(group[-1])] = index
     arm_bearing = next(
         (
             mapping
@@ -2904,30 +2887,29 @@ def _nested_statement_lists(statement: Any) -> list[tuple[str | None, list[Any]]
         ),
         {},
     )
-    for attr in _NESTED_STATEMENT_ATTRS:
-        if isinstance(statement, IfStatement) and attr in (
-            "then_statements",
-            "else_statements",
-        ):
-            continue  # already paired with their arm ids above
-        value = getattr(statement, attr, None)
-        if value:
-            lists.append((arm_bearing.get(attr), value))
-    if isinstance(statement, EvaluateStatement):
-        for index, group in enumerate(statement.when_groups(), start=1):
-            if group[-1].statements:
-                lists.append((f"WHEN_{index}", group[-1].statements))
-        if statement.default_when is not None and statement.default_when.statements:
-            lists.append(("WHEN_OTHER", statement.default_when.statements))
-    if isinstance(statement, SearchStatement):
-        for index, when_dict in enumerate(statement.when_clauses, start=1):
-            if when_dict.get("statements"):
-                lists.append((f"WHEN_{index}", when_dict["statements"]))
+    lists: list[tuple[str | None, list[Any]]] = []
+    for body in iter_clause_bodies(statement):
+        arm_id: str | None
+        if body.attr == "then_statements":
+            arm_id = "THEN"
+        elif body.attr == "else_statements":
+            arm_id = "ELSE"
+        elif body.attr == "default_when":
+            arm_id = "WHEN_OTHER"
+        elif body.attr == "when_clauses":
+            if isinstance(statement, EvaluateStatement):
+                group_index = group_of.get(id(body.clause))
+                arm_id = f"WHEN_{group_index}" if group_index is not None else None
+            else:
+                arm_id = f"WHEN_{body.position}"
+        else:
+            arm_id = arm_bearing.get(body.attr)
+        lists.append((arm_id, body.statements))
     return lists
 
 
 #: Nested statement lists that ARE a modeled branch arm despite living on a
-#: `_NESTED_STATEMENT_ATTRS` attribute rather than in a `when_clauses` list.
+#: handler attribute rather than in a `when_clauses` list.
 #: Only SEARCH's `AT END` qualifies today: `_extract_search` registers an
 #: `arms["AT_END"]` entry for it, so a statement nested under it does have an
 #: enclosing path condition to join to. Without this, that statement's
@@ -3309,8 +3291,7 @@ __all__ = [
 
 def _leaf_name(text: str) -> str:
     """``SQLCODE OF SQLCA`` / ``SQLCA.SQLCODE`` -> ``SQLCODE``."""
-    name = text.strip().upper().split(" OF ")[0].split(" IN ")[0]
-    return name.rsplit(".", 1)[-1].strip()
+    return bare_item_name(text).rsplit(".", 1)[-1].strip()
 
 
 def _is_exec_sql(statement: Any) -> bool:

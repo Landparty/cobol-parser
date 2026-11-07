@@ -241,7 +241,7 @@ must stop at a boundary *without consuming it*. The rules:
 **Folded references reach analyzers.** Operand strings carry the full
 qualified / subscripted reference (`"WS-NUM OF GRP-1"`, `"WS-TAB ( 3 )"`). An
 analyzer keying data items by bare name must normalize via
-`analysis._names.base_data_name` (as `MoveTypeChecker._resolve_category` and
+`analysis._names` (`base_data_name`, `bare_item_name`, ...; as `MoveTypeChecker._resolve_category` and
 `DynamicCallAnalyzer` do; pinned by
 `tests/regression/test_folded_reference_analyzers.py`); a raw `name in catalog`
 lookup silently misses qualified references.

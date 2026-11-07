@@ -50,6 +50,7 @@ hand use `ASTNodeFactory` (see below) or the node's constructor.
 * [`calculate_size()` and `_storage.py`](#calculate_size-and-_storagepy)
 * [SQL statement nodes](#sql-statement-nodes-modelssql_statementspy)
 * [Statement models](#statement-models-modelsstatements)
+  * [Nested statement bodies](#nested-statement-bodies)
   * [Stacked WHENs](#stacked-whens)
   * [Expression trees](#expression-trees)
   * [Statement field reference](#statement-field-reference)
@@ -140,8 +141,9 @@ class CobolParagraph(ASTNode):           # CobolParagraph(paragraph_name, locati
 `to_dict(config=None)` / `to_json(config_or_indent=None)` / `from_json()`.
 
 `get_all_statements()` walks contained programs too, and reaches handler
-bodies (INVALID KEY, ON EXCEPTION, ...); the result is cached on the program
-(invalidated by `add_division`).
+bodies (INVALID KEY, ON EXCEPTION, ...) through `.children` plus the
+canonical `NESTED_BODY_ATTRS` ([Nested statement bodies](#nested-statement-bodies));
+the result is cached on the program (invalidated by `add_division`).
 
 FD/SD entries are `CobolFileDescription(file_name, location, record_type="FD")`
 (`file_name`, `record_type` FD|SD, `data_records`, BLOCK/RECORD CONTAINS,
@@ -611,7 +613,7 @@ See [dialects.md](dialects.md) for the SQL details.
 
 | File | Node Classes |
 |------|-------------|
-| `base.py` | `CobolStatement`, `CobolExpression`, `ArithmeticExpression`, `ConditionalExpression`, `LogicalExpression`, `FunctionCall` |
+| `base.py` | `CobolStatement`, `CobolExpression`, `ArithmeticExpression`, `ConditionalExpression`, `LogicalExpression`, `FunctionCall`; `ClauseBody`, `iter_clause_bodies`, `walk_statements` and the nested-body attribute lists |
 | `arithmetic.py` | `ArithmeticStatement`, `AddStatement`, `SubtractStatement`, `MultiplyStatement`, `DivideStatement`, `ComputeStatement` |
 | `call.py` | `CallParameter`, `CallStatement`, `EntryStatement` |
 | `communication.py` | `SendStatement`, `ReceiveStatement`, `EnableStatement`, `DisableStatement`, `PurgeStatement` (private base `_EnableDisableStatement`) |
@@ -629,6 +631,40 @@ fields below are also added there). `ExecCicsStatement` / `ExecImsStatement`
 (`parsers/statements/ibm_exec_statements.py`) also extend `CobolStatement`
 (`statement_type` `"EXEC CICS"` / `"EXEC IMS"`, `node_type` `"EXEC_CICS"` /
 `"EXEC_IMS"`) so `get_all_statements()` returns them.
+
+### Nested statement bodies
+
+`models/statements/base.py` owns the **one** list of attributes that hold a
+nested statement body; no analyzer keeps its own (ten private copies had
+drifted -- RECEIVE's `NO DATA` / `WITH DATA`, `NOT AT END-OF-PAGE` and SEARCH
+WHEN bodies were each missed somewhere -- the same drift behind the old
+paragraph-swallow bugs; audit 2026-09-27 §3.5). Exported from
+`cobolparser.models.statements`:
+
+| Name | Holds |
+|------|-------|
+| `BRANCH_BODY_ATTRS` | `then_statements`, `else_statements` |
+| `LOOP_BODY_ATTRS` | `inline_statements` |
+| `HANDLER_CLAUSE_PAIRS` | (positive, negative) handler pairs: AT END, INVALID KEY, AT END-OF-PAGE, ON SIZE ERROR, ON OVERFLOW, ON EXCEPTION, NO DATA / WITH DATA |
+| `HANDLER_CLAUSE_ATTRS` / `HANDLER_CLAUSE_PHRASES` | the pairs flattened / attribute -> COBOL phrase (`"AT END-OF-PAGE"`) |
+| `WHEN_ARM_ATTRS` | `when_clauses`, `default_when` (EVALUATE `WhenClause` nodes, SEARCH `{"condition", "statements"}` dicts) |
+| `STATEMENT_LIST_ATTRS` / `NESTED_BODY_ATTRS` | every `list[CobolStatement]` attribute / those plus the WHEN arms |
+
+`iter_clause_bodies(stmt, *, include_handlers=True, include_loops=True,
+include_empty=False)` (also `CobolStatement.iter_clause_bodies()`) yields
+`ClauseBody(attr, kind, statements, position, clause)` in source order: IF
+arms, inline PERFORM, handlers, WHEN arms (`position` 1-based, `clause` the
+`WhenClause` / dict), WHEN OTHER. `kind` is `"branch"`, `"loop"` or
+`"handler"`. Empty lists are skipped unless `include_empty`; a None
+attribute never yields. `CobolStatement.iter_child_statements()` flattens
+one level; `walk_statements(statements, *, include_handlers=True,
+include_loops=True)` is the iterative depth-first walk (each node once).
+A walker that needs more context (constraints' arm chain, ast_diff's paths,
+complexity's pair counting) iterates `iter_clause_bodies` itself rather than
+copying the list. A new clause body is a one-line change here;
+`tests/unit/test_statement_bodies.py` fails until a statement node's
+statement-list attribute is listed (static annotation scan plus every
+statement the sample corpus parses into).
 
 The `communication.py` / `legacy.py` / `report_writer.py` modules plus
 `RaiseStatement`/`ResumeStatement` and `ValidateStatement` back the
