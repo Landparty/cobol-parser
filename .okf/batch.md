@@ -3,7 +3,7 @@ type: Module
 title: Batch Parsing
 description: Many files at once — parse_files() / parse_files_with_copybooks() (batch.py) hand back every ParseResult; scan_files() / cross_file_clone_groups() (scan.py) run analyzers inside the workers and hand back only report dicts.
 tags: [batch, parallel, process-pool, copybook, scan, clones]
-timestamp: 2026-10-15T00:00:00Z
+timestamp: 2026-11-06T00:00:00Z
 ---
 
 # Batch Parsing
@@ -30,6 +30,7 @@ need grades/findings across a codebase.
 
 * [Public API (`batch.py`)](#public-api-batchpy)
 * [Per-file fault isolation](#per-file-fault-isolation)
+* [Per-file resource limits](#per-file-resource-limits)
 * [Multi-file analysis: `scan.py`](#multi-file-analysis-scanpy) —
   [entry points and options](#entry-points-and-options),
   [report shape](#report-shape),
@@ -59,7 +60,9 @@ Signatures (all keyword arguments after `paths` have defaults):
 
 * `parse_files(paths, workers=None, error_recovery=COLLECT_ALL,
   dialect=IBM_ENTERPRISE, encoding=None, errors="replace", executor=None,
-  enable_profiling=False, top_n=50, prof_output=None, debug_lines=False)`.
+  enable_profiling=False, top_n=50, prof_output=None, debug_lines=False,
+  timeout_seconds=None, max_file_bytes=None)` (the two limits: see
+  [Per-file resource limits](#per-file-resource-limits)).
   `workers=None` uses `os.cpu_count()`; `workers <= 0` raises `ValueError`.
   With no `executor` and one worker it takes a **sequential fast path** in
   the caller's process (no pickling, clean tracebacks) reusing one
@@ -74,10 +77,14 @@ Signatures (all keyword arguments after `paths` have defaults):
 * `parse_files_with_copybooks(paths, copybook_paths, workers=None,
   error_recovery=..., dialect=..., encoding=None, errors="replace",
   max_nesting_depth=100, copybook_cache_size=1024, enable_profiling=False,
-  top_n=50, prof_output=None, debug_lines=False)`. Runs **sequentially** in
-  the main process (`workers` is accepted but unused, reserved) to maximize
+  top_n=50, prof_output=None, debug_lines=False, timeout_seconds=None,
+  max_file_bytes=None)`. Runs **sequentially** in
+  the main process (`workers` is accepted but unused, reserved, unless
+  `timeout_seconds` is set) to maximize
   cache hits: one `PathResolver` (resolution + directory-index caches) and
-  one `CobolParser` are reused for every file, and copybook reads go through
+  one `CobolParser` are reused for every file (`_CopybookState`, built from
+  the picklable `_CopybookJob` settings; the per-file body is
+  `_parse_one_with_copybooks`), and copybook reads go through
   the copybook expander's module-level LRU file cache. Expansion runs with
   `validate_content=False` (speed), `process_conditionals=True`,
   `preserve_source_locations=True, source_file=<path>` and `debug_lines`.
@@ -152,6 +159,59 @@ Pinned by
 `tests/integration/test_batch_coverage_gaps.py::TestParseFilesWithCopybooksParseException`
 and `::TestParseFilesWithCopybooksDecodeError`.
 
+## Per-file resource limits
+
+Fault isolation stops an *exception* costing more than its file; it does
+not stop one hostile or pathological input from holding a worker (or the
+only process) for an hour. Two opt-in limits, both `None` by default (no
+limit, behaviour unchanged), live in `cobolparser/_file_limits.py` and are
+taken by `parse_files` / `parse_files_with_copybooks` (keyword arguments)
+and by `ScanOptions` (fields):
+
+| Limit | Checked | A file over it becomes |
+|-------|---------|------------------------|
+| `max_file_bytes: int \| None` | `os.stat` size, before the file is opened (`oversize_reason`); copybooks are not checked | `read_error` / `FileScan.error` = `"skipped: file is N bytes, over the max_file_bytes limit of M"` |
+| `timeout_seconds: float \| None` | wall clock per file, from hand-off to a worker | `read_error` / `FileScan.error` = `"timed out after N s (the worker process was terminated)"` (`timeout_reason`) |
+
+Both are the same per-file failure shape as an unreadable file
+(`BatchResult(result=None, read_error=...)`; a `FileScan` with `error` and no
+units, listed under `failures`, so `file_count == scanned + failed` still
+holds), and the rest of the run carries on. `validate_limits` raises
+`ValueError` for a timeout `<= 0` or a byte cap `< 1` (bools refused).
+
+**How a timeout is enforced** (`run_with_timeouts(func, tasks, *,
+timeout_seconds, workers, failure, warmup, warmup_args)`). A thread cannot
+be killed, nor a `ProcessPoolExecutor` worker without breaking the pool, so
+with a timeout set **every file runs in a worker process this module owns,
+even at `workers=1`**: `workers` long-lived processes (capped at the file
+count; `parse_files_with_copybooks` uses `workers or 1`, so one process
+keeps the copybook caches shared), each handed one file at a time over a
+`Pipe`. The parent waits on the pipes and process sentinels with
+`multiprocessing.connection.wait` until the nearest deadline; a worker past
+its deadline is terminated (then killed if still alive) and
+joined -- reaped, never leaked -- and a replacement started only if
+files are still waiting. A worker that dies mid-file costs that file
+(`"the worker process exited unexpectedly (exit code N)"`); one that dies
+while starting up raises `RuntimeError` (an environment problem). It uses
+the platform's default start method (spawn on Windows/macOS, fork on
+Linux); *func*, *warmup* and every task are module-level functions and
+picklable tuples. *func* is passed with the process arguments and each
+worker runs a **warm-up** (`batch._warm_parser`,
+`batch._warm_copybook_worker`, `scan._warm_scan_worker`: parse the tiny
+`batch._WARMUP_PROGRAM` and, for scan, run the requested analyzers on it)
+before reporting ready, so interpreter start-up and lazy imports (about 2 s
+under spawn) never count against the first file. The workers reuse one
+parser each (`_parse_one_reuse`; `_worker_copybook_state` for the
+copybook path). **`timeout_seconds` with a caller-owned `executor` raises
+`ValueError`** (its workers cannot be stopped). `scan_one` called on its
+own checks `max_file_bytes` but does not enforce the timeout.
+
+Config: `cobol.yml`'s `limits:` section (`timeout_seconds`,
+`max_file_bytes`; `ProjectConfig.limits`, a `LimitDefaults`), see
+[docs/project-config.md](../docs/project-config.md). The CLI and MCP do not
+pass them yet. Pinned by `tests/unit/test_file_limits.py` (process-starting
+tests marked `slow`).
+
 ## Multi-file analysis: `scan.py`
 
 ```python
@@ -213,6 +273,8 @@ arguments, so a worker signature cannot drift from its call site):
 | `debug_lines` | `False` | compile `D`-in-column-7 lines (CLI `--debug-lines`, cobol.yml `project.debug_lines`) |
 | `defined_symbols` | `()` | conditional-compilation `(name, value)` pairs (CLI `--define`, cobol.yml `project.define`): handed to the expander with copybook paths, else evaluated by `preprocess_conditional_compilation` before `parse_cobol` (#324) |
 | `cache_dir` | `None` | a `FactsCache` directory (CLI `--cache-dir`): see "Incremental cache" below |
+| `timeout_seconds` | `None` | per-file wall-clock limit, enforced by `scan_files` in worker processes ([Per-file resource limits](#per-file-resource-limits)) |
+| `max_file_bytes` | `None` | files larger on disk are skipped as failures; `scan_one` checks it before the cache |
 
 ### Incremental cache (`_facts_cache.py`)
 
@@ -229,7 +291,8 @@ its direct subdirectories (`COPY X OF LIB`): a member added on the search
 path changes a directory mtime though no file the parse read changed.
 
 `scan_one` with `cache_dir`: the key's settings are `ScanOptions.
-cache_settings()` (every field but `cache_dir`), the stamps are the program
+cache_settings()` (every field but `cache_dir`, `timeout_seconds` and
+`max_file_bytes`: a file a limit stops is a failure, never stored), the stamps are the program
 (taken *before* the parse, so an edit during it is a later miss), every file
 in the expansion source map or `result.expansion_copybooks` (#763: a member
 that only COPYs another is in the second only) and

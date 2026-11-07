@@ -271,6 +271,7 @@ OKF_MAP = [
     ("cobolparser/batch.py", [".okf/batch.md"]),
     ("cobolparser/scan.py", [".okf/batch.md"]),
     ("cobolparser/_facts_cache.py", [".okf/batch.md"]),
+    ("cobolparser/_file_limits.py", [".okf/batch.md"]),
     ("cobolparser/cli/", [".okf/cli.md"]),
     ("cobolparser/config/", [".okf/cli.md"]),
     ("cobolparser/mcp/", [".okf/mcp.md"]),

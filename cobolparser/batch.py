@@ -29,6 +29,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from cobolparser._file_limits import (
+    oversize_reason,
+    run_with_timeouts,
+    validate_limits,
+)
 from cobolparser.parser import CobolParser, ParseResult, parse_cobol
 from cobolparser.plugins.core import DialectType, ErrorRecoveryMode
 from cobolparser.preprocess import PreprocessingError
@@ -125,6 +130,7 @@ def _parse_one(
     prof_output_dir: str | None,
     prof_name: str | None = None,
     debug_lines: bool = False,
+    max_file_bytes: int | None = None,
 ) -> BatchResult:
     """Read one file and parse it.
 
@@ -132,6 +138,9 @@ def _parse_one(
     Note: parse_cobol default is FAIL_FAST; we always pass error_recovery explicitly.
     """
     path = Path(path_str)
+    oversize = oversize_reason(path_str, max_file_bytes)
+    if oversize is not None:
+        return BatchResult(path=path, result=None, read_error=oversize)
     decode_warnings: list[str] = []
     try:
         source = _read_program(path_str, encoding, errors, decode_warnings)
@@ -197,12 +206,17 @@ def _parse_one_reuse(
     prof_output_dir: str | None,
     prof_name: str | None = None,
     debug_lines: bool = False,
+    max_file_bytes: int | None = None,
 ) -> BatchResult:
-    """Parse one file reusing a module-level parser (sequential mode only).
+    """Parse one file reusing a module-level parser (one process at a time:
+    the sequential path, or a per-file-timeout worker).
 
     Avoids re-creating CobolParser and re-registering division parsers for each file.
     """
     path = Path(path_str)
+    oversize = oversize_reason(path_str, max_file_bytes)
+    if oversize is not None:
+        return BatchResult(path=path, result=None, read_error=oversize)
     decode_warnings: list[str] = []
     try:
         source = _read_program(path_str, encoding, errors, decode_warnings)
@@ -258,6 +272,46 @@ def _parse_one_packed(args: tuple) -> BatchResult:
     return _parse_one(*args)
 
 
+#: A program small enough to parse in milliseconds: what a per-file-timeout
+#: worker parses once before taking work, so the parser's first-use set-up
+#: and lazy imports are not charged to the first real file's deadline.
+_WARMUP_PROGRAM = """       IDENTIFICATION DIVISION.
+       PROGRAM-ID. WARMUP.
+       DATA DIVISION.
+       WORKING-STORAGE SECTION.
+       01 WS-A PIC X(4).
+       PROCEDURE DIVISION.
+           MOVE 'A' TO WS-A.
+           STOP RUN.
+"""
+
+
+def _warm_parser(
+    error_recovery: ErrorRecoveryMode,
+    dialect: DialectType,
+    debug_lines: bool,
+    copybooks: bool = False,
+) -> None:
+    """A timeout worker's warm-up: build and exercise the reused parser."""
+    _get_reusable_parser(error_recovery, dialect, debug_lines).parse(
+        _WARMUP_PROGRAM, filename="<warm-up>", error_recovery=error_recovery
+    )
+    if copybooks:
+        from cobolparser.preprocess.copybook_expander import (  # noqa: F401
+            expand_copybooks,
+        )
+
+
+def _limit_failure(path_list: list[str]) -> Any:
+    """``run_with_timeouts``' *failure* callback: a ``BatchResult`` whose
+    ``read_error`` is the reason (a timeout, or a worker that died)."""
+
+    def failure(index: int, reason: str) -> BatchResult:
+        return BatchResult(path=Path(path_list[index]), result=None, read_error=reason)
+
+    return failure
+
+
 def parse_files(
     paths: Iterable[str | Path],
     workers: int | None = None,
@@ -270,6 +324,8 @@ def parse_files(
     top_n: int = 50,
     prof_output: str | None = None,
     debug_lines: bool = False,
+    timeout_seconds: float | None = None,
+    max_file_bytes: int | None = None,
 ) -> list[BatchResult]:
     """Parse multiple COBOL files in parallel.
 
@@ -295,15 +351,31 @@ def parse_files(
             (that would be a file path, not a directory).
         debug_lines: ``parse_cobol``'s ``debug_lines``: compile fixed-format
             debugging lines (``D`` in column 7) as code for every file.
+        timeout_seconds: Per-file wall-clock limit. A file still parsing
+            after this long has its worker process terminated and comes
+            back with ``read_error="timed out after N s ..."``; the rest of
+            the batch carries on. Every file then runs in one of *workers*
+            worker processes (even ``workers=1``: a thread cannot be
+            stopped). Cannot be combined with *executor*. None = no limit.
+        max_file_bytes: Files larger than this on disk are not read; they
+            come back with ``read_error="skipped: file is N bytes, ..."``.
+            None = no limit.
 
     Returns:
         list[BatchResult] in input order.
 
     Raises:
-        ValueError: If workers <= 0 or prof_output ends with ".prof".
+        ValueError: If workers <= 0, prof_output ends with ".prof", a limit
+            is not positive, or *timeout_seconds* is given with *executor*.
     """
     if workers is not None and workers <= 0:
         raise ValueError("workers must be >= 1 or None")
+    validate_limits(timeout_seconds, max_file_bytes)
+    if timeout_seconds is not None and executor is not None:
+        raise ValueError(
+            "timeout_seconds cannot be combined with executor: a worker of a "
+            "caller-owned pool cannot be terminated without breaking the pool"
+        )
 
     if prof_output is not None and prof_output.endswith(".prof"):
         raise ValueError(
@@ -331,9 +403,23 @@ def parse_files(
             prof_output,
             prof_name,
             debug_lines,
+            max_file_bytes,
         )
         for p, prof_name in zip(path_list, _prof_file_names(path_list), strict=True)
     ]
+
+    if timeout_seconds is not None:
+        # Long-lived worker processes, one file at a time each, so the
+        # module-level reused parser is safe (and saves re-registration).
+        return run_with_timeouts(
+            _parse_one_reuse,
+            args,
+            timeout_seconds=timeout_seconds,
+            workers=resolved_workers,
+            failure=_limit_failure(path_list),
+            warmup=_warm_parser,
+            warmup_args=(error_recovery, dialect, debug_lines),
+        )
 
     if executor is None and resolved_workers == 1:
         # Sequential fast path: reuse parser instance, clean stack traces, no pickle overhead
@@ -378,6 +464,200 @@ def _attach_expansion_debug_lines(
     warn_dropped_debug_lines(result, expansion, filename)
 
 
+@dataclass(frozen=True)
+class _CopybookJob:
+    """Everything one ``parse_files_with_copybooks`` file needs besides its
+    path: one picklable object, so a timeout worker gets the same settings
+    the in-process loop uses (and a hashable key for its per-process state).
+    """
+
+    copybook_paths: tuple[str, ...]
+    error_recovery: ErrorRecoveryMode
+    dialect: DialectType
+    encoding: str | None
+    errors: str
+    max_nesting_depth: int
+    copybook_cache_size: int
+    enable_profiling: bool
+    top_n: int
+    prof_output: str | None
+    debug_lines: bool
+    max_file_bytes: int | None
+
+
+@dataclass
+class _CopybookState:
+    """What every file of one run shares: the path resolver (resolution and
+    directory-index caches) and the parser (registered once)."""
+
+    path_resolver: Any
+    parser: CobolParser
+
+
+def _new_copybook_state(job: _CopybookJob) -> _CopybookState:
+    from cobolparser.preprocess.models import CopybookSearchPath
+    from cobolparser.preprocess.path_resolver import PathResolver
+
+    search_config = CopybookSearchPath(
+        directories=list(job.copybook_paths),
+        max_nesting_depth=job.max_nesting_depth,
+        max_cache_entries=job.copybook_cache_size,
+    )
+    return _CopybookState(
+        path_resolver=PathResolver(search_config),
+        parser=CobolParser(
+            error_recovery=job.error_recovery,
+            dialect=job.dialect,
+            debug_lines=job.debug_lines,
+        ),
+    )
+
+
+#: A timeout worker's shared state for the run it serves. A worker lives
+#: for one ``parse_files_with_copybooks`` call, so this is as fresh as the
+#: in-process loop's state; keyed by the job in case that ever changes.
+_WORKER_COPYBOOK_STATE: tuple[_CopybookJob, _CopybookState] | None = None
+
+
+def _worker_copybook_state(job: _CopybookJob) -> _CopybookState:
+    global _WORKER_COPYBOOK_STATE
+    if _WORKER_COPYBOOK_STATE is None or _WORKER_COPYBOOK_STATE[0] != job:
+        _WORKER_COPYBOOK_STATE = (job, _new_copybook_state(job))
+    return _WORKER_COPYBOOK_STATE[1]
+
+
+def _warm_copybook_worker(job: _CopybookJob) -> None:
+    """A timeout worker's warm-up: build the shared state, parse once."""
+    state = _worker_copybook_state(job)
+    state.parser.parse(
+        _WARMUP_PROGRAM, filename="<warm-up>", error_recovery=job.error_recovery
+    )
+    from cobolparser.preprocess.copybook_expander import (  # noqa: F401
+        expand_copybooks,
+    )
+
+
+def _parse_one_with_copybooks(
+    path_str: str,
+    prof_name: str,
+    job: _CopybookJob,
+    state: _CopybookState | None = None,
+) -> BatchResult:
+    """One file of ``parse_files_with_copybooks``: read, expand, parse.
+
+    *state* is the run's shared resolver and parser; ``None`` (in a timeout
+    worker) uses the worker's own. Never raises.
+    """
+    from cobolparser.preprocess.copybook_expander import expand_copybooks
+
+    if state is None:
+        state = _worker_copybook_state(job)
+    path = Path(path_str)
+    oversize = oversize_reason(path_str, job.max_file_bytes)
+    if oversize is not None:
+        return BatchResult(path=path, result=None, read_error=oversize)
+    decode_warnings: list[str] = []
+    try:
+        source = _read_program(path_str, job.encoding, job.errors, decode_warnings)
+    except (OSError, ValueError, PreprocessingError) as exc:
+        # ValueError covers UnicodeDecodeError under errors="strict".
+        return BatchResult(path=path, result=None, read_error=str(exc))
+
+    # Expand copybooks with shared cache, the way parse_cobol_with_expansion
+    # does (#255): the source map and the expansion warnings reach the
+    # result, so the two entry points cannot disagree about a line.
+    expansion_warnings: list[str] = []
+    source_map: dict[int, tuple[str, int]] | None = None
+    copybook_error: str | None = None
+    expansion: Any = None
+    try:
+        expansion = expand_copybooks(
+            source_code=source,
+            copybook_paths=list(job.copybook_paths),
+            max_nesting_depth=job.max_nesting_depth,
+            validate_content=False,  # Skip validation for speed in batch mode
+            path_resolver=state.path_resolver,
+            # Directives decide which COPY statements exist: one inside an
+            # excluded >>IF must not be resolved (parse_cobol_with_expansion
+            # does the same). The parser's own directive pass would
+            # otherwise run only after the fact.
+            process_conditionals=True,
+            preserve_source_locations=True,
+            source_file=path_str,
+            debug_lines=job.debug_lines,
+        )
+        expanded_source = expansion.expanded_source
+        expansion_warnings = decode_warnings + list(
+            getattr(expansion.statistics, "warnings", []) or []
+        )
+        source_map = getattr(expansion, "source_location_map", None)
+    except Exception as exc:
+        # Copybook expansion is best-effort in batch mode: a single bad
+        # COPY must not abort the whole run, so we fall back to parsing the
+        # raw source (codebase-graph relies on the unexpanded parse for a
+        # file's CALL edges). Every COPY in the file goes unexpanded, not
+        # just the bad one, so the reason must reach the caller: it is kept
+        # as BatchResult.copybook_error and as a warning on the result,
+        # not only logged (#255).
+        logger.warning(
+            "Copybook expansion failed for %s; parsing without expansion: %r",
+            path_str,
+            exc,
+            exc_info=True,
+        )
+        copybook_error = f"{type(exc).__name__}: {exc}"
+        expansion_warnings = decode_warnings + [
+            f"copybook expansion failed ({copybook_error}); "
+            "the file was parsed without expanding any COPY statement"
+        ]
+        expanded_source = source
+
+    # Parse expanded source reusing the parser instance. Guarded the same
+    # way as _parse_one/_parse_one_reuse: one poisoned file must not abort
+    # the whole batch, so a parse-time exception is recorded per-file
+    # instead of propagating out of the function.
+    parser = state.parser
+    try:
+        if not job.enable_profiling:
+            result = parser.parse(
+                expanded_source, filename=path_str, error_recovery=job.error_recovery
+            )
+            _attach_expansion(result, expansion_warnings, source_map)
+            _attach_expansion_debug_lines(result, expansion, path_str)
+            return BatchResult(
+                path=path,
+                result=result,
+                read_error=None,
+                copybook_error=copybook_error,
+            )
+        prof_file: str | None = None
+        if job.prof_output is not None:
+            prof_file = str(Path(job.prof_output) / prof_name)
+        parse_result, prof = parser.parse(
+            expanded_source,
+            filename=path_str,
+            error_recovery=job.error_recovery,
+            enable_profiling=True,
+            top_n=job.top_n,
+            prof_output=prof_file,
+        )
+        _attach_expansion(parse_result, expansion_warnings, source_map)
+        _attach_expansion_debug_lines(parse_result, expansion, path_str)
+        return BatchResult(
+            path=path,
+            result=parse_result,
+            read_error=None,
+            profiling=prof,
+            copybook_error=copybook_error,
+        )
+    except Exception as exc:  # noqa: BLE001 — record per-file, don't abort batch
+        return BatchResult(
+            path=path,
+            result=None,
+            read_error=f"parse error: {type(exc).__name__}: {exc}",
+        )
+
+
 def parse_files_with_copybooks(
     paths: Iterable[str | Path],
     copybook_paths: list[str],
@@ -392,6 +672,8 @@ def parse_files_with_copybooks(
     top_n: int = 50,
     prof_output: str | None = None,
     debug_lines: bool = False,
+    timeout_seconds: float | None = None,
+    max_file_bytes: int | None = None,
 ) -> list[BatchResult]:
     """Parse multiple COBOL files with shared copybook path resolution.
 
@@ -409,7 +691,9 @@ def parse_files_with_copybooks(
     Args:
         paths: File paths to parse.
         copybook_paths: Directories to search for copybook files.
-        workers: Unused (reserved for future parallel copybook expansion).
+        workers: Unused without *timeout_seconds* (reserved for future
+            parallel copybook expansion). With it, the number of worker
+            processes (None -> 1, so the caches stay shared).
         error_recovery: Passed to parser for each file.
         dialect: COBOL dialect, passed to parser for each file.
         encoding: Source encoding; None (default) detects it (#522).
@@ -421,10 +705,21 @@ def parse_files_with_copybooks(
         prof_output: Directory path to write per-file .prof binaries.
         debug_lines: Compile fixed-format debugging lines (``D`` in column 7)
             as code, through both the copybook expansion and the parse.
+        timeout_seconds: Per-file wall-clock limit (expansion plus parse). A
+            file that overruns has its worker process terminated and comes
+            back with ``read_error="timed out after N s ..."``; the rest
+            carry on. The files then run in worker processes (each keeps its
+            own resolver and parser for the run). None = no limit.
+        max_file_bytes: Programs larger than this on disk are not read (a
+            ``read_error`` starting ``"skipped:"``). Copybooks are not
+            checked. None = no limit.
 
     Returns:
         list[BatchResult] in input order.
     """
+    validate_limits(timeout_seconds, max_file_bytes)
+    if timeout_seconds is not None and workers is not None and workers <= 0:
+        raise ValueError("workers must be >= 1 or None")
     if prof_output is not None and prof_output.endswith(".prof"):
         raise ValueError(
             "prof_output in batch mode must be a directory path, not a .prof file. "
@@ -433,138 +728,41 @@ def parse_files_with_copybooks(
     if enable_profiling and prof_output is not None:
         os.makedirs(prof_output, exist_ok=True)
 
-    from cobolparser.preprocess.copybook_expander import expand_copybooks
-    from cobolparser.preprocess.models import CopybookSearchPath
-    from cobolparser.preprocess.path_resolver import PathResolver
-
     path_list = [str(p) for p in paths]
     if not path_list:
         return []
 
-    # Create a shared search config with large cache
-    search_config = CopybookSearchPath(
-        directories=copybook_paths,
+    job = _CopybookJob(
+        copybook_paths=tuple(copybook_paths),
+        error_recovery=error_recovery,
+        dialect=dialect,
+        encoding=encoding,
+        errors=errors,
         max_nesting_depth=max_nesting_depth,
-        max_cache_entries=copybook_cache_size,
+        copybook_cache_size=copybook_cache_size,
+        enable_profiling=enable_profiling,
+        top_n=top_n,
+        prof_output=prof_output,
+        debug_lines=debug_lines,
+        max_file_bytes=max_file_bytes,
     )
+    prof_names = _prof_file_names(path_list)
 
-    # Reusable path resolver to avoid recreating per file
-    path_resolver = PathResolver(search_config)
+    if timeout_seconds is not None:
+        return run_with_timeouts(
+            _parse_one_with_copybooks,
+            [(p, n, job) for p, n in zip(path_list, prof_names, strict=True)],
+            timeout_seconds=timeout_seconds,
+            workers=workers or 1,
+            failure=_limit_failure(path_list),
+            warmup=_warm_copybook_worker,
+            warmup_args=(job,),
+        )
 
-    # Reusable parser to avoid re-registering division parsers per file
-    parser = CobolParser(
-        error_recovery=error_recovery, dialect=dialect, debug_lines=debug_lines
-    )
-
-    results: list[BatchResult] = []
-    for path_str, prof_name in zip(path_list, _prof_file_names(path_list), strict=True):
-        path = Path(path_str)
-        decode_warnings: list[str] = []
-        try:
-            source = _read_program(path_str, encoding, errors, decode_warnings)
-        except (OSError, ValueError, PreprocessingError) as exc:
-            # ValueError covers UnicodeDecodeError under errors="strict".
-            results.append(BatchResult(path=path, result=None, read_error=str(exc)))
-            continue
-
-        # Expand copybooks with shared cache, the way parse_cobol_with_expansion
-        # does (#255): the source map and the expansion warnings reach the
-        # result, so the two entry points cannot disagree about a line.
-        expansion_warnings: list[str] = []
-        source_map: dict[int, tuple[str, int]] | None = None
-        copybook_error: str | None = None
-        expansion: Any = None
-        try:
-            expansion = expand_copybooks(
-                source_code=source,
-                copybook_paths=copybook_paths,
-                max_nesting_depth=max_nesting_depth,
-                validate_content=False,  # Skip validation for speed in batch mode
-                path_resolver=path_resolver,
-                # Directives decide which COPY statements exist: one inside an
-                # excluded >>IF must not be resolved (parse_cobol_with_expansion
-                # does the same). The parser's own directive pass would
-                # otherwise run only after the fact.
-                process_conditionals=True,
-                preserve_source_locations=True,
-                source_file=path_str,
-                debug_lines=debug_lines,
-            )
-            expanded_source = expansion.expanded_source
-            expansion_warnings = decode_warnings + list(
-                getattr(expansion.statistics, "warnings", []) or []
-            )
-            source_map = getattr(expansion, "source_location_map", None)
-        except Exception as exc:
-            # Copybook expansion is best-effort in batch mode: a single bad
-            # COPY must not abort the whole run, so we fall back to parsing the
-            # raw source (codebase-graph relies on the unexpanded parse for a
-            # file's CALL edges). Every COPY in the file goes unexpanded, not
-            # just the bad one, so the reason must reach the caller: it is kept
-            # as BatchResult.copybook_error and as a warning on the result,
-            # not only logged (#255).
-            logger.warning(
-                "Copybook expansion failed for %s; parsing without expansion: %r",
-                path_str,
-                exc,
-                exc_info=True,
-            )
-            copybook_error = f"{type(exc).__name__}: {exc}"
-            expansion_warnings = decode_warnings + [
-                f"copybook expansion failed ({copybook_error}); "
-                "the file was parsed without expanding any COPY statement"
-            ]
-            expanded_source = source
-
-        # Parse expanded source reusing the parser instance. Guarded the same
-        # way as _parse_one/_parse_one_reuse: one poisoned file must not abort
-        # the whole batch, so a parse-time exception is recorded per-file
-        # instead of propagating out of the function.
-        try:
-            if not enable_profiling:
-                result = parser.parse(
-                    expanded_source, filename=path_str, error_recovery=error_recovery
-                )
-                _attach_expansion(result, expansion_warnings, source_map)
-                _attach_expansion_debug_lines(result, expansion, path_str)
-                results.append(
-                    BatchResult(
-                        path=path,
-                        result=result,
-                        read_error=None,
-                        copybook_error=copybook_error,
-                    )
-                )
-            else:
-                prof_file: str | None = None
-                if prof_output is not None:
-                    prof_file = str(Path(prof_output) / prof_name)
-                parse_result, prof = parser.parse(
-                    expanded_source,
-                    filename=path_str,
-                    error_recovery=error_recovery,
-                    enable_profiling=True,
-                    top_n=top_n,
-                    prof_output=prof_file,
-                )
-                _attach_expansion(parse_result, expansion_warnings, source_map)
-                _attach_expansion_debug_lines(parse_result, expansion, path_str)
-                results.append(
-                    BatchResult(
-                        path=path,
-                        result=parse_result,
-                        read_error=None,
-                        profiling=prof,
-                        copybook_error=copybook_error,
-                    )
-                )
-        except Exception as exc:  # noqa: BLE001 — record per-file, don't abort batch
-            results.append(
-                BatchResult(
-                    path=path,
-                    result=None,
-                    read_error=f"parse error: {type(exc).__name__}: {exc}",
-                )
-            )
-
-    return results
+    # In-process: one resolver (shared caches) and one parser (registered
+    # once) for every file of this call.
+    state = _new_copybook_state(job)
+    return [
+        _parse_one_with_copybooks(p, n, job, state)
+        for p, n in zip(path_list, prof_names, strict=True)
+    ]

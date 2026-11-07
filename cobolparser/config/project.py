@@ -46,7 +46,11 @@ Shape (every key optional)::
       min_severity: warning
       fail_on: error
 
-    mockymock: {...}                # read by the mockymock CLI
+    limits:                         # per-file caps for batch / scan
+      timeout_seconds: 30           # number > 0
+      max_file_bytes: 10000000      # integer > 0
+
+    mockymock: {...}               # read by the mockymock CLI
     analyzer:  {...}                # read by the VS Code extension
 
 Unknown keys are **rejected**, not ignored: a typo'd ``copybook-paths``
@@ -69,6 +73,7 @@ __all__ = [
     "CONFIG_FILE_NAMES",
     "ConfigError",
     "DataDefaults",
+    "LimitDefaults",
     "LintDefaults",
     "ProjectConfig",
     "SCHEMA_VERSION",
@@ -151,6 +156,20 @@ class LintDefaults:
 
 
 @dataclass(frozen=True)
+class LimitDefaults:
+    """The ``limits:`` section: per-file resource caps for multi-file runs.
+
+    The values ``parse_files`` / ``parse_files_with_copybooks``
+    (``timeout_seconds=`` / ``max_file_bytes=``) and ``ScanOptions`` take,
+    so one hostile or pathological file cannot stall a portfolio run.
+    ``None`` = not stated (no limit, the built-in default).
+    """
+
+    timeout_seconds: float | None = None
+    max_file_bytes: int | None = None
+
+
+@dataclass(frozen=True)
 class ProjectConfig:
     """A loaded ``cobol.yml``, or an all-default instance when none was found.
 
@@ -181,6 +200,7 @@ class ProjectConfig:
     define: tuple[str, ...] = ()
     data: DataDefaults = field(default_factory=DataDefaults)
     lint: LintDefaults = field(default_factory=LintDefaults)
+    limits: LimitDefaults = field(default_factory=LimitDefaults)
     # Raw `mockymock:` / `analyzer:` sections, for the tools that own them.
     tools: dict[str, Any] = field(default_factory=dict)
 
@@ -277,6 +297,21 @@ def _int(value: Any, where: str, source: Path) -> int | None:
     # reader returns whatever the document held), and mypy will not narrow it
     # to int through the negated isinstance above.
     return int(value)
+
+
+def _positive_number(value: Any, where: str, source: Path) -> float | None:
+    if value is None:
+        return None
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or value <= 0:
+        raise ConfigError(f"{source}: '{where}' must be a number greater than 0")
+    return float(value)
+
+
+def _positive_int(value: Any, where: str, source: Path) -> int | None:
+    number = _int(value, where, source)
+    if number is not None and number <= 0:
+        raise ConfigError(f"{source}: '{where}' must be an integer greater than 0")
+    return number
 
 
 def _bool(value: Any, where: str, source: Path) -> bool | None:
@@ -418,7 +453,21 @@ _LINT_KEYS = (
     "baseline",
     "scope",
 )
-_TOP_LEVEL_KEYS = ("version", "project", "data", "lint", *_TOOL_SECTIONS)
+_LIMITS_KEYS = ("timeout_seconds", "max_file_bytes")
+_TOP_LEVEL_KEYS = ("version", "project", "data", "lint", "limits", *_TOOL_SECTIONS)
+
+
+def _build_limits(raw: Any, source: Path) -> LimitDefaults:
+    limits = _require_mapping(raw, "limits", source) if raw is not None else {}
+    _reject_unknown(limits, _LIMITS_KEYS, "limits", source)
+    return LimitDefaults(
+        timeout_seconds=_positive_number(
+            limits.get("timeout_seconds"), "limits.timeout_seconds", source
+        ),
+        max_file_bytes=_positive_int(
+            limits.get("max_file_bytes"), "limits.max_file_bytes", source
+        ),
+    )
 
 
 def _build_data(raw: Any, source: Path) -> DataDefaults:
@@ -519,6 +568,7 @@ def build_config(document: Any, source: Path) -> ProjectConfig:
         define=_defines(project.get("define"), source),
         data=_build_data(top.get("data"), source),
         lint=_build_lint(top.get("lint"), source),
+        limits=_build_limits(top.get("limits"), source),
         tools={
             name: _require_mapping(top[name], name, source)
             for name in _TOOL_SECTIONS
