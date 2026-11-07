@@ -594,6 +594,18 @@ def _varying_clause_roles(clause: dict[str, Any]) -> _Roles:
     return pairs
 
 
+#: Statements whose ``file_name`` is a file operation (OPEN / CLOSE list
+#: theirs in ``file_names``; RETURN records its own).
+_FILE_NAMED_IO_STATEMENTS = (
+    IOReadStatement,
+    IOWriteStatement,
+    IORewriteStatement,
+    IODeleteStatement,
+    IOStartStatement,
+    IOUnlockStatement,
+)
+
+
 class XrefAnalyzer:
     """Analyzer producing a full cross-reference listing for one program.
 
@@ -1948,66 +1960,89 @@ class XrefAnalyzer:
                 return [(str(text), ROLE_CONDITION, False)]
         return []
 
-    def _io_statement_roles(self, stmt: CobolStatement) -> list[tuple[Any, str, bool]]:
-        pairs: list[tuple[Any, str, bool]] = []
+    def _io_statement_roles(self, stmt: CobolStatement) -> _Roles:
+        """Roles for the file and sort I/O verbs: the file operation, then
+        the first ``_IO_ROLE_HANDLERS`` entry whose class *stmt* is an
+        instance of."""
         if isinstance(stmt, (IOOpenStatement, IOCloseStatement)):
-            pairs += [(name, ROLE_FILE_OPERATION, True) for name in stmt.file_names]
-            return pairs
+            return [(name, ROLE_FILE_OPERATION, True) for name in stmt.file_names]
 
+        pairs: _Roles = []
         file_name = getattr(stmt, "file_name", None)
-        if file_name and isinstance(
-            stmt,
-            (
-                IOReadStatement,
-                IOWriteStatement,
-                IORewriteStatement,
-                IODeleteStatement,
-                IOStartStatement,
-                IOUnlockStatement,
-            ),
-        ):
+        if file_name and isinstance(stmt, _FILE_NAMED_IO_STATEMENTS):
             pairs.append((file_name, ROLE_FILE_OPERATION, True))
 
-        if isinstance(stmt, IOReadStatement):
-            if stmt.record_name:
-                pairs.append((stmt.record_name, ROLE_WRITE, True))
-            if stmt.into_target:
-                pairs.append((stmt.into_target, ROLE_WRITE, True))
-            if stmt.key_name:
-                pairs.append((stmt.key_name, ROLE_READ, True))
-        elif isinstance(stmt, (IOWriteStatement, IORewriteStatement)):
-            if stmt.record_name:
-                pairs.append((stmt.record_name, ROLE_READ, True))
-            if stmt.from_clause:
-                pairs.append((stmt.from_clause, ROLE_READ, True))
-            # ``WRITE ... AFTER ADVANCING WS-N LINES``: the line count is
-            # read on every WRITE. It lives in ``advancing_clause`` only
-            # (never ``.operands``), as an int for a literal count and a
-            # string for an identifier or a mnemonic-name / PAGE.
-            advancing = getattr(stmt, "advancing_clause", None)
-            if isinstance(advancing, dict) and isinstance(advancing.get("value"), str):
-                pairs.append((advancing["value"], ROLE_READ, False))
-        elif isinstance(stmt, IOStartStatement):
-            if stmt.key_name:
-                pairs.append((stmt.key_name, ROLE_READ, True))
-        elif isinstance(stmt, IOAcceptStatement):
-            if stmt.target:
-                pairs.append((stmt.target, ROLE_WRITE, True))
-        elif isinstance(stmt, ReleaseStatement):
-            # The sort-side twin of WRITE: `RELEASE rec FROM x` reads x (and
-            # hands rec's contents to the sort).
-            if stmt.record_name:
-                pairs.append((stmt.record_name, ROLE_READ, True))
-            if stmt.from_source:
-                pairs.append((stmt.from_source, ROLE_READ, True))
-        elif isinstance(stmt, ReturnStatement):
-            # The sort-side twin of READ: `RETURN sd-file INTO x` names the
-            # SD file and writes x.
-            if stmt.file_name:
-                pairs.append((stmt.file_name, ROLE_FILE_OPERATION, True))
-            if stmt.into_target:
-                pairs.append((stmt.into_target, ROLE_WRITE, True))
+        for klass, handler in self._IO_ROLE_HANDLERS:
+            if isinstance(stmt, klass):
+                pairs += handler(self, stmt)
+                break
         return pairs
+
+    def _read_roles(self, stmt: IOReadStatement) -> _Roles:
+        pairs: _Roles = []
+        if stmt.record_name:
+            pairs.append((stmt.record_name, ROLE_WRITE, True))
+        if stmt.into_target:
+            pairs.append((stmt.into_target, ROLE_WRITE, True))
+        if stmt.key_name:
+            pairs.append((stmt.key_name, ROLE_READ, True))
+        return pairs
+
+    def _write_roles(self, stmt: IOWriteStatement | IORewriteStatement) -> _Roles:
+        pairs: _Roles = []
+        if stmt.record_name:
+            pairs.append((stmt.record_name, ROLE_READ, True))
+        if stmt.from_clause:
+            pairs.append((stmt.from_clause, ROLE_READ, True))
+        # ``WRITE ... AFTER ADVANCING WS-N LINES``: the line count is
+        # read on every WRITE. It lives in ``advancing_clause`` only
+        # (never ``.operands``), as an int for a literal count and a
+        # string for an identifier or a mnemonic-name / PAGE.
+        advancing = getattr(stmt, "advancing_clause", None)
+        if isinstance(advancing, dict) and isinstance(advancing.get("value"), str):
+            pairs.append((advancing["value"], ROLE_READ, False))
+        return pairs
+
+    def _start_roles(self, stmt: IOStartStatement) -> _Roles:
+        if stmt.key_name:
+            return [(stmt.key_name, ROLE_READ, True)]
+        return []
+
+    def _accept_roles(self, stmt: IOAcceptStatement) -> _Roles:
+        if stmt.target:
+            return [(stmt.target, ROLE_WRITE, True)]
+        return []
+
+    def _release_roles(self, stmt: ReleaseStatement) -> _Roles:
+        # The sort-side twin of WRITE: `RELEASE rec FROM x` reads x (and
+        # hands rec's contents to the sort).
+        pairs: _Roles = []
+        if stmt.record_name:
+            pairs.append((stmt.record_name, ROLE_READ, True))
+        if stmt.from_source:
+            pairs.append((stmt.from_source, ROLE_READ, True))
+        return pairs
+
+    def _return_roles(self, stmt: ReturnStatement) -> _Roles:
+        # The sort-side twin of READ: `RETURN sd-file INTO x` names the
+        # SD file and writes x.
+        pairs: _Roles = []
+        if stmt.file_name:
+            pairs.append((stmt.file_name, ROLE_FILE_OPERATION, True))
+        if stmt.into_target:
+            pairs.append((stmt.into_target, ROLE_WRITE, True))
+        return pairs
+
+    _IO_ROLE_HANDLERS: ClassVar[
+        tuple[tuple[type | tuple[type, ...], _RoleHandler], ...]
+    ] = (
+        (IOReadStatement, _read_roles),
+        ((IOWriteStatement, IORewriteStatement), _write_roles),
+        (IOStartStatement, _start_roles),
+        (IOAcceptStatement, _accept_roles),
+        (ReleaseStatement, _release_roles),
+        (ReturnStatement, _return_roles),
+    )
 
     def _exec_statement_roles(
         self, stmt: CobolStatement

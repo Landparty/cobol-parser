@@ -370,7 +370,8 @@ the per-family mappers; `_data_statement_roles` dispatches through
 `_DATA_ROLE_HANDLERS`, an ordered `(statement class, _<verb>_roles method)`
 table where the first `isinstance` match wins (so a subclass row must precede
 its base's). `_control_statement_roles` does the same through
-`_CONTROL_ROLE_HANDLERS`. A new verb mapping is one method plus one row.
+`_CONTROL_ROLE_HANDLERS`, and `_io_statement_roles` (after recording the
+file operation) through `_IO_ROLE_HANDLERS`. A new verb mapping is one method plus one row.
 
 * **Arithmetic.** With GIVING, only the GIVING/REMAINDER items are `write`; the
   TO/FROM operand is `read` (`SUBTRACT A FROM B GIVING C` does not write B).
