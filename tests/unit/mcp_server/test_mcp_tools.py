@@ -23,7 +23,7 @@ from cobolparser.mcp.envelope import (
     Response,
     clamp_limit,
 )
-from cobolparser.mcp.tools import MAX_SOURCE_LINES
+from cobolparser.mcp.tools.structure import MAX_SOURCE_LINES
 
 ENTERPRISE = Path(__file__).resolve().parents[2] / "samples" / "enterprise"
 

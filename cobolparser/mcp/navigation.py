@@ -118,7 +118,7 @@ class _Lines:
 
     def of(self, file: str) -> list[str]:
         if file not in self._held:
-            from .tools import _source_lines
+            from .tools.structure import _source_lines
 
             try:
                 path = self.workspace.resolve(file)
@@ -147,7 +147,7 @@ def statement_rows(
 ) -> Iterator[StatementRow]:
     """Every statement of every unit of *parsed*, with its operands."""
     from ..analysis.xref import XrefAnalyzer
-    from .tools import _own_statements
+    from .tools.common import _own_statements
 
     for unit in parsed.ast.program_units():
         name = unit.program_name or "<unnamed>"
@@ -315,7 +315,7 @@ def find_statements(
     program_info = None
     if file is not None:
         parsed = workspace.program(file)
-        from .tools import _carry_parse_caveats
+        from .tools.common import _carry_parse_caveats
 
         _carry_parse_caveats(parsed, response)
         program_info = parsed.program_info()
@@ -325,7 +325,7 @@ def find_statements(
         scope = "file"
     else:
         index = statements_index(workspace)
-        from .tools import _carry_index_caveats
+        from .tools.common import _carry_index_caveats
 
         _carry_index_caveats(index, response, "statements")
         rows = index.rows
@@ -529,7 +529,7 @@ def read_procedure(
     """The whole of one paragraph or section, numbered, copybook lines in
     their own files."""
     from ..analysis._procedures import ProcedureIndex
-    from .tools import _carry_parse_caveats, _declared_elsewhere
+    from .tools.common import _carry_parse_caveats, _declared_elsewhere
 
     wanted = " ".join(name.upper().replace(" IN ", " OF ").split())
     if not wanted:

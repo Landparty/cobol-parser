@@ -18,7 +18,7 @@ from cobolparser.generators import (
 )
 from cobolparser.mcp import CobolTools, ToolError, Workspace
 from cobolparser.mcp.prompts import PROMPTS
-from cobolparser.mcp.tools import DEFAULT_DECODE_RECORDS, DEFAULT_FIXTURE_ROWS
+from cobolparser.mcp.tools.data import DEFAULT_DECODE_RECORDS, DEFAULT_FIXTURE_ROWS
 
 ENTERPRISE = Path(__file__).resolve().parents[2] / "samples" / "enterprise"
 
@@ -461,7 +461,7 @@ class TestFailures:
         self, root: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         write_accounts(root, 5, Charset.ASCII)
-        monkeypatch.setattr("cobolparser.mcp.tools.MAX_DECODE_BYTES", 20)
+        monkeypatch.setattr("cobolparser.mcp.tools.data.MAX_DECODE_BYTES", 20)
         tools = tools_for(root)
         answer = tools.decode_record("ACCT.cpy", "ACCT.DAT")["answer"]
         # 20 bytes hold two 9-byte records; the cut tail is no "trailing" bytes.
@@ -481,7 +481,7 @@ class TestFailures:
         data = (root / "ACCT.DAT").read_bytes()
         records = [data[i : i + 9] for i in range(0, len(data), 9)]
         (root / "ACCT.TXT").write_bytes(b"".join(r + b"\n" for r in records))
-        monkeypatch.setattr("cobolparser.mcp.tools.MAX_DECODE_BYTES", 25)
+        monkeypatch.setattr("cobolparser.mcp.tools.data.MAX_DECODE_BYTES", 25)
         tools = tools_for(root)
         page = tools.decode_record(
             "ACCT.cpy", "ACCT.TXT", record_separator="newline", max_records=3

@@ -213,7 +213,7 @@ and no job, step or dataset node, while `cobolparser/jcl/` already resolves
 DD → dataset and step → program. The JCL joins live elsewhere: field lineage
 (`analysis/lineage_jcl.py`, behind `field-impact --jcl` and `widen-check
 --jcl`) and the MCP server's `jobs_running` / `dataset_users` / `jcl_job`
-(`mcp/jcl_tools.py`), which answer "which job writes the dataset this program
+(`mcp/tools/jcl_*.py`), which answer "which job writes the dataset this program
 reads". `codebase-graph` output has no JCL in it. See [jcl.md](../jcl.md).
 
 ## ProgramSignatureExtractor

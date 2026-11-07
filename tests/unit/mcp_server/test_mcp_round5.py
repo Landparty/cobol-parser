@@ -276,7 +276,7 @@ class TestBriefRunBy:
         assert answer["run_by"] == []
 
     def test_no_jcl_extra_no_field(self, shop: Path) -> None:
-        with patch("cobolparser.mcp.jcl_tools.jcl_available", return_value=False):
+        with patch("cobolparser.mcp.tools.jcl_index.jcl_available", return_value=False):
             answer = make_tools(shop).program_brief("bank/cbl/BATCH.cbl")["answer"]
         assert "run_by" not in answer
 
