@@ -2,7 +2,8 @@
 Base classes for COBOL statement and expression AST nodes.
 """
 
-from typing import Any, Union
+from collections.abc import Iterable, Iterator
+from typing import Any, Literal, NamedTuple, Union
 
 from ..ast_base import ASTNode, SourceLocation
 
@@ -10,6 +11,179 @@ from ..ast_base import ASTNode, SourceLocation
 def _serialize_operand(operand: Any) -> Any:
     """Serialize a binary-expression operand to a dict or passthrough value."""
     return operand.to_dict() if isinstance(operand, ASTNode) else operand
+
+
+# ---------------------------------------------------------------------------
+# Nested statement bodies: the one list of clause attributes
+# ---------------------------------------------------------------------------
+#
+# Every statement attribute that holds a nested body of statements is named
+# here, and nowhere else. Analyzers walk nested statements through
+# ``CobolStatement.iter_clause_bodies()`` / ``iter_child_statements()`` or the
+# module-level ``walk_statements()``; none keeps its own attribute list. Ten
+# private copies used to drift (one missed ``not_at_eop_clause``, several
+# missed RECEIVE's ``NO DATA`` / ``WITH DATA``, one never entered SEARCH WHEN
+# bodies), the same drift behind the old paragraph-swallow bugs. A statement
+# node that gains a new clause body adds its attribute here, and
+# ``tests/unit/models/test_statement_bodies.py`` fails until it does.
+
+#: IF's two arms.
+BRANCH_BODY_ATTRS: tuple[str, ...] = ("then_statements", "else_statements")
+
+#: An inline ``PERFORM ... END-PERFORM`` body.
+LOOP_BODY_ATTRS: tuple[str, ...] = ("inline_statements",)
+
+#: Conditional handler bodies, as (positive, negative) pairs: the two
+#: outcomes of one runtime test (an exception, end of file, an overflow, a
+#: missing message), so a pair with either side written is one decision.
+HANDLER_CLAUSE_PAIRS: tuple[tuple[str, str], ...] = (
+    ("at_end_clause", "not_at_end_clause"),
+    ("invalid_key_clause", "not_invalid_key_clause"),
+    ("at_eop_clause", "not_at_eop_clause"),
+    ("on_size_error", "not_on_size_error"),
+    ("on_overflow", "not_on_overflow"),
+    ("on_exception", "not_on_exception"),
+    ("no_data_clause", "with_data_clause"),
+)
+
+#: Every handler body attribute, flattened from :data:`HANDLER_CLAUSE_PAIRS`.
+HANDLER_CLAUSE_ATTRS: tuple[str, ...] = tuple(
+    attr for pair in HANDLER_CLAUSE_PAIRS for attr in pair
+)
+
+#: The COBOL phrase each handler body is written with.
+HANDLER_CLAUSE_PHRASES: dict[str, str] = {
+    "at_end_clause": "AT END",
+    "not_at_end_clause": "NOT AT END",
+    "invalid_key_clause": "INVALID KEY",
+    "not_invalid_key_clause": "NOT INVALID KEY",
+    "at_eop_clause": "AT END-OF-PAGE",
+    "not_at_eop_clause": "NOT AT END-OF-PAGE",
+    "on_size_error": "ON SIZE ERROR",
+    "not_on_size_error": "NOT ON SIZE ERROR",
+    "on_overflow": "ON OVERFLOW",
+    "not_on_overflow": "NOT ON OVERFLOW",
+    "on_exception": "ON EXCEPTION",
+    "not_on_exception": "NOT ON EXCEPTION",
+    "no_data_clause": "NO DATA",
+    "with_data_clause": "WITH DATA",
+}
+
+#: Attributes whose value is a WHEN arm (EVALUATE's ``WhenClause`` nodes,
+#: SEARCH's ``{"condition", "statements"}`` dicts) or a list of them, rather
+#: than a statement list.
+WHEN_ARM_ATTRS: tuple[str, ...] = ("when_clauses", "default_when")
+
+#: Attributes whose value is itself a ``list[CobolStatement]`` (or None).
+STATEMENT_LIST_ATTRS: tuple[str, ...] = (
+    BRANCH_BODY_ATTRS + LOOP_BODY_ATTRS + HANDLER_CLAUSE_ATTRS
+)
+
+#: Every attribute that holds a nested statement body, in any shape.
+NESTED_BODY_ATTRS: tuple[str, ...] = STATEMENT_LIST_ATTRS + WHEN_ARM_ATTRS
+
+BodyKind = Literal["branch", "loop", "handler"]
+
+
+class ClauseBody(NamedTuple):
+    """One nested statement body of a statement.
+
+    *attr* is the attribute it came from; *kind* is ``"branch"`` (an IF arm,
+    an EVALUATE / SEARCH WHEN arm, WHEN OTHER), ``"loop"`` (an inline
+    PERFORM body) or ``"handler"`` (AT END, INVALID KEY, ON SIZE ERROR, ...).
+    For a ``when_clauses`` arm, *position* is its 1-based position and *clause*
+    the ``WhenClause`` / SEARCH WHEN dict; for ``default_when``, *clause* is
+    the WHEN OTHER ``WhenClause``.
+    """
+
+    attr: str
+    kind: BodyKind
+    statements: list["CobolStatement"]
+    position: int | None = None
+    clause: Any = None
+
+
+def _when_arm_statements(clause: Any) -> list["CobolStatement"]:
+    """The statements of one WHEN arm, whichever shape it has."""
+    if isinstance(clause, dict):
+        body = clause.get("statements")
+    else:
+        body = getattr(clause, "statements", None)
+    return body if isinstance(body, list) else []
+
+
+def iter_clause_bodies(
+    statement: Any,
+    *,
+    include_handlers: bool = True,
+    include_loops: bool = True,
+    include_empty: bool = False,
+) -> Iterator[ClauseBody]:
+    """Every nested statement body of *statement*, in source order.
+
+    IF THEN / ELSE, the inline PERFORM body, each handler body, then each
+    WHEN arm and WHEN OTHER. (A statement holds one handler family at most,
+    and SEARCH writes AT END before its WHENs, so this is source order.)
+    Works on any object: a node without these attributes yields nothing.
+
+    *include_handlers* / *include_loops* leave out handler bodies / inline
+    PERFORM bodies for a walker that treats them separately. An empty body
+    list (an IF with no ELSE, a WHEN with no statement) is skipped unless
+    *include_empty*; an attribute that is None or absent never yields.
+    """
+    for attr in BRANCH_BODY_ATTRS:
+        yield from _list_body(statement, attr, "branch", include_empty)
+    if include_loops:
+        for attr in LOOP_BODY_ATTRS:
+            yield from _list_body(statement, attr, "loop", include_empty)
+    if include_handlers:
+        for attr in HANDLER_CLAUSE_ATTRS:
+            yield from _list_body(statement, attr, "handler", include_empty)
+    when_clauses = getattr(statement, "when_clauses", None)
+    if isinstance(when_clauses, list):
+        for position, clause in enumerate(when_clauses, start=1):
+            body = _when_arm_statements(clause)
+            if body or include_empty:
+                yield ClauseBody("when_clauses", "branch", body, position, clause)
+    default_when = getattr(statement, "default_when", None)
+    if default_when is not None:
+        body = _when_arm_statements(default_when)
+        if body or include_empty:
+            yield ClauseBody("default_when", "branch", body, None, default_when)
+
+
+def _list_body(
+    statement: Any, attr: str, kind: BodyKind, include_empty: bool
+) -> Iterator[ClauseBody]:
+    value = getattr(statement, attr, None)
+    if isinstance(value, list) and (value or include_empty):
+        yield ClauseBody(attr, kind, value)
+
+
+def walk_statements(
+    statements: Iterable[Any],
+    *,
+    include_handlers: bool = True,
+    include_loops: bool = True,
+) -> Iterator[Any]:
+    """Every statement in *statements* and, depth first, every statement
+    nested in their clause bodies (:func:`iter_clause_bodies`), in source
+    order. Iterative, so nesting depth never meets the recursion limit; a
+    node reached twice (a shared list) is yielded once."""
+    stack: list[Any] = list(reversed(list(statements)))
+    seen: set[int] = set()
+    while stack:
+        stmt = stack.pop()
+        if id(stmt) in seen:
+            continue
+        seen.add(id(stmt))
+        yield stmt
+        nested: list[Any] = []
+        for body in iter_clause_bodies(
+            stmt, include_handlers=include_handlers, include_loops=include_loops
+        ):
+            nested.extend(body.statements)
+        stack.extend(reversed(nested))
 
 
 class CobolStatement(ASTNode):
@@ -34,6 +208,32 @@ class CobolStatement(ASTNode):
     def ims_command(self) -> str | None:
         """Return IMS command if this is an IMS statement, None otherwise."""
         return None
+
+    def iter_clause_bodies(
+        self,
+        *,
+        include_handlers: bool = True,
+        include_loops: bool = True,
+        include_empty: bool = False,
+    ) -> Iterator[ClauseBody]:
+        """This statement's nested statement bodies; see the module-level
+        :func:`iter_clause_bodies`."""
+        return iter_clause_bodies(
+            self,
+            include_handlers=include_handlers,
+            include_loops=include_loops,
+            include_empty=include_empty,
+        )
+
+    def iter_child_statements(
+        self, *, include_handlers: bool = True, include_loops: bool = True
+    ) -> Iterator["CobolStatement"]:
+        """The statements directly nested in this statement's clause bodies
+        (not their own nested ones), in source order."""
+        for body in iter_clause_bodies(
+            self, include_handlers=include_handlers, include_loops=include_loops
+        ):
+            yield from body.statements
 
     def add_operand(self, operand: str) -> None:
         """Add an operand to the statement (allowing duplicates)."""
