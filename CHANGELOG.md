@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+* **Per-file limits for `batch` and `scan`.** `--timeout SECONDS` stops a
+  file that is still being parsed or analyzed after that long (its worker
+  process is terminated and reaped) and reports it as a failure;
+  `--max-file-bytes N` skips a larger file before reading it. The rest of
+  the run carries on. Both default to no limit, and `cobol.yml` gains a
+  `limits:` section (`timeout_seconds`, `max_file_bytes`) that fills them.
+  In the library: `parse_files`, `parse_files_with_copybooks` and
+  `ScanOptions` take `timeout_seconds=` / `max_file_bytes=`; a timeout works
+  on Windows and Linux, including with one worker.
+
 * **Lint reports what IBM's compiler would.** Ten new rules, on by default,
   for the mistakes Enterprise COBOL rejects or warns about, so they show up
   in the editor and the CI gate instead of the compile listing:
@@ -231,6 +241,43 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+* **BREAKING: the Cython accelerators are gone.** The opt-in
+  `_lexer_fast` / `_preprocess_fast` / `_data_fast` extensions measured about
+  1.3x, not the documented 3x, and kept a second copy of the normalizer and
+  the data-item clause loop in sync by hand. Removed with them: the `[fast]`
+  extra, `COBOLPARSER_ACCEL` / `COBOLPARSER_SKIP_EXT` and `setup.py`. The
+  package now ships one pure-Python `py3-none-any` wheel plus the sdist, and
+  CI runs one test matrix (3.11-3.13) with coverage on.
+
+* **One statement walker.** The statement models own the only list of
+  nested-body attributes (`NESTED_BODY_ATTRS`), with
+  `CobolStatement.iter_clause_bodies()` / `iter_child_statements()` and
+  `walk_statements()`; eleven analyzers dropped their private copies, and a
+  guard test fails when a statement node gains a body the list does not
+  name. `analysis/_names.py` is the one data-name normalizer.
+
+* **`cli/parse.py` split.** The 6,351-line module is now a 332-line entry
+  point over `cobolparser/cli/commands/` (source, data, analyze, lint,
+  lineage, codebase, jcl, project) and a shared `cli/_common.py`. The
+  standard single-file analyzers are declared in an `ANALYZERS` table. Every
+  `--help` output is byte-identical.
+
+* **MCP tool modules split.** `mcp/tools.py` and `mcp/jcl_tools.py` are now
+  the `cobolparser/mcp/tools/` package (one mixin per area over a shared
+  `BaseTools`, five JCL modules). Tool names, descriptions, schemas and
+  prompts are unchanged.
+
+* **The most complex parser and xref functions are broken up.**
+  `DataItemClauseParser.parse_data_item` (cyclomatic complexity 112),
+  `PerformStatementParser.parse` (87), `CallStatementParser.parse` (69) and
+  `XrefAnalyzer._data_statement_roles` (84), plus six more in the same
+  files, now dispatch through tables; none is rated worse than C. AST,
+  errors, warnings and xref output are byte-identical over 649 programs.
+
+* `[dev]` pins ruff, black and mypy to the versions CI and pre-commit use;
+  pre-commit runs black only (no `ruff-format`); the `docs` extra (Sphinx
+  with no `conf.py`) is gone.
+
 * **Less lint noise.** Graded info rather than warning: a field of a group
   the program uses whole (`ACCTFILE-STAT1` under the FILE STATUS group;
   `UnusedVariableItem.used_group` names the group), a FILE record field, a
@@ -246,7 +293,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 * **`lint` parses each file once**: copybook provenance now comes from the
   expansion source map instead of a second, unexpanded parse.
 
+### Removed
+
+* **BREAKING:** the never-instantiated `CobolFileDescription` node, the
+  uncalled `TokenStream.transaction()`, `TokenType.ALL` (`ALL` always lexes
+  as a figurative constant) and the legacy character-cursor `CobolLexer`
+  methods (`peek_char`, `read_string_literal`, ...).
+
 ### Fixed
+
+* **An unexpected exception while parsing kept its location.** It used to
+  become `ParseError("Division parsing error: ...")` at line 1, column 1; it
+  now names the exception type, takes the line and column from the
+  exception or the current token, and chains the original as `__cause__`.
+
+* **RECEIVE's NO DATA / WITH DATA bodies were invisible to most
+  analyzers.** Program flow (a PERFORM there made no edge, so the paragraph
+  read as unreachable), complexity, boundary inventory, constraints,
+  constant folding (a MOVE there left the field falsely constant), business
+  rules and redundancy all skipped them. The bug-pattern walk also never
+  entered SEARCH WHEN bodies or NOT AT END-OF-PAGE.
+
+* **`MOVE WS-ENT(1) TO WS-PGM` lost WS-ENT's values** in dynamic-CALL
+  resolution: the name normalizer left a glued subscript on, so
+  `CALL WS-PGM` had no possible values.
+
+* A zero value in an all-`*` numeric-edited picture now fills `CR` / `DB`
+  with `*` too (`***.**CR` -> `***.****`), as it already did a fixed `+`/`-`.
+
+* `datetime.utcnow()` (deprecated since Python 3.12) is replaced by a
+  timezone-aware call in the IO-coverage reporter and tools; output strings
+  are unchanged.
 
 * **PERFORM VARYING ... AFTER ... UNTIL no longer swallows a following GO
   TO.** The last AFTER condition read `GO TO X` as part of itself, so the GO
@@ -470,6 +547,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   adds a note naming that dataset instead of dropping the flow silently.
 
 ### Documentation
+
+* `MemoryConfiguration` says what it does: only `max_error_count` is
+  enforced; `max_memory_mb`, `enable_streaming` and `chunk_size_kb` are
+  advisory.
 
 * **README: every command and API entry point, with an example.** One
   example per subcommand (all 41, in the groups `cobol-parser --help` uses)
