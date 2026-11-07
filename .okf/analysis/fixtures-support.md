@@ -241,11 +241,13 @@ special cases: `EvaluateStatement.when_clauses`/`.default_when` are
 `WhenClause` *nodes* with a `.statements` attribute, while
 `SearchStatement.when_clauses` is a **list of dicts** with a `"statements"`
 key -- a different shape, and a documented trap (mixing the two loop
-variables up trips mypy immediately). This module's and `constraints.py`'s
-`_NESTED_STATEMENT_ATTRS` must list every clause-body attribute
-`program_flow/scanner.py` and `const_fold.py` walk; a missing one (a `CALL
-'ERRLOG'` nested in an arithmetic `ON SIZE ERROR`) produces no boundary at
-all. Pinned by
+variables up trips mypy immediately). Both shapes, and every other nested
+body, come from the statement models' `iter_clause_bodies()` (see
+[ast-models.md](../ast-models.md#nested-statement-bodies)), which this
+module, `constraints.py`, `const_fold.py` and `program_flow/scanner.py` all
+walk; a missing body (a `CALL 'ERRLOG'` nested in an arithmetic `ON SIZE
+ERROR`, or in RECEIVE's `NO DATA`, which the old private lists missed)
+produces no boundary at all. Pinned by
 `tests/regression/test_audit_2026_08_12_analysis.py::TestA5SizeErrorBodiesAreWalked`.
 
 ## ConstraintExtractor and domains.solve
@@ -333,8 +335,8 @@ branch arm here, and inventing an id for one would produce a path entry
 nothing could ever join to. **SEARCH's `AT END` is the exception**
 (`_ARM_BEARING_ATTRS`): `_extract_search` really does register an
 `arms["AT_END"]` entry, so a statement nested under it has an enclosing arm
-to join to -- even though the clause reaches `_walk_list` through
-`_NESTED_STATEMENT_ATTRS` rather than a `when_clauses` list. Leaving it
+to join to -- even though the clause reaches `_walk_list` as a handler body
+rather than a `when_clauses` arm. Leaving it
 untagged made such a statement look top-level, so a scenario for a branch
 inside it could be reported verified without its data establishing that the
 table search found nothing.
@@ -881,7 +883,8 @@ internal env) rather than approximating:
   `tests/unit/analysis/test_const_fold.py::TestDecidedBranches`.
 * A conditional handler body (`AT END`/`NOT AT END`/`INVALID KEY`/`ON SIZE
   ERROR`/`ON OVERFLOW`/`ON EXCEPTION`/`AT EOP` and their `NOT` variants,
-  the `_HANDLER_BODY_ATTRS` tuple) may or may not fire, so every field it
+  RECEIVE's `NO DATA` / `WITH DATA`: the statement models'
+  `HANDLER_CLAUSE_ATTRS`) may or may not fire, so every field it
   could write is poisoned exactly like an `IF` arm -- and the poison runs
   AFTER the statement's own fold, so a handler writing the statement's own
   target (`ADD 1 TO X ON SIZE ERROR MOVE 0 TO X`) still leaves X unknown

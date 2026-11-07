@@ -35,13 +35,13 @@ from ..models.statements.base import (
     ConditionalExpression,
     FunctionCall,
     LogicalExpression,
+    iter_clause_bodies,
 )
 from ..models.statements.call import CallStatement
 from ..models.statements.control import (
     EvaluateStatement,
     IfStatement,
     PerformStatement,
-    SearchStatement,
 )
 from ..models.statements.data import (
     DisplayStatement,
@@ -80,31 +80,11 @@ if TYPE_CHECKING:
 
 # -- statement-walk discipline ------------------------------------------------
 #
-# Mirrors the walking discipline mockymock's own `mock_surface.py` and this
-# repo's `IOLogger` both converged on independently: a fixed set of
-# nested-body attributes, recursed via getattr() (CobolStatement's base class
-# defines none of them, so a plain getattr(..., None) never misfires on an
-# unrelated statement type), plus two shapes that need special-casing.
+# Nested bodies (IF arms, inline PERFORM, every handler clause, EVALUATE /
+# SEARCH WHEN arms) come from the statement models' canonical
+# `iter_clause_bodies()`; this module keeps no attribute list of its own.
 
-_NESTED_STATEMENT_ATTRS = (
-    "then_statements",
-    "else_statements",
-    "inline_statements",
-    "at_end_clause",
-    "not_at_end_clause",
-    "invalid_key_clause",
-    "not_invalid_key_clause",
-    "at_eop_clause",
-    "not_at_eop_clause",
-    "on_exception",
-    "not_on_exception",
-    "on_overflow",
-    "not_on_overflow",
-    "on_size_error",
-    "not_on_size_error",
-)
-
-# Which of the generic clause attributes above signal a *declared error
+# Which of the handler clause attributes signal a *declared error
 # handler* on a boundary statement (as opposed to just being a nested-body
 # source) -- feeds Boundary.handlers, which later phases use to decide which
 # error-status scenarios the program actually has a path for.
@@ -611,25 +591,7 @@ class BoundaryInventoryAnalyzer:
 
     @staticmethod
     def _nested_statement_lists(statement: Any) -> list[list]:
-        lists = [
-            value
-            for attr in _NESTED_STATEMENT_ATTRS
-            if (value := getattr(statement, attr, None))
-        ]
-        if isinstance(statement, EvaluateStatement):
-            for when in statement.when_clauses:
-                if when.statements:
-                    lists.append(when.statements)
-            if statement.default_when is not None and statement.default_when.statements:
-                lists.append(statement.default_when.statements)
-        if isinstance(statement, SearchStatement):
-            # SearchStatement.when_clauses is list[dict] with a "statements"
-            # key -- a different shape than EvaluateStatement's WhenClause
-            # nodes. Its AT END body is already covered by "at_end_clause".
-            for when_dict in statement.when_clauses:
-                if when_dict.get("statements"):
-                    lists.append(when_dict["statements"])
-        return lists
+        return [body.statements for body in iter_clause_bodies(statement)]
 
     def _visit(
         self,
