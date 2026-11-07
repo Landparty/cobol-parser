@@ -29,6 +29,7 @@ first imports (seconds under spawn) never count against the first file.
 
 from __future__ import annotations
 
+import math
 import multiprocessing
 import os
 import time
@@ -43,6 +44,25 @@ R = TypeVar("R")
 #: ``terminate()``, before it is killed outright.
 _EXIT_GRACE_SECONDS = 2.0
 
+#: The largest per-file timeout accepted: one week. Far past any real parse,
+#: and well inside what ``multiprocessing.connection.wait`` can take (an
+#: infinite or ~1e308 timeout overflows it; Windows waits in milliseconds).
+MAX_TIMEOUT_SECONDS = 7 * 24 * 60 * 60
+
+
+def timeout_problem(timeout_seconds: float) -> str | None:
+    """Why *timeout_seconds* is unusable, or ``None`` when it is fine.
+
+    The one check behind every place a timeout comes in (the library, the
+    CLI flag, ``cobol.yml``), so NaN, infinity and huge values are refused
+    the same way everywhere.
+    """
+    if not math.isfinite(timeout_seconds) or not timeout_seconds > 0:
+        return "must be a finite number greater than 0"
+    if timeout_seconds > MAX_TIMEOUT_SECONDS:
+        return f"must be at most {MAX_TIMEOUT_SECONDS} (one week)"
+    return None
+
 
 def validate_limits(timeout_seconds: float | None, max_file_bytes: int | None) -> None:
     """Raise ``ValueError`` for a limit that cannot mean anything."""
@@ -51,8 +71,9 @@ def validate_limits(timeout_seconds: float | None, max_file_bytes: int | None) -
             timeout_seconds, (int, float)
         ):
             raise ValueError("timeout_seconds must be a number of seconds or None")
-        if not timeout_seconds > 0:
-            raise ValueError("timeout_seconds must be > 0 or None")
+        problem = timeout_problem(timeout_seconds)
+        if problem is not None:
+            raise ValueError(f"timeout_seconds {problem}, or None")
     if max_file_bytes is not None:
         if isinstance(max_file_bytes, bool) or not isinstance(max_file_bytes, int):
             raise ValueError("max_file_bytes must be an integer or None")
@@ -241,10 +262,17 @@ def run_with_timeouts(
             pool.append(_Worker(ctx, func, warmup, warmup_args))
 
         while remaining:
-            for worker in pool:
+            for worker in list(pool):
                 if worker.ready and worker.task is None and pending:
                     index = pending.popleft()
-                    worker.conn.send(tasks[index])
+                    try:
+                        worker.conn.send(tasks[index])
+                    except (OSError, ValueError):
+                        # The worker died while idle (killed from outside):
+                        # the file never reached it, so it goes back in line.
+                        pending.appendleft(index)
+                        replace(worker)
+                        continue
                     worker.task = index
                     worker.deadline = time.monotonic() + timeout_seconds
 
@@ -269,7 +297,11 @@ def run_with_timeouts(
                                 finish(worker, message[1])
                             else:
                                 finish(worker, failure(worker.task, message[1]))
-                        continue
+                        # A worker can reply and then die (killed from
+                        # outside) before its sentinel is seen: reap it now,
+                        # or it stays "ready" and the next hand-out fails.
+                        if not exited and worker.process.is_alive():
+                            continue
                     exited = True
                 if exited:
                     worker.process.join(_EXIT_GRACE_SECONDS)

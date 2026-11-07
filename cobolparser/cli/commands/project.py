@@ -249,7 +249,7 @@ def _cmd_config(args: argparse.Namespace) -> None:
     lines.append(f"Config file: {config.source}")
     lines.append(f"Schema version: {config.version}")
     missing = set(payload.get("missing_directories", ()))
-    for section in ("project", "data", "lint"):
+    for section in ("project", "data", "lint", "limits"):
         values = payload[section]
         if not values:
             continue

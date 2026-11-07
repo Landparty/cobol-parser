@@ -14,8 +14,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   process is terminated and reaped) and reports it as a failure;
   `--max-file-bytes N` skips a larger file before reading it. The rest of
   the run carries on. Both default to no limit, and `cobol.yml` gains a
-  `limits:` section (`timeout_seconds`, `max_file_bytes`) that fills them.
-  In the library: `parse_files`, `parse_files_with_copybooks` and
+  `limits:` section (`timeout_seconds`, `max_file_bytes`) that fills them
+  (shown by `cobol-parser config`). A timeout must be finite and at most
+  604800 s (one week); NaN, infinity and larger values are refused up front.
+  A worker killed from outside the run costs at most the file it was
+  running, never the run. In the library: `parse_files`, `parse_files_with_copybooks` and
   `ScanOptions` take `timeout_seconds=` / `max_file_bytes=`; a timeout works
   on Windows and Linux, including with one worker.
 

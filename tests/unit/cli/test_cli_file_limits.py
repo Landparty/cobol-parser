@@ -110,8 +110,11 @@ def test_batch_reports_an_oversize_file_and_parses_the_other(sources, capsys):
 @pytest.mark.parametrize(
     ("flag", "value", "message"),
     [
-        ("--timeout", "0", "--timeout must be greater than 0"),
-        ("--timeout", "-1", "--timeout must be greater than 0"),
+        ("--timeout", "0", "--timeout must be a finite number greater than 0"),
+        ("--timeout", "-1", "--timeout must be a finite number greater than 0"),
+        ("--timeout", "nan", "--timeout must be a finite number greater than 0"),
+        ("--timeout", "inf", "--timeout must be a finite number greater than 0"),
+        ("--timeout", "1e308", "--timeout must be at most 604800"),
         ("--max-file-bytes", "0", "--max-file-bytes must be >= 1"),
     ],
 )
@@ -139,6 +142,27 @@ def test_cobol_yml_limits_fill_the_flags_and_a_flag_wins(sources):
         _main(["batch", "SMALL.cbl", "--timeout", "5"])
     assert fake.call_args.kwargs["timeout_seconds"] == 5
     assert fake.call_args.kwargs["max_file_bytes"] == 4096
+
+
+def test_config_text_shows_limits(sources, capsys):
+    (sources / "cobol.yml").write_text(LIMITS_CONFIG)
+    _main(["config"])
+    out = capsys.readouterr().out
+    assert "[limits]" in out
+    assert "timeout_seconds: 30" in out
+    assert "max_file_bytes: 4096" in out
+
+
+INFINITE_TIMEOUT_CONFIG = """\
+limits:
+  timeout_seconds: 1e999
+"""
+
+
+def test_cobol_yml_infinite_timeout_is_a_clean_error(sources, capsys):
+    (sources / "cobol.yml").write_text(INFINITE_TIMEOUT_CONFIG)
+    assert _main(["config", "--json"]) != 0
+    assert "limits.timeout_seconds" in capsys.readouterr().err
 
 
 def test_config_json_shows_limits(sources, capsys):

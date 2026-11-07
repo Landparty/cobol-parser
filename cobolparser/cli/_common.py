@@ -14,6 +14,7 @@ import re
 import sys
 from typing import Any, NoReturn
 
+from .._file_limits import timeout_problem
 from ..models.program import CobolProgram
 from ..parser import parse_cobol
 from ..plugins.core import DialectType, ErrorRecoveryMode
@@ -220,8 +221,8 @@ def _limit_kwargs(args: argparse.Namespace) -> dict[str, Any]:
     """The validated ``timeout_seconds`` / ``max_file_bytes`` for a run."""
     timeout = getattr(args, "timeout_seconds", None)
     max_bytes = getattr(args, "max_file_bytes", None)
-    if timeout is not None and timeout <= 0:
-        _fail("--timeout must be greater than 0")
+    if timeout is not None and (problem := timeout_problem(timeout)) is not None:
+        _fail(f"--timeout {problem}")
     if max_bytes is not None and max_bytes < 1:
         _fail("--max-file-bytes must be >= 1")
     return {"timeout_seconds": timeout, "max_file_bytes": max_bytes}

@@ -107,7 +107,9 @@ class TestValidateLimits:
         validate_limits(None, None)
         validate_limits(0.5, 1)
 
-    @pytest.mark.parametrize("bad", [0, -1, True, "5"])
+    @pytest.mark.parametrize(
+        "bad", [0, -1, True, "5", float("nan"), float("inf"), 1e308, 7 * 86400 + 1]
+    )
     def test_bad_timeout(self, bad: object) -> None:
         with pytest.raises(ValueError, match="timeout_seconds"):
             validate_limits(bad, None)  # type: ignore[arg-type]
@@ -281,6 +283,76 @@ class TestRunWithTimeouts:
         assert died[1] == "A"
         assert _no_leaked_children()
 
+    def test_worker_that_replies_then_dies_is_replaced(self, monkeypatch) -> None:
+        # Kill the worker right after it sends its first result, before the
+        # parent sees its sentinel: the parent must reap it rather than hand
+        # the next file to a dead process (a BrokenPipeError used to abort
+        # the whole run).
+        real_wait = _file_limits.wait
+        killed: list[int] = []
+
+        def wait_then_kill(handles, timeout=None):
+            got = real_wait(handles, timeout=timeout)
+            for handle in got:
+                if isinstance(handle, int) or not hasattr(handle, "poll"):
+                    continue
+                for worker in created:
+                    if worker.conn is handle and worker.task is not None:
+                        if not killed:
+                            worker.process.kill()
+                            worker.process.join()
+                            killed.append(worker.process.pid)
+                        return [h for h in got if h is handle]
+            return got
+
+        created: list[_file_limits._Worker] = []
+        real_init = _file_limits._Worker.__init__
+
+        def recording_init(self, *args, **kwargs):
+            real_init(self, *args, **kwargs)
+            created.append(self)
+
+        monkeypatch.setattr(_file_limits, "wait", wait_then_kill)
+        monkeypatch.setattr(_file_limits._Worker, "__init__", recording_init)
+        results = run_with_timeouts(
+            _raise_on_bad,
+            [("a",), ("b",), ("c",)],
+            timeout_seconds=30,
+            workers=1,
+            failure=_failure,
+        )
+        assert results == ["A", "B", "C"]
+        assert killed and len(created) == 2
+        assert _no_leaked_children()
+
+    def test_idle_worker_that_died_gets_no_task(self, monkeypatch) -> None:
+        # The hand-out finds a dead idle worker (the send fails): the file
+        # goes back in line and runs in a replacement.
+        created: list[_file_limits._Worker] = []
+        real_init = _file_limits._Worker.__init__
+
+        def recording_init(self, *args, **kwargs):
+            real_init(self, *args, **kwargs)
+            if not created:
+
+                def broken_send(_obj: object) -> None:
+                    raise BrokenPipeError("worker is gone")
+
+                self.conn.send = broken_send  # type: ignore[method-assign]
+            created.append(self)
+
+        monkeypatch.setattr(_file_limits._Worker, "__init__", recording_init)
+        results = run_with_timeouts(
+            _raise_on_bad,
+            [("a",), ("b",)],
+            timeout_seconds=30,
+            workers=1,
+            failure=_failure,
+        )
+        assert results == ["A", "B"]
+        assert len(created) == 2
+        assert _no_leaked_children()
+
     def test_no_tasks(self) -> None:
         assert (
             run_with_timeouts(
@@ -437,6 +509,9 @@ class TestConfigLimits:
             {"timeout_seconds": 0},
             {"timeout_seconds": "10"},
             {"timeout_seconds": True},
+            {"timeout_seconds": float("inf")},
+            {"timeout_seconds": float("nan")},
+            {"timeout_seconds": 1e308},
             {"max_file_bytes": 0},
             {"max_file_bytes": 1.5},
             {"max_bytes": 10},

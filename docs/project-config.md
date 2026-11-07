@@ -194,7 +194,7 @@ Both keys are optional; leaving one out means no limit.
 
 | Key | Type | Meaning |
 |-----|------|---------|
-| `timeout_seconds` | number greater than 0 | a file still being parsed or analyzed after this many seconds is stopped (its worker process is terminated) and reported as a failure, `timed out after N s`; the other files carry on |
+| `timeout_seconds` | finite number greater than 0, at most 604800 (one week) | a file still being parsed or analyzed after this many seconds is stopped (its worker process is terminated) and reported as a failure, `timed out after N s`; the other files carry on |
 | `max_file_bytes` | integer greater than 0 | a program file larger than this on disk is not read; it is reported as a failure, `skipped: file is N bytes, ...` |
 
 ```yaml

@@ -67,6 +67,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from .._file_limits import timeout_problem
 from ._yaml import YamlError, parse_yaml
 
 __all__ = [
@@ -299,11 +300,14 @@ def _int(value: Any, where: str, source: Path) -> int | None:
     return int(value)
 
 
-def _positive_number(value: Any, where: str, source: Path) -> float | None:
+def _timeout_seconds(value: Any, where: str, source: Path) -> float | None:
     if value is None:
         return None
-    if isinstance(value, bool) or not isinstance(value, (int, float)) or value <= 0:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
         raise ConfigError(f"{source}: '{where}' must be a number greater than 0")
+    problem = timeout_problem(value)
+    if problem is not None:
+        raise ConfigError(f"{source}: '{where}' {problem}")
     return float(value)
 
 
@@ -461,7 +465,7 @@ def _build_limits(raw: Any, source: Path) -> LimitDefaults:
     limits = _require_mapping(raw, "limits", source) if raw is not None else {}
     _reject_unknown(limits, _LIMITS_KEYS, "limits", source)
     return LimitDefaults(
-        timeout_seconds=_positive_number(
+        timeout_seconds=_timeout_seconds(
             limits.get("timeout_seconds"), "limits.timeout_seconds", source
         ),
         max_file_bytes=_positive_int(
