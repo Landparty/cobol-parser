@@ -138,6 +138,13 @@ arm.
 
 ## PERFORM
 
+- **Structure.** `parse()` handles the missing-target error, then tries
+  `_parse_inline_form` (VARYING, `[WITH TEST] UNTIL`, `n TIMES` via
+  `_try_parse_inline_literal_times`) and `_parse_procedure_form` (`id TIMES`
+  inline, else target -> `_parse_thru_phrase` -> `_parse_trailing_times` ->
+  `[WITH TEST]` -> `_parse_out_of_line_loop` for VARYING / UNTIL), and ends with
+  `_consume_perform_end` (period or END-PERFORM). `_is_times_word` is the one
+  TIMES/TIME lookahead test.
 - **Forms.** Inline (`PERFORM [WITH TEST ...] [UNTIL ... | VARYING ... | n
   TIMES] ... END-PERFORM`) and out-of-line (`PERFORM p [THRU q] [n TIMES | [WITH
   TEST ...] UNTIL ... | VARYING ...]`). `PERFORM id TIMES` and `PERFORM P id
@@ -170,7 +177,8 @@ arm.
   `tests/unit/test_perform_until_newline.py`.
 - **WITH TEST.** `WITH`, `TEST` and `BEFORE` / `AFTER` may sit on separate lines;
   all three call sites (inline form, out-of-line form, inside
-  `_parse_varying_header`) `skip_whitespace` before each peek. Bare `TEST
+  `_parse_varying_header`) share `_parse_test_phrase`, which `skip_whitespace`s
+  before each peek. Bare `TEST
   BEFORE` (no WITH) and `WITH TEST AFTER VARYING ...` inline are accepted.
 - **TIMES lookahead.** After a target paragraph, a following IDENTIFIER /
   NUMERIC_LITERAL is a TIMES count only if `TIMES` / `TIME` follows
