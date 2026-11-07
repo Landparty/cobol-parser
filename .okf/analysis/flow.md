@@ -1,7 +1,7 @@
 ---
 type: Module
 title: Control Flow and Code Quality Analyzers
-description: ProgramFlowAnalyzer (the program_flow/ package CFG), DeadCodeAnalyzer, RecursionRiskAnalyzer, ComplexityAnalyzer, RedundancyAnalyzer (clones, paragraph fingerprints) and TechnicalDebtAnalyzer, plus the shared procedure-name index (_procedures.py), CICS terminators (_cics.py) and SQL WHENEVER handlers (_sql_whenever.py).
+description: ProgramFlowAnalyzer (the program_flow/ package CFG), DeadCodeAnalyzer, RecursionRiskAnalyzer, ComplexityAnalyzer, RedundancyAnalyzer (clones, paragraph fingerprints), TechnicalDebtAnalyzer and InputDependenceAnalyzer (decisions no input can change, unreachable code for coverage), plus the shared procedure-name index (_procedures.py), CICS terminators (_cics.py) and SQL WHENEVER handlers (_sql_whenever.py).
 tags: [analysis, program-flow, dead-code, recursion-risk, complexity, redundancy, technical-debt, cfg]
 timestamp: 2026-10-16T00:00:00Z
 ---
@@ -28,6 +28,7 @@ analyzer are in [../analysis.md](../analysis.md).
 * [ComplexityAnalyzer](#complexityanalyzer)
 * [RedundancyAnalyzer](#redundancyanalyzer)
 * [TechnicalDebtAnalyzer](#technicaldebtanalyzer)
+* [InputDependenceAnalyzer](#inputdependenceanalyzer)
 * [See also](#see-also)
 
 ## Same-named procedures
@@ -843,6 +844,46 @@ surfaces via its `unreachable`/`no-escape recursion cycle` reasons instead;
 confirmed empirically, not assumed, while writing this module's own tests.
 
 CLI: `cobol-parser health <file.cbl>` (see cli.md).
+
+## InputDependenceAnalyzer
+
+`cobolparser/analysis/input_dependence.py` (added 2026-11-07 for
+mocky-mock's `run --branch-coverage`). `InputDependenceAnalyzer().analyze(ast,
+extra_inputs=())` answers, for every IF and EVALUATE, whether anything from
+outside the program can change which way it goes. A decision no input can
+change is evaluated the same way by every run from the program's entry point,
+so an outcome a measured run never took is unreachable: the self-checking
+FAIL branch of a NIST CCVS85 program, a flag nobody sets.
+
+* **Taint** per 01/77 storage root (REDEFINES / RENAMES share their record).
+  Seeds: FILE SECTION and LINKAGE records, EXTERNAL items, FILE STATUS /
+  RELATIVE KEY items, runtime-set special registers, and whatever CALL,
+  ACCEPT, READ INTO, RETURN, EXEC SQL / CICS / DLI, INVOKE and XML / JSON
+  write, plus `extra_inputs` (a test case's setup MOVE targets).
+* **Implicit flow** through a statement-level CFG: a decision's region is
+  what it reaches before its immediate post-dominator; writes in the region
+  of an input-dependent decision are tainted. Clause handlers (AT END,
+  INVALID KEY, ON SIZE ERROR, ...), DECLARATIVES, SORT INPUT / OUTPUT
+  PROCEDUREs and ALTERed GO TOs are event decisions. Iterated to a fixpoint.
+* **The CFG** has one copy of each procedure per PERFORM-return context;
+  reachability matches calls to returns (valid paths), so the FAIL paragraph
+  right after PASS is not reached by falling out of a PERFORMed PASS.
+* **`report.unreachable(taken, executed_lines=None)`** prunes the untaken
+  outcomes of input-independent decisions (`taken` maps `(kind, line)` to
+  the outcome indexes measured; two decisions on one line are never pruned)
+  and, with `executed_lines`, the never-run bodies of input-independent
+  clause decisions. It returns `UnreachableResult`: `paragraphs`,
+  `outcomes` and `statements` with a reason, `REASON_DEAD` (nothing reaches
+  it at all) or `REASON_FIXED` / "reached only through decision outcomes no
+  input can take".
+* **Entry point**: `report.entry_names` (the first procedure after
+  DECLARATIVES, and a section's first paragraph). The pruning claim holds
+  only for runs that start there; callers check that (mocky-mock falls back
+  to dead code only).
+* Exact by construction, or absent: `report.incomplete` (graph over
+  `max_nodes`, nesting too deep) means nothing is claimed.
+
+Tests: `tests/unit/analysis/test_input_dependence.py`.
 
 ## See also
 
