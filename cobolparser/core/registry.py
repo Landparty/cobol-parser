@@ -10,25 +10,19 @@ The StatementParserRegistry maintains an ordered list of statement parsers
 and searches them using first-match strategy - the first parser whose
 matches() method returns True is used to parse the statement.
 
-Dispatch is accelerated by a two-token (type, value) result cache that is
-invalidated whenever parsers are registered or unregistered. Using two
-tokens ensures parsers that inspect lookahead-1 (e.g. EXEC SQL vs EXEC
-CICS) are always dispatched to the correct handler.
+Dispatch is uncached: every lookup asks the parsers in order. A result
+cache keyed on the next few tokens used to sit here, but a parser's
+``matches()`` may look further ahead than any fixed key covers, and on the
+shared registry the key (which held identifiers) grew with every distinct
+statement opening a long-running process saw. Measured over the 571 sample
+and NIST programs it saved about 2% of parse time and nothing end to end,
+so it was removed rather than widened.
 """
 
 import logging
+import warnings
 
-from ..lexer import TokenType
 from .interfaces import IStatementParser, ITokenStream
-
-#: Layout tokens a parser's lookahead may step over (``EXEC`` alone on a
-#: line, then ``SQL``); see ``_utils._NOISE_TOKEN_TYPES``.
-_LAYOUT_TOKEN_TYPES = (
-    TokenType.WHITESPACE,
-    TokenType.COMMENT,
-    TokenType.NEWLINE,
-    TokenType.CONTINUATION,
-)
 
 logger = logging.getLogger(__name__)
 
@@ -43,13 +37,9 @@ class StatementParserRegistry:
     Uses first-match strategy: The first parser whose matches() method
     returns True is used to parse the statement. Parser order matters.
 
-    Dispatch is accelerated by a result cache keyed on the first two tokens'
-    (type, normalized_value) pairs — a 4-tuple of the form
-    (tok0_type, tok0_val, tok1_type, tok1_val).  Using two tokens ensures
-    parsers that inspect peek(1) (e.g. EXEC SQL vs EXEC CICS) are always
-    dispatched to the correct handler.  The cache is invalidated automatically
-    on every register() / unregister() / clear() call, so it is always
-    consistent with the current parser list.
+    The registry holds no per-statement state, so a lookup's result depends
+    only on the parser list and the token stream, never on what was parsed
+    before (``ProcedureDivisionParser`` shares one registry across parses).
 
     Example:
         registry = StatementParserRegistry()
@@ -65,15 +55,6 @@ class StatementParserRegistry:
     def __init__(self) -> None:
         """Initialize the statement parser registry."""
         self._parsers: list[IStatementParser] = []
-        # Cache: (tok0_type, tok0_val, tok1_type, tok1_val) -> matched parser | None
-        # tok*_val entries are uppercased str or None; tok1_* entries are None when
-        # the stream has fewer than two tokens remaining.
-        self._dispatch_cache: dict[
-            tuple[
-                object, str | None, object | None, str | None, object | None, str | None
-            ],
-            IStatementParser | None,
-        ] = {}
 
     def register(self, parser: IStatementParser, position: int | None = None) -> None:
         """Register a statement parser.
@@ -95,17 +76,12 @@ class StatementParserRegistry:
             self._parsers.insert(position, parser)
         else:
             self._parsers.append(parser)
-        self._dispatch_cache.clear()
 
     def find_parser(self, token_stream: ITokenStream) -> IStatementParser | None:
         """Find a parser for the current token stream position.
 
         Uses first-match strategy: Returns the first registered parser
         whose matches() method returns True for the current token stream.
-        Results are cached by the first two tokens' (type, value) pairs to
-        avoid redundant linear scans on hot paths and to correctly
-        disambiguate parsers that inspect the second token (e.g. EXEC SQL
-        vs EXEC CICS).
 
         Args:
             token_stream: The token stream to find a parser for
@@ -117,52 +93,16 @@ class StatementParserRegistry:
         if first_token is None:
             return None
 
-        # Build a 2-token cache key so parsers that inspect the second token
-        # (e.g. EXEC SQL vs EXEC CICS) are disambiguated correctly.
-        second_token = token_stream.peek(1)
-        tok0_val = first_token.value.upper() if first_token.value else None
-        tok1_type = second_token.type if second_token is not None else None
-        tok1_val = (
-            second_token.value.upper()
-            if second_token is not None and second_token.value
-            else None
-        )
-        # A parser may look past a line break to the second word (EXEC <newline>
-        # CICS), so the first meaningful token after it is part of the key
-        # too: keyed on the NEWLINE alone, EXEC <newline> CICS reused the
-        # parser cached for an earlier EXEC <newline> SQL.
-        offset = 1
-        meaningful = second_token
-        while meaningful is not None and meaningful.type in _LAYOUT_TOKEN_TYPES:
-            offset += 1
-            meaningful = token_stream.peek(offset)
-        tok2_type = meaningful.type if meaningful is not None else None
-        tok2_val = (
-            meaningful.value.upper()
-            if meaningful is not None and meaningful.value
-            else None
-        )
-        cache_key = (
-            first_token.type,
-            tok0_val,
-            tok1_type,
-            tok1_val,
-            tok2_type,
-            tok2_val,
-        )
-
-        if cache_key in self._dispatch_cache:
-            return self._dispatch_cache[cache_key]
-
-        matched: IStatementParser | None = None
         for parser in self._parsers:
             try:
                 if parser.matches(token_stream):
-                    matched = parser
-                    break
+                    return parser
+            except RecursionError:
+                # Nesting too deep to parse (#375). Trying the next parser
+                # would drop the statement with only a warning; let it reach
+                # the statement loop, which records it as an error.
+                raise
             except Exception as e:
-                import warnings
-
                 logger.debug(
                     "Parser %s.matches() raised %s: %s",
                     parser.__class__.__name__,
@@ -178,8 +118,7 @@ class StatementParserRegistry:
                 )
                 continue
 
-        self._dispatch_cache[cache_key] = matched
-        return matched
+        return None
 
     def unregister(self, parser: IStatementParser) -> bool:
         """Remove a registered parser.
@@ -192,7 +131,6 @@ class StatementParserRegistry:
         """
         try:
             self._parsers.remove(parser)
-            self._dispatch_cache.clear()
             return True
         except ValueError:
             return False
@@ -214,7 +152,6 @@ class StatementParserRegistry:
         Warning: This removes all parsers from the registry. Use with care.
         """
         self._parsers.clear()
-        self._dispatch_cache.clear()
 
     def __len__(self) -> int:
         """Return the number of registered parsers."""

@@ -3,7 +3,7 @@ type: Log
 title: OKF Update Log
 description: Dated log of OKF bundle updates, newest first.
 tags: [log, changelog, history]
-timestamp: 2026-11-06T00:00:00Z
+timestamp: 2026-11-08T00:00:00Z
 ---
 
 # OKF Update Log
@@ -13,6 +13,14 @@ follows up on even when a day or two out of order -- that adjacency is
 deliberate. Anything else appended to the bottom is a mistake: five
 entries, including both 2026-09-15 sections, were found there on
 2026-09-15 and moved back up.
+
+## 2026-11-08 -- statement dispatch cache removed
+
+- [parser/orchestration.md](parser/orchestration.md): `StatementParserRegistry`
+  no longer memoises `find_parser`. The cache could return a stale parser when a
+  `matches()` looked past its key and grew without bound on the shared registry;
+  measured, it saved about 2% of parse time. The gotcha now says why there is no
+  cache.
 
 ## 2026-11-08 -- unused private helpers removed
 

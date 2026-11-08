@@ -369,21 +369,16 @@ class TestStatementParserRegistryIntegration:
         assert perform_parser.parse_called
 
     def test_multiple_dispatch_calls(self):
-        """Test that repeated dispatch on the same token is served from cache.
+        """Every lookup consults matches(): the registry keeps no result cache.
 
-        The registry caches results by (tok0, tok1) key. On a cache hit,
-        matches() must NOT be called again — only the first lookup consults
-        the parsers in order.
-
-        peek() is configured with explicit stable token objects so the cache
-        key is deterministic across repeated calls.
+        A cached result keyed on the next few tokens made dispatch depend on
+        what was parsed before whenever a parser looked further ahead than
+        the key, so each call must ask the parsers afresh.
         """
         registry = StatementParserRegistry()
         parser = MockStatementParser("test", should_match=True)
         registry.register(parser)
 
-        # Build stable token mocks so the 2-token cache key is identical
-        # on every call to find_parser().
         tok0 = Mock()
         tok0.type = "MOVE_TYPE"
         tok0.value = "MOVE"
@@ -393,23 +388,80 @@ class TestStatementParserRegistryIntegration:
         mock_stream = Mock(spec=ITokenStream)
         mock_stream.peek.side_effect = lambda offset=0: tok0 if offset == 0 else tok1
 
-        # First call — cache miss, matches() is consulted
-        parser.matches_called = False
-        found1 = registry.find_parser(mock_stream)
-        assert found1 is parser
-        assert parser.matches_called, "matches() must be called on cache miss"
+        for _ in range(2):
+            parser.matches_called = False
+            assert registry.find_parser(mock_stream) is parser
+            assert parser.matches_called, "matches() must be called on every lookup"
 
-        # Second call — cache hit, matches() must NOT be called again
-        parser.matches_called = False
-        found2 = registry.find_parser(mock_stream)
-        assert found2 is parser
-        assert not parser.matches_called, "matches() must be skipped on cache hit"
+    def test_dispatch_does_not_depend_on_earlier_lookups(self):
+        """Regression: a parser that looks past the third token.
+
+        The old cache key covered the first token, the second and the first
+        meaningful one after it. Two streams that agree on those but differ
+        at peek(3) got whichever parser the first lookup had cached.
+        """
+
+        class DeepLookaheadParser:
+            def __init__(self, word: str):
+                self.word = word
+
+            def matches(self, stream: ITokenStream) -> bool:
+                t3 = stream.peek(3)
+                return t3 is not None and getattr(t3, "value", "") == self.word
+
+            def parse(self, stream, context=None):
+                return Mock()
+
+        def make_stream(fourth: str) -> Mock:
+            toks = []
+            for value in ("VERB", "A", "B", fourth):
+                tok = Mock()
+                tok.type = "ID_TYPE"
+                tok.value = value
+                toks.append(tok)
+            stream = Mock(spec=ITokenStream)
+            stream.peek.side_effect = lambda offset=0: (
+                toks[offset] if offset < len(toks) else None
+            )
+            return stream
+
+        first = DeepLookaheadParser("X")
+        second = DeepLookaheadParser("Y")
+        registry = StatementParserRegistry()
+        registry.register(first)
+        registry.register(second)
+
+        assert registry.find_parser(make_stream("X")) is first
+        assert registry.find_parser(make_stream("Y")) is second
+        assert registry.find_parser(make_stream("Z")) is None
+
+    def test_recursion_error_in_matches_propagates(self):
+        """A RecursionError is not a "does not match" (#375).
+
+        Swallowing it fell through to the next parser, so a statement nested
+        too deeply was dropped with only a warning.
+        """
+
+        class TooDeep:
+            def matches(self, stream):
+                raise RecursionError("maximum recursion depth exceeded")
+
+            def parse(self, stream, context=None):
+                return Mock()
+
+        fallback = MockStatementParser("fallback", should_match=True)
+        registry = StatementParserRegistry()
+        registry.register(TooDeep())
+        registry.register(fallback)
+
+        with pytest.raises(RecursionError):
+            registry.find_parser(Mock(spec=ITokenStream))
+        assert not fallback.matches_called
 
     def test_exec_sql_vs_exec_cics_dispatch(self):
         """Regression: EXEC SQL and EXEC CICS share the same first token.
 
-        The cache key must include the second token so the two parsers are
-        never confused even after one of them is cached.
+        The two parsers must never be confused, whichever was looked up first.
         """
 
         class SecondTokenParser:
@@ -454,14 +506,10 @@ class TestStatementParserRegistryIntegration:
         found = registry.find_parser(sql_stream)
         assert found is sql_parser
 
-        # Second lookup — EXEC CICS must NOT return the cached SQL parser
+        # Second lookup — EXEC CICS must not return the SQL parser
         found = registry.find_parser(cics_stream)
         assert found is cics_parser
 
-        # Repeated lookups hit the cache and return the correct parsers
-        sql_parser.matches_called = False
-        cics_parser.matches_called = False
+        # Repeated lookups keep returning the correct parsers
         assert registry.find_parser(sql_stream) is sql_parser
         assert registry.find_parser(cics_stream) is cics_parser
-        assert not sql_parser.matches_called, "EXEC SQL should be a cache hit"
-        assert not cics_parser.matches_called, "EXEC CICS should be a cache hit"
