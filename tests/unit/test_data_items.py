@@ -1003,15 +1003,6 @@ def test_data_items_integration():
     assert result["usage"] == "COMP-3"
 
 
-def test_update_cobol_data_item_placeholder():
-    """Test the placeholder function for updating CobolDataItem in program.py."""
-    from cobolparser.models.data_items import update_cobol_data_item_placeholder
-
-    # This function is a placeholder and should not raise an error
-    result = update_cobol_data_item_placeholder()
-    assert result is None  # Function returns None
-
-
 def test_picture_clause_additional_coverage():
     """Test additional PictureClause scenarios for full coverage."""
     location = SourceLocation(1, 1)

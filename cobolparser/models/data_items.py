@@ -1143,13 +1143,6 @@ class CobolDataItem(ASTNode):
         return result
 
 
-# Update the placeholder in program.py to use the full implementation
-def update_cobol_data_item_placeholder() -> None:
-    """Update the CobolDataItem placeholder in program.py with full implementation."""
-    # This would be handled by importing the real implementation
-    pass
-
-
 class ConditionNameItem(ASTNode):
     """AST node for COBOL level-88 condition name items.
 

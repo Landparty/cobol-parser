@@ -508,9 +508,8 @@ PROCEDURE DIVISION caller reports it -- see [statements-io.md](statements-io.md)
 
 ## Delegating wrappers
 
-`DataDivisionParser` keeps `_parse_picture_clause` / `_parse_value_clause` /
-`_parse_usage_clause` (and `_parse_data_item`) as delegating wrappers with their
-historical names and signatures; new clause logic goes in
+`DataDivisionParser` keeps `_parse_data_item` as a delegating wrapper with its
+historical name and signature; new clause logic goes in
 `DataItemClauseParser`.
 
 ## PROCEDURE DIVISION

@@ -15,7 +15,6 @@ from cobolparser.core.ast_factory import get_factory
 from cobolparser.core.interfaces import ITokenStream, ParseContext
 from cobolparser.lexer import Token, TokenType
 from cobolparser.models.ast_base import ASTNode, SourceLocation
-from cobolparser.plugins.core import ErrorRecoveryMode
 
 logger = logging.getLogger(__name__)
 
@@ -688,12 +687,6 @@ def peek_value_upper(token_stream: ITokenStream, offset: int = 0) -> str:
     return token.value.upper() if token and token.value else ""
 
 
-def peek_value(token_stream: ITokenStream, offset: int = 0) -> str:
-    """Return raw value of the token at ``peek(offset)``, or ``""``."""
-    token = peek_token(token_stream, offset)
-    return token.value if token and token.value else ""
-
-
 def matches_keyword(token_stream: ITokenStream, token_type: Any, keyword: str) -> bool:
     """Return True if the next token matches *token_type* or is an IDENTIFIER equal to *keyword*.
 
@@ -1188,21 +1181,6 @@ def get_parse_context(stream: ITokenStream) -> ParseContext | None:
     if context is None:
         context = getattr(stream, "_context", None)
     return context
-
-
-def get_error_recovery_mode(
-    context: ParseContext | None,
-) -> ErrorRecoveryMode | None:
-    """Return the host parser's ``error_recovery`` mode, if reachable."""
-    if context is None:
-        return None
-    host = getattr(context, "host", None)
-    if host is None:
-        return None
-    mode = getattr(host, "error_recovery", None)
-    if isinstance(mode, ErrorRecoveryMode):
-        return mode
-    return None
 
 
 def report_parse_error(

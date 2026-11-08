@@ -879,12 +879,6 @@ class LineageGraph:
 
     # -- queries -----------------------------------------------------------
 
-    def _items_named(
-        self, field_name: str, programs: Sequence[str] | None
-    ) -> list[NodeKey]:
-        groups, _matched = self._start_groups(field_name, programs)
-        return sorted({n for group in groups for n in group}, key=repr)
-
     def _start_groups(
         self, field_name: str, programs: Sequence[str] | None
     ) -> tuple[list[list[NodeKey]], dict[str, list[str]]]:

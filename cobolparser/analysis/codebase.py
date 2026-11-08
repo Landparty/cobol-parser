@@ -737,14 +737,6 @@ def _sanitize_id(name: str) -> str:
     return safe or "UNKNOWN"
 
 
-def _program_node_id(program_id: str) -> str:
-    return "P_" + _sanitize_id(program_id)
-
-
-def _member_node_id(member: str) -> str:
-    return "C_" + _sanitize_id(member)
-
-
 class _NodeIds:
     """One diagram's mapping from a program or member name to a unique id.
 
