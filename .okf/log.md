@@ -14,6 +14,16 @@ deliberate. Anything else appended to the bottom is a mistake: five
 entries, including both 2026-09-15 sections, were found there on
 2026-09-15 and moved back up.
 
+## 2026-11-08 -- unused private helpers removed
+
+- [parser/divisions.md](parser/divisions.md): `DataDivisionParser` no longer
+  keeps the `_parse_picture_clause` / `_parse_value_clause` /
+  `_parse_usage_clause` wrappers (nothing called them); `_parse_data_item`
+  stays. The environment parser's `_parse_select_statement` and the IF
+  parser's paren/operator shims went too.
+- [generators/decode-compare.md](generators/decode-compare.md): the overlay
+  scan sums child widths inline; the unused `views._footprint()` is gone.
+
 ## 2026-11-08 -- one-way layers, enforced
 
 - [index.md](index.md): new "Layers" section, the dependency order and its

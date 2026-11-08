@@ -19,7 +19,6 @@ from cobolparser.analysis.codebase import (
     _member_fields,
     _normalize_member,
     _normalize_program_name,
-    _program_node_id,
     _sanitize_id,
 )
 from cobolparser.models.ast_base import SourceLocation
@@ -1263,7 +1262,6 @@ class TestHelpers:
 
     def test_sanitize_id_never_returns_empty(self):
         assert _sanitize_id("") == "UNKNOWN"
-        assert _program_node_id("") == "P_UNKNOWN"
 
     def test_member_fields_reports_an_unreadable_file(self, tmp_path):
         fields, problem = _member_fields(str(tmp_path / "gone.cpy"))

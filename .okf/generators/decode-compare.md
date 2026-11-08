@@ -75,9 +75,9 @@ The overlay scan (`_scan_overlays`) mirrors `layout_offsets._layout_siblings`'
 slot bookkeeping (a run of mutually-redefining siblings shares one slot; the
 slot's footprint is its widest member) but emits placed `FieldSpec`s and
 recurses *into* redefining children, so a redefinition of a redefinition gets
-its own view. Each member's footprint comes from `_footprint()` =
-`sum(storage_size for flatten_record(child, ...))`, i.e. the same widths
-again rather than a parallel size model.
+its own view. Each member's footprint is the sum of `storage_size` over the child's
+flattened `FieldSpec`s, i.e. the same widths again rather than a parallel
+size model.
 
 ## Decoding
 

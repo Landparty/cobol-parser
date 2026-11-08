@@ -820,18 +820,6 @@ class DataDivisionParser(BaseDivisionParser):
             token_stream, report_group=report_group
         )
 
-    def _parse_picture_clause(self, token_stream: ITokenStream) -> str | None:
-        """Parse PICTURE clause pattern (delegates to DataItemClauseParser)."""
-        return self._clause_parser.parse_picture_clause(token_stream)
-
-    def _parse_value_clause(self, token_stream: ITokenStream) -> str | None:
-        """Parse VALUE clause value (delegates to DataItemClauseParser)."""
-        return self._clause_parser.parse_value_clause(token_stream)
-
-    def _parse_usage_clause(self, token_stream: ITokenStream) -> str | None:
-        """Parse USAGE clause value (delegates to DataItemClauseParser)."""
-        return self._clause_parser.parse_usage_clause(token_stream)
-
     def _parse_fd_clauses(self, token_stream: ITokenStream) -> dict[str, Any]:
         """Parse FD/SD clauses (delegates to FileDescriptionClauseParser)."""
         return self._fd_parser.parse_fd_clauses(token_stream)

@@ -428,20 +428,6 @@ def _storage_children(item: CobolDataItem) -> list[CobolDataItem]:
     ]
 
 
-def _footprint(item: CobolDataItem, opts: DataGeneratorOptions) -> int:
-    """Bytes *item* occupies, every occurrence of its own ``OCCURS`` included.
-
-    Measured by flattening the subtree and summing the same widths the base
-    view was built from, so a group's footprint and the sum of its fields'
-    placements are the same number by construction rather than by agreement
-    between two implementations.
-    """
-    return sum(
-        spec.storage_size
-        for spec in flatten_record(item, opts, ignore_root_redefines=True)
-    )
-
-
 def _scan_overlays(
     record: CobolDataItem,
     item: CobolDataItem,

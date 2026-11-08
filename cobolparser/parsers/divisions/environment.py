@@ -118,12 +118,6 @@ class EnvironmentDivisionParser(BaseDivisionParser):
         """Parse INPUT-OUTPUT SECTION (delegates to InputOutputSectionParser)."""
         return self._input_output_parser.parse_input_output_section(token_stream)
 
-    def _parse_select_statement(
-        self, token_stream: ITokenStream
-    ) -> dict[str, Any] | None:
-        """Parse a SELECT statement (delegates to SelectClauseParser)."""
-        return self._select_parser.parse_select_statement(token_stream)
-
     def _create_select_statement_node(
         self, select_data: dict[str, Any]
     ) -> SelectStatement:

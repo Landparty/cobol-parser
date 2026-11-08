@@ -8,8 +8,6 @@ from cobolparser.parsers.statements._conditions import (
     build_condition_expression,
     condition_symbols,
     condition_token_text,
-    find_top_level_operator,
-    strip_enclosing_parens,
 )
 from cobolparser.parsers.statements._utils import (
     LITERAL_TOKEN_TYPES,
@@ -271,16 +269,6 @@ class IfStatementParser(IStatementParser):
         used by the PERFORM parser to decompose UNTIL conditions (M12).
         """
         return build_condition_expression(tokens, location, symbols=symbols)
-
-    @staticmethod
-    def _strip_enclosing_parens(tokens: list[str]) -> list[str]:
-        """Delegate to the shared :func:`strip_enclosing_parens` (M12)."""
-        return strip_enclosing_parens(tokens)
-
-    @staticmethod
-    def _find_top_level_operator(tokens: list[str], op: str) -> int | None:
-        """Delegate to the shared :func:`find_top_level_operator` (M12)."""
-        return find_top_level_operator(tokens, op)
 
     def _is_statement_keyword(self, token_upper: str) -> bool:
         """Check if token is a COBOL statement keyword."""
