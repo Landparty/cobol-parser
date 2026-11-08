@@ -3,7 +3,7 @@ type: Module
 title: Parser orchestration
 description: CobolParser / parse_cobol / ParseResult, the source-text passes before lexing, multi-unit compilation units, core/ infrastructure (TokenStream, StatementParserRegistry, ASTNodeFactory, interfaces, exceptions, _errors.py), plugins/core.py configuration and profiling.py.
 tags: [parser, parse-result, token-stream, registry, configuration, profiling]
-timestamp: 2026-10-15T00:00:00Z
+timestamp: 2026-11-08T00:00:00Z
 ---
 
 # Parser orchestration
@@ -300,7 +300,7 @@ and keeps the case. Every division parser stops at these markers (see
 |------|----------------|
 | `interfaces.py` | `ITokenStream`, `IDivisionParser`, `IStatementParser` ABCs; `ParseContext` (nested statement parsing; carries `host`, the registry, `known_data_names` and `condition_names` -- the level-88 names, #562) |
 | `token_stream.py` | `TokenStream` — `peek()`, `consume()`, `expect()`, configurable lookahead; `omitted_source_lines` |
-| `registry.py` | `StatementParserRegistry` — `register(parser, position=None)` / `unregister` / `clear` / `find_parser(stream)` / `get_all_parsers()`; first-match dispatch (registration order matters) memoised in `_dispatch_cache`, keyed on the first token, the raw second token and the first meaningful token after the verb (so `EXEC <newline> CICS` and `EXEC <newline> SQL` differ), invalidated on every register/unregister/clear |
+| `registry.py` | `StatementParserRegistry` — `register(parser, position=None)` / `unregister` / `clear` / `find_parser(stream)` / `get_all_parsers()`; first-match dispatch (registration order matters), uncached: every lookup asks the parsers in order, so a result never depends on earlier parses |
 | `exceptions.py` | `TokenMismatch`, `UnexpectedEndOfInput`, `DivisionNotFoundError`, `UnknownStatementError`, `ValidationError` (all `ParseError` subclasses) |
 | `ast_factory.py` | `ASTNodeFactory` — validated node creation; `get_factory()` / `set_factory()` / `create_node(node_class, location, **kwargs)`; raises `NodeTypeError` / `FieldValidationError` (both `ValidationError`) |
 | `_errors.py` (root) | `ParseError` base class — zero internal deps (avoids circular imports); re-exported by `plugins/core.py` |
@@ -313,9 +313,16 @@ The division layer adds `parsers/divisions/base.py` (`BaseDivisionParser`,
   non-empty expected value.** EOF's value is `""`; a truthiness short-circuit
   would let `expect(".")` silently consume EOF instead of raising
   `TokenMismatch`.
-- **The dispatch cache key includes the first meaningful token after the verb.**
-  Keyed on the raw second token alone, `(EXEC, NEWLINE)` reused the parser cached
-  for an earlier `EXEC <newline> SQL` on `EXEC <newline> CICS`.
+- **`find_parser` has no result cache, on purpose.** A cache keyed on the next
+  few tokens returned a stale parser whenever a `matches()` looked further ahead
+  than the key, and on the shared `ProcedureDivisionParser._SHARED_REGISTRY` it
+  grew with every distinct statement opening (identifiers included) in a
+  long-running process: about 19,000 keys after one pass over the samples. It
+  saved about 2% of parse time (0.4 s of 18 s on the 571 sample and NIST
+  programs) and nothing measurable end to end, so it was deleted. Don't add one
+  back without a benchmark that shows a real win. `find_parser` re-raises a
+  `RecursionError` from `matches()` rather than trying the next parser (#375),
+  the same rule as `try_parse_nested`.
 
 ## Configuration classes
 

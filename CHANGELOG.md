@@ -318,6 +318,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Removed
 
+* **The statement dispatch cache.** `StatementParserRegistry.find_parser` no
+  longer caches its result by the next few tokens. A parser whose `matches()`
+  looked further ahead than the cache key could get the parser cached for an
+  earlier, different statement, and on the registry `ProcedureDivisionParser`
+  shares across parses the cache grew with every distinct statement opening
+  without bound in a long-running `cobol-parser mcp` process. Measured over
+  the 571 sample and NIST programs it saved about 2% of parse time and
+  nothing end to end. Removing it exposed one more case of #375: a
+  `RecursionError` raised inside `matches()` was taken as "no match", so an
+  IF nested too deeply was dropped with a warning; it now reaches the
+  statement loop and is reported as an error, as from `parse()`.
+
 * **BREAKING:** the never-instantiated `CobolFileDescription` node, the
   uncalled `TokenStream.transaction()`, `TokenType.ALL` (`ALL` always lexes
   as a figurative constant) and the legacy character-cursor `CobolLexer`
