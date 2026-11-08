@@ -100,7 +100,7 @@ _SUBCOMMANDS = frozenset(
 
 
 def _build_parser() -> argparse.ArgumentParser:
-    from .. import __version__
+    from .._version import __version__
 
     parser = _help.TopLevelParser(
         prog="cobol-parser",

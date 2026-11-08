@@ -14,7 +14,11 @@ from dataclasses import replace
 from difflib import get_close_matches
 from pathlib import Path
 
-from . import CopybookNotFoundError, CopybookSizeExceededError, PathTraversalError
+from ._normalize import (
+    CopybookNotFoundError,
+    CopybookSizeExceededError,
+    PathTraversalError,
+)
 from .models import CopybookSearchPath
 
 

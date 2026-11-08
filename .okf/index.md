@@ -58,6 +58,32 @@ Topic files describe how things **are**. Why a rule exists — the input that
 broke a naive version — is kept beside the rule as a one- or two-line
 invariant, so a future change does not undo a fix.
 
+## Layers
+
+Dependencies point one way, down this stack (lowest first); a module may
+import its own package and anything on a lower or equal layer, and equal
+layers must not form a cycle:
+
+1. leaves: `_errors`, `_lines`, `_literals`, `_storage`, `_file_limits`,
+   `_source_directive`, `_version` (`__version__`; release-please edits it),
+   `profiling`, `jcl`; then `definitions`, `plugins`
+2. `models` (the AST)
+3. `lexer`, `dialects`
+4. `preprocess`, `core`
+5. `parsers`, then `parser`, then `batch`
+6. `analysis`, then `generators`
+7. `_facts_cache`, `scan`, `config`, `mcp`, `cli`, then the `cobolparser`
+   facade and `__main__`
+
+`tests/contracts/test_layer_dependencies.py` enforces it from the source
+(module-level, function-local and `TYPE_CHECKING` imports alike), fails on a
+module-level import loop anywhere, and keeps the four deliberate upward
+imports in `KNOWN_UPWARD` with their reasons: `CobolProgram` convenience
+methods calling analyzers, `tokenize_cobol` normalizing fixed-form source,
+`parse_cobol_with_expansion` living in `preprocess`, and `analysis` using the
+record-layout modules under `generators/data/`. Nothing below the facade
+imports from `cobolparser` itself: read the version from `_version`.
+
 ## History (not loaded by default)
 
 Point-in-time material lives outside the topic files:

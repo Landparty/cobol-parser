@@ -106,7 +106,7 @@ COBOL source (.cbl/.cob)
 | `cobolparser/cli/`, `config/` | the CLI and the `cobol.yml` reader | `.okf/cli.md` |
 | `cobolparser/mcp/` | the MCP server ([`docs/mcp-server.md`](docs/mcp-server.md)) | `.okf/mcp.md` |
 
-Two rules that bite: split source text with `cobolparser/_lines.py`'s `split_source_lines()`, never `str.splitlines()` (form feed and U+2028 shift line numbers); and the analyzers follow "exact by construction, or absent", reporting what they could not check as caveats rather than guessing.
+Dependencies flow one way down the layers listed in `.okf/index.md` ("Layers"), enforced by `tests/contracts/test_layer_dependencies.py`; an import that points up fails it. Two more rules that bite: split source text with `cobolparser/_lines.py`'s `split_source_lines()`, never `str.splitlines()` (form feed and U+2028 shift line numbers); and the analyzers follow "exact by construction, or absent", reporting what they could not check as caveats rather than guessing.
 
 ### Public API
 

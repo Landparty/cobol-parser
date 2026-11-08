@@ -352,7 +352,7 @@ class FactsStore:
     # -- identity -------------------------------------------------------------
 
     def _config_key(self) -> str:
-        from .. import __version__
+        from .._version import __version__
 
         config = self.workspace.config
         text = repr(

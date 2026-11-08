@@ -14,6 +14,23 @@ deliberate. Anything else appended to the bottom is a mistake: five
 entries, including both 2026-09-15 sections, were found there on
 2026-09-15 and moved back up.
 
+## 2026-11-08 -- one-way layers, enforced
+
+- [index.md](index.md): new "Layers" section, the dependency order and its
+  four known exceptions; `tests/contracts/test_layer_dependencies.py`
+  ([tests.md](tests.md)) enforces it.
+- `__version__` moved to `cobolparser/_version.py` (release-please's
+  extra-file too), so the facts cache ([batch.md](batch.md)), SARIF
+  ([analysis/lint.md](analysis/lint.md)), the IO coverage report
+  ([analysis/data-use.md](analysis/data-use.md)), program metadata
+  ([ast-models.md](ast-models.md)), the CLI and the MCP facts key
+  ([mcp.md](mcp.md)) no longer import the `cobolparser` facade.
+- [cli.md](cli.md): `parse_scopes` / `SCOPES` live in
+  `config/_lint_scope.py` (re-exported from `cli/_new_code.py`).
+- [preprocessing.md](preprocessing.md): `copybook_expander` and
+  `path_resolver` import from `_normalize`, ending a module-level loop
+  through `preprocess/__init__.py`.
+
 ## 2026-11-06 -- tech-debt pass: Cython removed, CLI/MCP split, one walker
 
 - [lexer.md](lexer.md), [preprocessing.md](preprocessing.md),

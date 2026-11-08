@@ -402,7 +402,7 @@ def _lint_scope(value: Any, source: Path) -> tuple[str, ...]:
     call-check: all}``. Validated here so a typo fails loudly."""
     if value is None:
         return ()
-    from ..cli._new_code import parse_scopes
+    from ._lint_scope import parse_scopes
 
     if isinstance(value, dict):
         items: list[str] = []

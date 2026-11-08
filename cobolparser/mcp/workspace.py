@@ -782,13 +782,13 @@ class Workspace:
         return kwargs
 
     def _parse(self, path: Path) -> ParsedProgram:
-        from .. import parse_cobol
         from .._lines import split_source_lines
         from ..analysis.lint import source_column_offsets
         from ..generators.data.copybook import (
             WRAPPER_HEAD_LINES,
             wrap_copybook_fragment,
         )
+        from ..parser import parse_cobol
         from ..plugins.core import DialectType, ErrorRecoveryMode
         from ..preprocess import PreprocessingError, preprocess_conditional_compilation
         from ..preprocess.copybook_expander import parse_cobol_with_expansion

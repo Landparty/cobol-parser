@@ -992,7 +992,7 @@ class CobolProgram(ASTNode):
             _strip_locations(result["divisions"])
 
         if config.include_metadata:
-            from cobolparser import __version__
+            from .._version import __version__
 
             # No ``created_at``: a timestamp would make the JSON of the same
             # input differ run to run, and the placeholder one was a lie (#508).
