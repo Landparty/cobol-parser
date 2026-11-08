@@ -93,7 +93,8 @@ tests/
                                # gen-fixtures phases 1-7 parametrised over shamrice: no raise, no unexpected unresolved, layout-valid values, exact coverage accounting
     io/                        # 1 file: IO coverage reporting integration (`io` too)
     io_statements/             # 2 files: IO statement parsing, VSAM (`io` too)
-  contracts/                   # 21 files: API contract tests (`contract` marker)
+  contracts/                   # 22 files: API contract tests (`contract` marker)
+    test_layer_dependencies.py  # imports point down the layers in index.md; no package cycle, no module-level import loop; KNOWN_UPWARD exceptions must still exist
     test_fixture_bundle_contract.py  # FixtureBundle: exported names, bundle_version, generator signatures, to_dict() key sets, reproducibility, scenario-mode contract (see docs/fixture-bundle-schema.md)
     io_statements/             # 1 file (`io` too)
   regression/                  # 262 files: pinned bug fixes, typically named for the issue/finding, e.g.

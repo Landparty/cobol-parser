@@ -829,7 +829,8 @@ parse, one severity-graded finding list.
   new file. The count is `LintReport.outside_new_code` (`None`, and absent
   from `summary`, without the flag); text adds `; N outside new code`, json
   adds `new_code: {ref, default_scope, rule_scopes, changed_files}`.
-  **`--scope`** (`parse_scopes`, validated in `_lint_prepare_scopes`, exit 2
+  **`--scope`** (`parse_scopes`, in `config/_lint_scope.py` so `config` never
+  imports `cli`; validated in `_lint_prepare_scopes`, exit 2
   on a bad value): bare `new`/`all` is the default for every rule (default
   `new`), `RULE=…`/`RULE/KIND=…` one rule (`scope_of`: KIND beats rule beats
   default); `lint.scope` in cobol.yml is `new`/`all` or a `{default: …,

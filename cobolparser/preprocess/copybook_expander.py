@@ -21,7 +21,7 @@ from typing import Any
 
 from .._lines import split_source_lines
 from .._source_directive import free_format_flags
-from . import (
+from ._normalize import (
     ALL_COMMENT_INDICATORS,
     CircularReferenceError,
     CopybookNotFoundError,

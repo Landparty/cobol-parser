@@ -354,7 +354,7 @@ class IOCoverageReporter:
     def _get_parser_version(self) -> str:
         """Get the parser version."""
         try:
-            from cobolparser import __version__
+            from cobolparser._version import __version__
 
             return __version__
         except ImportError:

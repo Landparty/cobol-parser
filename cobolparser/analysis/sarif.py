@@ -200,7 +200,7 @@ def sarif_log(
     base: str | Path | None = None,
 ) -> dict[str, Any]:
     """A SARIF 2.1.0 log of one run holding *results*."""
-    from .. import __version__
+    from .._version import __version__
 
     root = Path(os.path.normpath(Path(base).resolve() if base else Path.cwd()))
     results = list(results)

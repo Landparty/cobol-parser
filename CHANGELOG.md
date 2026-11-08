@@ -255,6 +255,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+* **Layer dependencies are one way, and a test enforces it.** The package
+  version lives in `cobolparser/_version.py` (still exported as
+  `cobolparser.__version__`), so nothing below the facade imports
+  `cobolparser` itself; `config` no longer imports `cli`; and a module-level
+  import loop through `preprocess/__init__.py` is gone.
+  `tests/contracts/test_layer_dependencies.py` fails on an import that
+  points up the layer order in `.okf/index.md`, on a cycle between
+  packages, and on a module-level import loop. No public API changed.
+
 * **BREAKING: the Cython accelerators are gone.** The opt-in
   `_lexer_fast` / `_preprocess_fast` / `_data_fast` extensions measured about
   1.3x, not the documented 3x, and kept a second copy of the normalizer and

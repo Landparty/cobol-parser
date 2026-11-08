@@ -72,7 +72,7 @@ class FactsCache:
     """
 
     def __init__(self, directory: str | Path, namespace: str, settings: Any) -> None:
-        from . import __version__
+        from ._version import __version__
 
         self.directory = Path(directory) / namespace
         self._prefix = json.dumps(

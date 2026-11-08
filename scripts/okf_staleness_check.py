@@ -37,6 +37,7 @@ OKF_MAP = [
     ("cobolparser/_literals.py", [".okf/lexer.md", ".okf/parser/statements.md"]),
     ("cobolparser/_lines.py", [".okf/lexer.md", ".okf/preprocessing.md"]),
     ("cobolparser/_source_directive.py", [".okf/preprocessing.md"]),
+    ("cobolparser/_version.py", [".okf/index.md"]),
     ("cobolparser/preprocess/", [".okf/preprocessing.md"]),
     ("cobolparser/parser.py", [".okf/parser/orchestration.md"]),
     ("cobolparser/_errors.py", [".okf/parser/orchestration.md"]),
