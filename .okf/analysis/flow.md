@@ -851,6 +851,8 @@ Its clause-outcome bodies are the statement models' `HANDLER_CLAUSE_ATTRS`
 * **Taint** per 01/77 storage root (REDEFINES / RENAMES share their record).
   Seeds: FILE SECTION and LINKAGE records, EXTERNAL items, FILE STATUS /
   RELATIVE KEY items, the RECORD VARYING DEPENDING ON item a READ sets,
+  in a contained program every data name an enclosing program declares and
+  the unit does not (its GLOBAL items and files, #857),
   runtime-set special registers, and whatever CALL,
   ACCEPT, READ INTO, RETURN, EXEC SQL / CICS / DLI, INVOKE and XML / JSON
   write, plus `extra_inputs` (a test case's setup MOVE targets).
@@ -858,7 +860,10 @@ Its clause-outcome bodies are the statement models' `HANDLER_CLAUSE_ATTRS`
   what it reaches before its immediate post-dominator; writes in the region
   of an input-dependent decision are tainted. Clause handlers (AT END,
   INVALID KEY, ON SIZE ERROR, ...), DECLARATIVES, SORT INPUT / OUTPUT
-  PROCEDUREs and ALTERed GO TOs are event decisions. Iterated to a fixpoint.
+  PROCEDUREs and ALTERed GO TOs are event decisions. An IF / EVALUATE
+  whose own operands name an environment function (`FUNCTION CURRENT-DATE`,
+  `RANDOM`, ...) is input-dependent, reason "reads the clock (...)" or
+  "reads the environment (...)" (#857). Iterated to a fixpoint.
 * **The CFG** has one copy of each procedure per PERFORM-return context;
   reachability matches calls to returns (valid paths), so the FAIL paragraph
   right after PASS is not reached by falling out of a PERFORMed PASS.

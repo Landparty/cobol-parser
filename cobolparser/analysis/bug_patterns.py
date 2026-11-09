@@ -75,7 +75,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Callable, Iterable, Iterator
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any
 
 from .._literals import QUOTED_LITERAL_RE
@@ -382,6 +382,41 @@ def _item_capacity(item: CobolDataItem) -> Capacity | None:
     return capacity_of(item.picture_clause.pattern, item.usage, None, False)
 
 
+#: Usages whose PICTURE does not bound the value: a COMP-5 item holds the
+#: full range of its native binary size (#853).
+_NATIVE_BINARY_USAGES = frozenset({"COMP-5", "COMPUTATIONAL-5"})
+
+
+def _native_digits(total_digits: int) -> int:
+    """Digits a COMP-5 field of *total_digits* PICTURE digits always holds:
+    a halfword (1-4 digits) holds 4, a fullword (5-9) 9, a doubleword 18."""
+    if total_digits <= 4:
+        return 4
+    if total_digits <= 9:
+        return 9
+    return 18
+
+
+def _receiving_capacity(item: CobolDataItem) -> Capacity | None:
+    """What *item* can keep as a receiver.
+
+    The PICTURE capacity, except for COMP-5, which Enterprise COBOL fills to
+    its native binary capacity whatever the PICTURE says (#853).
+    """
+    capacity = _item_capacity(item)
+    if (
+        capacity is None
+        or not capacity.numeric
+        or str(item.usage or "").upper() not in _NATIVE_BINARY_USAGES
+    ):
+        return capacity
+    native = _native_digits(capacity.digits)
+    return replace(
+        capacity,
+        integer_digits=max(capacity.integer_digits, native - capacity.decimal_digits),
+    )
+
+
 def _literal_text(text: str) -> str:
     """The characters of a quoted literal (doubled quotes undone)."""
     text = text.strip()
@@ -512,10 +547,13 @@ class _Context:
 
     # -- truncation ----------------------------------------------------------
 
-    def _capacity(self, text: str) -> tuple[Capacity | None, str | None]:
+    def _capacity(
+        self, text: str, *, receiving: bool = False
+    ) -> tuple[Capacity | None, str | None]:
         """``(capacity, item name)`` of an operand; (None, None) when unknown.
 
-        A literal has a capacity but no item name.
+        A literal has a capacity but no item name. A *receiving* COMP-5 item
+        is judged by its native binary capacity (#853).
         """
         literal = _literal_capacity(text)
         if literal is not None:
@@ -523,6 +561,8 @@ class _Context:
         item = self._item(text)
         if item is None:
             return None, None
+        if receiving:
+            return _receiving_capacity(item), item.name
         return _item_capacity(item), item.name
 
     def _item(self, text: str) -> CobolDataItem | None:
@@ -627,7 +667,7 @@ class _Context:
             return []
         findings: list[BugFinding] = []
         for target in stmt.targets:
-            receiver, receiver_name = self._capacity(target)
+            receiver, receiver_name = self._capacity(target, receiving=True)
             if receiver is None or receiver_name is None:
                 continue
             if sender.numeric != receiver.numeric and not sender.numeric:
@@ -699,7 +739,7 @@ class _Context:
         shapes = [(text, *self._capacity(text)) for text in sources]
         findings: list[BugFinding] = []
         for target in receivers:
-            receiver, receiver_name = self._capacity(target)
+            receiver, receiver_name = self._capacity(target, receiving=True)
             if receiver is None or receiver_name is None or not receiver.numeric:
                 continue
             for text, capacity, name in shapes:

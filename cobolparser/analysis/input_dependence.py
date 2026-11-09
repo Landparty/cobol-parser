@@ -1014,6 +1014,11 @@ class InputDependenceAnalyzer:
         names_of = {k: records.roots_named(s) for k, s in live_stmts.items()}
         writes_of = {k: records.roots_written(s) for k, s in live_stmts.items()}
         source = {k for k, s in live_stmts.items() if _is_source(s)}
+        environment_of = {
+            k: sorted(set(_statement_tokens(s)) & _ENVIRONMENT_FUNCTIONS)
+            for k, s in live_stmts.items()
+            if isinstance(s, (IfStatement, EvaluateStatement))
+        }
         event_nodes = {
             n
             for n, stmt in graph.node_stmt.items()
@@ -1055,6 +1060,10 @@ class InputDependenceAnalyzer:
                 why = None
                 if n in event_nodes:
                     why = "depends on an input event"
+                elif environment_of.get(k):
+                    # FUNCTION CURRENT-DATE (or another environment function)
+                    # in the decision's own operands (#857).
+                    why = _environment_reason(environment_of[k])
                 elif names_of[k] & tainted:
                     hit = sorted({records.label(r) for r in names_of[k] & tainted})
                     why = "reads input-fed " + ", ".join(hit[:3])
@@ -1214,6 +1223,38 @@ class _Records:
         for name in _select_input_names(ast):
             roots = self._roots(name)
             self.seeds |= roots or {f"#{name}"}
+        self._seed_enclosing_names(ast)
+
+    def _seed_enclosing_names(self, ast: CobolProgram) -> None:
+        """A contained program sees its enclosing programs' GLOBAL items and
+        files, whose values come from outside the unit (#857). Every data
+        name an enclosing program declares and this unit does not is seeded:
+        when in doubt, input-dependent."""
+        outer = getattr(ast, "enclosing_program", None)
+        while outer is not None:
+            data = outer.data_division
+            for section in data.sections if data is not None else ():
+                if not isinstance(section, CobolSection):
+                    continue
+                for item in section.data_items:
+                    for node in [item, *item.get_all_children()]:
+                        names = [node.name] if node.name and not node.is_filler else []
+                        names += [
+                            c.name
+                            for c in node.children
+                            if isinstance(c, ConditionNameItem) and c.name
+                        ]
+                        for name in names:
+                            key = name.upper()
+                            if key in self.roots_of and not any(
+                                r.startswith("^") for r in self.roots_of[key]
+                            ):
+                                continue
+                            root = f"^{key}"
+                            self.roots_of.setdefault(key, set()).add(root)
+                            self._labels[root] = key
+                            self.seeds.add(root)
+            outer = getattr(outer, "enclosing_program", None)
 
     def _add_record(self, item: CobolDataItem, section: str, seed: bool) -> None:
         name = (item.name or "").upper()
@@ -1359,6 +1400,26 @@ def _is_source(stmt: Any) -> bool:
         return True
     tokens = set(_statement_tokens(stmt))
     return bool(tokens & _ENVIRONMENT_FUNCTIONS)
+
+
+_CLOCK_FUNCTIONS = frozenset(
+    {
+        "CURRENT-DATE",
+        "SECONDS-PAST-MIDNIGHT",
+        "LOCALE-DATE",
+        "LOCALE-TIME",
+        "LOCALE-TIME-FROM-SECONDS",
+        "WHEN-COMPILED",
+    }
+)
+
+
+def _environment_reason(functions: list[str]) -> str:
+    """Why a decision naming environment functions depends on the outside."""
+    named = ", ".join(f"FUNCTION {f}" for f in functions[:3])
+    if set(functions) & _CLOCK_FUNCTIONS:
+        return f"reads the clock ({named})"
+    return f"reads the environment ({named})"
 
 
 def _event_decision(stmt: Any) -> bool:

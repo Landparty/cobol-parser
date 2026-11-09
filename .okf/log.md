@@ -14,6 +14,18 @@ deliberate. Anything else appended to the bottom is a mistake: five
 entries, including both 2026-09-15 sections, were found there on
 2026-09-15 and moved back up.
 
+## 2026-11-09 -- hunt sweep: #852, #853, #857
+
+- [analysis/lint.md](analysis/lint.md): `stop-run-in-subprogram` skips the
+  JCL `PARM=` linkage shape (#852); `truncation` and `string-pointer` judge a
+  COMP-5 receiver or pointer by its native binary capacity (#853). Tests:
+  `tests/unit/analysis/test_code_patterns.py`, `test_bug_patterns.py`.
+- [analysis/flow.md](analysis/flow.md): `InputDependenceAnalyzer` treats a
+  decision naming an environment function as input-dependent and seeds a
+  contained program's names from its enclosing programs (#857). Tests:
+  `tests/unit/analysis/test_input_dependence.py`.
+- [tests.md](tests.md): no layout change; the new cases sit in the files above.
+
 ## 2026-11-09 -- record layout moved to `cobolparser.layout`; dead code removed
 
 - [index.md](index.md): new `layout` layer between `batch` and `analysis`;

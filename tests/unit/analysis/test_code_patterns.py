@@ -391,3 +391,65 @@ def test_no_procedure_division_is_quiet() -> None:
     result = parse_cobol(source)
     assert result.ast is not None
     assert CodePatternAnalyzer().analyze(result.ast).findings == []
+
+
+# -- #852: JCL PARM linkage is no CALL ------------------------------------------
+
+
+@pytest.mark.parametrize("usage", ["COMP", "COMP-5", "BINARY", "COMPUTATIONAL"])
+def test_stop_run_with_jcl_parm_using_is_silent(usage: str) -> None:
+    linkage = f"""
+    01 PARM-AREA.
+       05 PARM-LEN  PIC S9(4) {usage}.
+       05 PARM-TEXT PIC X(100).
+    """
+    main = _program(_DATA, "MAIN.\n    STOP RUN.", using="PARM-AREA", linkage=linkage)
+    assert _kinds(main, "stop-run-in-subprogram") == []
+
+
+@pytest.mark.parametrize(
+    "linkage, using",
+    [
+        # First item is no binary halfword.
+        ("01 LK-A.\n   05 LK-LEN PIC 9(4).\n   05 LK-T PIC X(9).", "LK-A"),
+        ("01 LK-A.\n   05 LK-LEN PIC S9(9) COMP.\n   05 LK-T PIC X(9).", "LK-A"),
+        # Two USING items: a CALL interface.
+        (
+            "01 LK-A.\n   05 LK-LEN PIC S9(4) COMP.\n   05 LK-T PIC X(9).\n"
+            "01 LK-B PIC X.",
+            "LK-A LK-B",
+        ),
+        # An elementary USING item.
+        ("01 LK-A PIC S9(4) COMP.", "LK-A"),
+    ],
+)
+def test_stop_run_with_call_shaped_using_is_flagged(linkage: str, using: str) -> None:
+    called = _program(_DATA, "MAIN.\n    STOP RUN.", using=using, linkage=linkage)
+    assert _kinds(called, "stop-run-in-subprogram") == ["STOP_RUN_IN_CALLED_PROGRAM"]
+
+
+# -- #853: COMP-5 holds its native binary range --------------------------------
+
+
+def test_comp5_pointer_is_judged_by_native_capacity() -> None:
+    data = """
+    01 WS-A PIC X(3).
+    01 P5 PIC 9(2) COMP-5.
+    01 P2 PIC 9(2) COMP.
+    01 BUF PIC X(99).
+    01 BIG PIC X(20000).
+    """
+    source = _program(
+        data,
+        """
+        MAIN.
+            MOVE 1 TO P5 P2
+            STRING WS-A DELIMITED BY SIZE INTO BUF WITH POINTER P5
+            STRING WS-A DELIMITED BY SIZE INTO BUF WITH POINTER P2
+            STRING WS-A DELIMITED BY SIZE INTO BIG WITH POINTER P5.
+            STOP RUN.
+        """,
+    )
+    # P2 (COMP, TRUNC(STD)) is too small for BUF; a halfword COMP-5 holds 100
+    # but not 20001.
+    assert _kinds(source, "string-pointer") == ["POINTER_TOO_SMALL"] * 2
