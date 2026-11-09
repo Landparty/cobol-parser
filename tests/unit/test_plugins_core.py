@@ -10,7 +10,7 @@ This module tests:
 - PluginManager class with registration and error handling
 """
 
-from unittest.mock import Mock, patch
+from unittest.mock import patch
 
 import pytest
 
@@ -22,7 +22,6 @@ from cobolparser.plugins.core import (
     MemoryLimitExceededError,
     ParseError,
     ParseStatistics,
-    PluginManager,
     SerializationConfig,
     UnterminatedStringError,
 )
@@ -575,237 +574,6 @@ class TestParseStatistics:
         assert stats.total_time_ms == 0.0
 
 
-class TestPluginManager:
-    """Test PluginManager class with plugin registration and error handling."""
-
-    def test_plugin_manager_creation(self):
-        """Test PluginManager creation."""
-        manager = PluginManager()
-        assert isinstance(manager._plugins, dict)
-        assert len(manager._plugins) == 0
-        assert isinstance(manager._active_plugins, list)
-        assert len(manager._active_plugins) == 0
-
-    def test_plugin_manager_register_plugin_success(self):
-        """Test successful plugin registration."""
-        manager = PluginManager()
-        mock_plugin = Mock()
-        mock_plugin.name = "test_plugin"
-
-        result = manager.register_plugin(mock_plugin)
-        assert result
-        assert "test_plugin" in manager._plugins
-        assert manager._plugins["test_plugin"] == mock_plugin
-        assert "test_plugin" in manager._active_plugins
-
-    def test_plugin_manager_register_plugin_duplicate_name(self):
-        """Test registration fails with duplicate name."""
-        manager = PluginManager()
-        mock_plugin1 = Mock()
-        mock_plugin1.name = "duplicate"
-        mock_plugin2 = Mock()
-        mock_plugin2.name = "duplicate"
-
-        # First registration should succeed
-        result1 = manager.register_plugin(mock_plugin1)
-        assert result1
-
-        # Second registration should fail
-        result2 = manager.register_plugin(mock_plugin2)
-        assert not result2
-
-        # First plugin should still be registered
-        assert manager._plugins["duplicate"] == mock_plugin1
-
-    def test_plugin_manager_unregister_plugin_success(self):
-        """Test successful plugin unregistration."""
-        manager = PluginManager()
-        mock_plugin = Mock()
-        mock_plugin.name = "removable_plugin"
-
-        # Register then unregister
-        manager.register_plugin(mock_plugin)
-        assert "removable_plugin" in manager._plugins
-
-        result = manager.unregister_plugin("removable_plugin")
-        assert result
-        assert "removable_plugin" not in manager._plugins
-        assert "removable_plugin" not in manager._active_plugins
-
-    def test_plugin_manager_unregister_plugin_not_found(self):
-        """Test unregistration fails when plugin not found."""
-        manager = PluginManager()
-
-        result = manager.unregister_plugin("nonexistent_plugin")
-        assert not result
-
-    def test_plugin_manager_get_plugin_success(self):
-        """Test successful plugin retrieval."""
-        manager = PluginManager()
-        mock_plugin = Mock()
-        mock_plugin.name = "retrievable_plugin"
-
-        manager.register_plugin(mock_plugin)
-
-        retrieved = manager.get_plugin("retrievable_plugin")
-        assert retrieved == mock_plugin
-
-    def test_plugin_manager_get_plugin_not_found(self):
-        """Test plugin retrieval returns None when not found."""
-        manager = PluginManager()
-
-        retrieved = manager.get_plugin("nonexistent_plugin")
-        assert retrieved is None
-
-    def test_plugin_manager_get_active_plugins_empty(self):
-        """Test getting active plugins when none are registered."""
-        manager = PluginManager()
-
-        plugin_list = manager.get_active_plugins()
-        assert plugin_list == []
-
-    def test_plugin_manager_get_active_plugins_with_plugins(self):
-        """Test getting active plugins when some are registered."""
-        manager = PluginManager()
-
-        mock_plugin1 = Mock()
-        mock_plugin1.name = "plugin1"
-        mock_plugin2 = Mock()
-        mock_plugin2.name = "plugin2"
-
-        manager.register_plugin(mock_plugin1)
-        manager.register_plugin(mock_plugin2)
-
-        plugin_list = manager.get_active_plugins()
-        assert len(plugin_list) == 2
-        assert "plugin1" in plugin_list
-        assert "plugin2" in plugin_list
-
-    def test_plugin_manager_plugin_without_name_attribute(self):
-        """Test plugin registration using class name when no name attribute."""
-        manager = PluginManager()
-
-        class TestPlugin:
-            pass
-
-        plugin = TestPlugin()
-        result = manager.register_plugin(plugin)
-        assert result
-        assert "TestPlugin" in manager._plugins
-        assert manager.get_plugin("TestPlugin") == plugin
-
-    def test_plugin_manager_case_sensitive_names(self):
-        """Test plugin names are case sensitive."""
-        manager = PluginManager()
-        mock_plugin = Mock()
-        mock_plugin.name = "CaseSensitive"
-
-        manager.register_plugin(mock_plugin)
-
-        assert manager.get_plugin("CaseSensitive") is not None
-        assert manager.get_plugin("casesensitive") is None
-        assert manager.get_plugin("CASESENSITIVE") is None
-
-    def test_plugin_manager_complex_workflow(self):
-        """Test complex plugin management workflow."""
-        manager = PluginManager()
-
-        # Register multiple plugins
-        plugins = {}
-        for i in range(5):
-            plugin = Mock()
-            plugin.name = f"plugin_{i}"
-            plugins[f"plugin_{i}"] = plugin
-            result = manager.register_plugin(plugin)
-            assert result
-
-        # Verify all are listed
-        plugin_list = manager.get_active_plugins()
-        assert len(plugin_list) == 5
-
-        # Remove some plugins
-        for i in [1, 3]:
-            result = manager.unregister_plugin(f"plugin_{i}")
-            assert result
-
-        # Verify remaining plugins
-        remaining_list = manager.get_active_plugins()
-        assert len(remaining_list) == 3
-        assert "plugin_1" not in remaining_list
-        assert "plugin_3" not in remaining_list
-        assert "plugin_0" in remaining_list
-        assert "plugin_2" in remaining_list
-        assert "plugin_4" in remaining_list
-
-    def test_plugin_manager_register_replace_existing(self):
-        """Test that re-registering the same name fails."""
-        manager = PluginManager()
-
-        original_plugin = Mock()
-        original_plugin.name = "test"
-
-        replacement_plugin = Mock()
-        replacement_plugin.name = "test"
-
-        # Register original
-        result1 = manager.register_plugin(original_plugin)
-        assert result1
-
-        # Try to register replacement (should fail)
-        result2 = manager.register_plugin(replacement_plugin)
-        assert not result2
-
-        # Original should still be there
-        retrieved = manager.get_plugin("test")
-        assert retrieved == original_plugin
-        assert retrieved != replacement_plugin
-
-    def test_plugin_manager_unregister_removes_from_active_list(self):
-        """Test that unregistering removes from active plugins list."""
-        manager = PluginManager()
-        mock_plugin = Mock()
-        mock_plugin.name = "test_plugin"
-
-        # Register
-        manager.register_plugin(mock_plugin)
-        assert "test_plugin" in manager.get_active_plugins()
-
-        # Unregister
-        manager.unregister_plugin("test_plugin")
-        assert "test_plugin" not in manager.get_active_plugins()
-
-    def test_plugin_manager_active_plugins_copy(self):
-        """Test that get_active_plugins returns a copy, not the original list."""
-        manager = PluginManager()
-        mock_plugin = Mock()
-        mock_plugin.name = "test_plugin"
-
-        manager.register_plugin(mock_plugin)
-        active_list = manager.get_active_plugins()
-
-        # Modify the returned list
-        active_list.append("fake_plugin")
-
-        # Original should be unchanged
-        assert "fake_plugin" not in manager.get_active_plugins()
-        assert len(manager.get_active_plugins()) == 1
-
-    def test_plugin_manager_unregister_plugin_not_in_active_list(self):
-        """Test unregistering a plugin that's not in the active list."""
-        manager = PluginManager()
-        mock_plugin = Mock()
-        mock_plugin.name = "test_plugin"
-
-        # Manually add plugin to _plugins but not to _active_plugins
-        manager._plugins["test_plugin"] = mock_plugin
-        # Don't add to _active_plugins to test the branch
-
-        # Should still unregister successfully
-        result = manager.unregister_plugin("test_plugin")
-        assert result
-        assert "test_plugin" not in manager._plugins
-
-
 class TestModuleIntegration:
     """Test integration between different components of the module."""
 
@@ -842,23 +610,6 @@ class TestModuleIntegration:
         assert memory_config.max_memory_mb == 512
         assert serialization_config.compact_format
 
-    def test_plugin_manager_with_error_handling(self):
-        """Test plugin manager handling errors."""
-        manager = PluginManager()
-
-        # Create a mock plugin that might raise errors
-        mock_plugin = Mock()
-        mock_plugin.name = "error_plugin"
-        mock_plugin.process.side_effect = ParseError("Plugin error")
-
-        # Register the plugin
-        result = manager.register_plugin(mock_plugin)
-        assert result
-
-        # The plugin is registered even if it might raise errors
-        retrieved_plugin = manager.get_plugin("error_plugin")
-        assert retrieved_plugin == mock_plugin
-
     def test_enum_values_in_configurations(self):
         """Test that enum values can be used with other components."""
         # Create instances of enums
@@ -880,43 +631,6 @@ class TestModuleIntegration:
             )  # Lower memory for fail fast
 
         assert config.max_memory_mb == 1024
-
-    def test_all_classes_instantiable(self):
-        """Test that all classes can be instantiated without errors."""
-        # Enums
-        recovery_mode = ErrorRecoveryMode.FAIL_FAST
-        dialect_type = DialectType.ANSI_COBOL
-
-        # Dataclasses
-        memory_config = MemoryConfiguration()
-        serialization_config = SerializationConfig()
-
-        # Exceptions
-        parse_error = ParseError("Test")
-        lexer_error = LexerError("Test")
-        string_error = UnterminatedStringError("Test")
-        memory_error = MemoryLimitExceededError(current_mb=50.0, limit_mb=32)
-
-        # Regular classes
-        statistics = ParseStatistics()
-        plugin_manager = PluginManager()
-
-        # All should be truthy (not None)
-        instances = [
-            recovery_mode,
-            dialect_type,
-            memory_config,
-            serialization_config,
-            parse_error,
-            lexer_error,
-            string_error,
-            memory_error,
-            statistics,
-            plugin_manager,
-        ]
-
-        for instance in instances:
-            assert instance is not None
 
 
 # Additional edge case tests to ensure 100% coverage
@@ -980,63 +694,6 @@ class TestEdgeCases:
         stats.reset()
         assert stats._start_time is None
         assert stats.parse_time_seconds == 0.0
-
-    def test_plugin_manager_edge_cases(self):
-        """Test edge cases in PluginManager methods."""
-        manager = PluginManager()
-
-        # Test plugin without name attribute
-        class PluginNoName:
-            pass
-
-        plugin = PluginNoName()
-        result = manager.register_plugin(plugin)
-        assert result
-        assert "PluginNoName" in manager._plugins
-
-        # Test unregister non-existent
-        result = manager.unregister_plugin("nonexistent")
-        assert not result
-
-        # Test get non-existent
-        result = manager.get_plugin("nonexistent")
-        assert result is None
-
-
-def test_module_coverage_completeness():
-    """Test that all exported items are covered by tests."""
-    # This test ensures we've covered all the main components
-    # Import all the main classes/functions to ensure they exist
-    from cobolparser.plugins.core import (
-        DialectType,
-        ErrorRecoveryMode,
-        LexerError,
-        MemoryConfiguration,
-        MemoryLimitExceededError,
-        ParseError,
-        ParseStatistics,
-        PluginManager,
-        SerializationConfig,
-        UnterminatedStringError,
-    )
-
-    # Verify all imports successful
-    components = [
-        ErrorRecoveryMode,
-        DialectType,
-        MemoryConfiguration,
-        SerializationConfig,
-        ParseError,
-        LexerError,
-        UnterminatedStringError,
-        MemoryLimitExceededError,
-        ParseStatistics,
-        PluginManager,
-    ]
-
-    for component in components:
-        assert component is not None
-        assert hasattr(component, "__name__")
 
 
 if __name__ == "__main__":

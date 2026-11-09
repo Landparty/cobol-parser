@@ -148,7 +148,7 @@ def _crud(parsed: ParsedProgram, unit: CobolProgram) -> Any:
 
 def _file_facts(parsed: ParsedProgram, unit: CobolProgram) -> dict[str, Any]:
     """Every FD/SD's facts (organization, keys, records), by upper-cased name."""
-    from ...generators.data.program_layout import ProgramLayoutIndex
+    from ...layout.program import ProgramLayoutIndex
 
     def build() -> dict[str, Any]:
         index = ProgramLayoutIndex.build(unit)

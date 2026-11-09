@@ -121,28 +121,6 @@ class TestPathResolverClass:
         with pytest.raises(PathTraversalError):
             resolver.validate("../../../etc/passwd", str(tmp_path))
 
-    def test_get_suggestions(self, tmp_path):
-        d = tmp_path / "copy"
-        d.mkdir()
-        (d / "EMPLOYEE.cpy").write_text("01 E.")
-
-        config = CopybookSearchPath(directories=[str(d)])
-        resolver = PathResolver(config)
-        suggestions = resolver.get_suggestions("EMPLOYE")
-        assert isinstance(suggestions, list)
-
-    def test_list_available(self, tmp_path):
-        d = tmp_path / "copy"
-        d.mkdir()
-        (d / "A.cpy").write_text("01 A.")
-        (d / "B.cpy").write_text("01 B.")
-
-        config = CopybookSearchPath(directories=[str(d)])
-        resolver = PathResolver(config)
-        available = resolver.list_available()
-        assert "A" in available
-        assert "B" in available
-
 
 class TestValidatePathEdgeCases:
     """Cover edge cases in validate_path_within_directory."""

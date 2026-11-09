@@ -773,10 +773,6 @@ class OccursClause(ASTNode):
         self.max_times = max_times
         self.depending_on = depending_on
 
-    def set_indexed_by(self, index_name: str) -> None:
-        """Set INDEXED BY clause (records the first index name)."""
-        self.indexed_by = index_name
-
     def add_index_name(self, index_name: str) -> None:
         """Append an INDEXED BY index name (supports multiple indexes)."""
         self.index_names.append(index_name)

@@ -10,7 +10,7 @@ from cobolparser import ErrorRecoveryMode, parse_cobol
 from cobolparser.generators import CopybookDataGenerator, DataGeneratorOptions
 from cobolparser.generators.data.decoding import RecordDecoder
 from cobolparser.generators.data.encoding import EncodingOptions, encoding_caveats
-from cobolparser.generators.data.layout_offsets import compute_program_data_items
+from cobolparser.layout.offsets import compute_program_data_items
 
 COPYBOOK = (
     "       01  REC.\n"

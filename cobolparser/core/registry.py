@@ -120,32 +120,6 @@ class StatementParserRegistry:
 
         return None
 
-    def unregister(self, parser: IStatementParser) -> bool:
-        """Remove a registered parser.
-
-        Args:
-            parser: The parser to remove
-
-        Returns:
-            True if parser was removed, False if not found
-        """
-        try:
-            self._parsers.remove(parser)
-            return True
-        except ValueError:
-            return False
-
-    def get_all_parsers(self) -> list[IStatementParser]:
-        """Get all registered parsers in order.
-
-        Warning: Use only for debugging/introspection. For actual
-        parsing, use find_parser() instead.
-
-        Returns:
-            List of all registered parsers in order
-        """
-        return list(self._parsers)
-
     def clear(self) -> None:
         """Clear all registered parsers.
 
@@ -161,3 +135,14 @@ class StatementParserRegistry:
         """Return string representation of registry."""
         parser_names = [type(p).__name__ for p in self._parsers]
         return f"StatementParserRegistry({len(self._parsers)} parsers: {', '.join(parser_names)})"
+
+    def get_all_parsers(self) -> list[IStatementParser]:
+        """Get all registered parsers in order.
+
+        Warning: Use only for debugging/introspection. For actual
+        parsing, use find_parser() instead.
+
+        Returns:
+            List of all registered parsers in order
+        """
+        return list(self._parsers)

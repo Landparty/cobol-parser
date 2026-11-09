@@ -28,7 +28,7 @@ from cobolparser.analysis.technical_debt import (
     TechnicalDebtAnalyzer,
     _grade_for,
 )
-from cobolparser.generators.data.layout_offsets import compute_program_data_items
+from cobolparser.layout.offsets import compute_program_data_items
 
 
 def _parse(source: str):

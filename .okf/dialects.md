@@ -13,7 +13,7 @@ timestamp: 2026-10-15T00:00:00Z
 (`le_signatures.py`). This file also documents the EXEC SQL statement model
 the parser builds (`models/sql_statements.py`), since that is where most
 dialect-specific behaviour lives. Start with
-[IBMEnterpriseCobol](#ibmenterprisecobol) for lookups, or
+[IBMEnterpriseCobol](#ibmenterprisecobol) for lookup tables, or
 [EXEC SQL model](#exec-sql-model-modelssql_statementspy) for host variables
 and tables.
 
@@ -21,10 +21,10 @@ and tables.
 
 Two modules:
 
-* `ibm_enterprise.py` -- `IBMEnterpriseCobol`: class-level word tables
-  (`IBM_RESERVED_WORDS`, `IBM_INTRINSIC_FUNCTIONS`, `CICS_COMMANDS`,
-  `IMS_COMMANDS`, `IBM_LE_CALLABLE_SERVICES`, `IBM_LE_SERVICE_CATEGORIES`,
-  `IBM_LE_SERVICE_INFO`) plus lookups and light validation.
+* `ibm_enterprise.py` -- `IBMEnterpriseCobol`: class-level lookup tables
+  only (`IBM_INTRINSIC_FUNCTIONS`, `IMS_COMMANDS`, `EXEC_DLI_COMMANDS`,
+  `IBM_LE_CALLABLE_SERVICES`, `IBM_LE_SERVICE_CATEGORIES`); it is never
+  instantiated.
   `IBM_LE_CALLABLE_SERVICES` is the key set of `IBM_LE_SERVICE_CATEGORIES`,
   rebuilt from the LE Programming Reference in #529 (see
   [analysis/sql-cics-ims.md](analysis/sql-cics-ims.md)). The analyzers read
@@ -38,63 +38,30 @@ Two modules:
 ```python
 from cobolparser.dialects.ibm_enterprise import IBMEnterpriseCobol
 
-dialect = IBMEnterpriseCobol()
-dialect.is_reserved_word(word)                    # bool, case-insensitive
-dialect.is_intrinsic_function(name)                # bool
-dialect.is_cics_command(name) / is_ims_command(name)
-dialect.is_le_callable_service(name)
-dialect.get_le_service_info(name) -> dict | None
-dialect.get_intrinsic_function_signature(name) -> dict[str, Any] | None
-dialect.validate_data_item(item) -> list[str]      # warnings
-dialect.validate_program_structure(program) -> list[str]
-dialect.create_comp3_data_item(name, picture, location) -> IBMDataItem
-dialect.parse_exec_sql / parse_exec_cics / parse_exec_ims(text, location)
-dialect.get_dialect_info() -> dict[str, Any]       # name/version/features + table sizes
+"UPPER-CASE" in IBMEnterpriseCobol.IBM_INTRINSIC_FUNCTIONS
+IBMEnterpriseCobol.IBM_LE_SERVICE_CATEGORIES.get("CEEDAYS")
 ```
 
-`get_le_service_info` covers fewer names than `is_le_callable_service`
-accepts: `IBM_LE_SERVICE_INFO` is the signature catalogue's services plus a
-small hand-written `_UNCATALOGUED_LE_SERVICE_INFO` (37 of the 62 services),
-so it returns `None` for a recognised service with neither.
-
-**The `Exec*Statement` classes here are not what the parser builds.**
-`ibm_enterprise.py` defines its own `ExecSQLStatement`, `ExecCICSStatement`,
-`ExecIMSStatement` (node types `EXEC-SQL`/`EXEC-CICS`/`EXEC-IMS`),
-`IBMDataItem` and `IBMDataType`, returned only by the dialect's own
-`parse_exec_*` / `create_comp3_data_item` helpers. The parser produces
-`models/sql_statements.py`'s `ExecSQLStatement` (and its subclasses) and
-`parsers/statements/ibm_exec_statements.py`'s `ExecCicsStatement` /
-`ExecImsStatement` (node types `EXEC_CICS` / `EXEC_IMS`). The
+The parser builds EXEC nodes from `models/sql_statements.py`
+(`ExecSQLStatement` and subclasses) and
+`parsers/statements/ibm_exec_statements.py` (`ExecCicsStatement` /
+`ExecImsStatement`, node types `EXEC_CICS` / `EXEC_IMS`). The
 [EXEC SQL model](#exec-sql-model-modelssql_statementspy) section describes
-the parser's SQL model.
+the parser's SQL model. For per-operand LE and intrinsic signatures, use
+`le_signatures.py`.
 
-`IBMDataItem.calculate_storage_size()` (the `storage_size` key of its
-`to_dict()`) is `calculate_size()`, i.e. `cobolparser/_storage.py`. It once
-kept its own copy of the rules, which sized even-digit COMP-3 one byte short
-(`(digits + 1) // 2`) and COMP-1 / COMP-2 / POINTER as 0 (#589).
+## Command sets
 
-## Command sets and COMP-3 validation
-
-* `validate_data_item` accepts any plain numeric PICTURE for COMP-3 --
-  optional leading `S`, then `9` / `P` / one `V` with repeat counts
-  (`_is_numeric_picture`). A `pattern.startswith("9")` test is wrong: it
-  rejects every signed (`S9(7)V99`) or fraction-only (`V99`) item.
-* `CICS_COMMANDS` also holds READQ/WRITEQ/DELETEQ, SYNCPOINT, ENQ/DEQ,
-  WAIT/POST/SIGNAL, ASSIGN/INQUIRE/ADDRESS/DUMP/QUERY, WEB, INVOKE,
-  SPOOLOPEN; `NOHANDLE` is an option, not a command, and is not in it.
 * `IMS_COMMANDS` (a frozenset) is the one list of DL/I **call** function
   codes -- the first operand of `CALL 'CBLTDLI'/'AIBTDLI'/'CEETDLI'`:
   database calls with their hold forms (GHU/GHN/GHNP, FLD, POS), message calls
   (CHNG/CMD/GCMD/PURG/AUTH/SETO) and system services (CHKP/XRST/SYNC/ROLB/ROLL/
   ROLS/SETS/SETU, APSB/DPSB/PCB/TERM, INIT/INQY/LOG/STAT/ICAL/...).
   ENQUEUE/DEQUEUE/XDLT/XRPL and `ROLLB` are not DL/I calls and are not in it
-  (#481). `is_ims_command()` and `IMSSegmentAnalyzer._IMS_FUNCTION_CODES`
-  read this set (#595).
+  (#481). `IMSSegmentAnalyzer._IMS_FUNCTION_CODES` reads this set (#595).
 * `EXEC_DLI_COMMANDS` is the command-level (`EXEC DLI`) vocabulary, which
-  both EXEC nodes read: the parser's `ExecImsStatement.ims_call_type`
-  (`ibm_exec_statements._IMS_CALL_TYPES` is this set) and the dialect's own
-  `ExecIMSStatement.ims_call_type`, so the two agree (#481; the dialect node
-  used to read the CALL codes and called `GHU` known, `LOAD` unknown). It differs from the call codes: no hold forms
+  the parser's `ExecImsStatement.ims_call_type` reads
+  (`ibm_exec_statements._IMS_CALL_TYPES` is this set, #481). It differs from the call codes: no hold forms
   (holds are implicit) and no message calls, but LOAD/SCHD/SYMCHKP/QUERY/
   REFRESH/RETRIEVE/ACCEPT. So `EXEC DLI GHU` is `UNKNOWN`. Only the
   abbreviated command word is listed; the spelled-out `GET UNIQUE` /
@@ -215,22 +182,6 @@ Coverage: 33 of the dialect's 62 LE services have a
 signature (the other 29 are reported by `services_without_signature()`,
 never hidden); all 81 intrinsic functions do (pinned by a test). Full
 API notes: [analysis.md](analysis.md) ("Call signatures").
-
-### `get_intrinsic_function_signature`
-
-Backed by the complete catalogue in `dialects/le_signatures.py` (the one
-`le-info` reads — see [analysis.md](analysis.md)'s "Call signatures"
-subsection for the full `le_service_signature`/`intrinsic_signature` API),
-so every function `is_intrinsic_function` accepts has a signature here. The
-returned dict carries the catalogue's own keys (`returns`, `arguments`,
-`call_example`, ...) plus historical `return_type`/`parameters`/
-`description` keys derived from the catalogue's `returns`/`arguments`/
-`summary` — **not** from a second, hand-written table: a second table drifts
-and overrides the catalogue whether or not it is more correct (e.g.
-`LENGTH`'s argument category is `["any"]`, not `["string"]`). Only
-`CURRENT-DATE`'s fixed return length — a fact the catalogue has no structured
-field for at all — is added on top, via the much narrower
-`_INTRINSIC_EXTRA_FIELDS`.
 
 ## See also
 

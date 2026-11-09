@@ -20,8 +20,8 @@ import pytest
 from cobolparser import parse_cobol
 from cobolparser.analysis.const_fold import ConstantFolder, _exact_divide, _fits_exactly
 from cobolparser.config._yaml import YamlError, parse_yaml
-from cobolparser.generators.data.options import DataGeneratorOptions
-from cobolparser.generators.data.program_layout import ProgramLayoutIndex
+from cobolparser.layout.options import DataGeneratorOptions
+from cobolparser.layout.program import ProgramLayoutIndex
 
 # ---------------------------------------------------------------------------
 # helpers
@@ -56,7 +56,7 @@ def _fold_compute(expression: str) -> Decimal | str | None:
 def _spec(picture: str, integer_digits: int, decimal_digits: int):
     """The FieldSpec `_fits_exactly` would be handed for `picture`."""
     from cobolparser.generators.data.copybook import parse_copybook_records
-    from cobolparser.generators.data.layout import flatten_record
+    from cobolparser.layout.fields import flatten_record
 
     source = f"       01  R.\n           05  F PIC {picture}.\n"
     records = parse_copybook_records(source)

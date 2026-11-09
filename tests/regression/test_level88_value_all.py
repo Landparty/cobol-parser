@@ -17,7 +17,7 @@ from cobolparser.generators import (
     DataGeneratorOptions,
     ProgramLayoutIndex,
 )
-from cobolparser.generators.data.layout import (
+from cobolparser.layout.fields import (
     condition_values_exhaustive,
     expand_condition_values,
     fill_all_literal,

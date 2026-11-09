@@ -3,7 +3,7 @@ type: Log
 title: OKF Update Log
 description: Dated log of OKF bundle updates, newest first.
 tags: [log, changelog, history]
-timestamp: 2026-11-08T00:00:00Z
+timestamp: 2026-11-09T00:00:00Z
 ---
 
 # OKF Update Log
@@ -13,6 +13,25 @@ follows up on even when a day or two out of order -- that adjacency is
 deliberate. Anything else appended to the bottom is a mistake: five
 entries, including both 2026-09-15 sections, were found there on
 2026-09-15 and moved back up.
+
+## 2026-11-09 -- record layout moved to `cobolparser.layout`; dead code removed
+
+- [index.md](index.md): new `layout` layer between `batch` and `analysis`;
+  `KNOWN_UPWARD` is down to two entries (the `CobolProgram` analyzer shortcuts
+  and the analysis -> `generators/data/` edge are gone).
+- [generators/record-data.md](generators/record-data.md),
+  [generators.md](generators.md) and every page that named
+  `generators/data/{layout,layout_offsets,program_layout,options,values,errors,storage}.py`:
+  paths now point at `layout/{fields,offsets,program,options,values,errors}.py`;
+  the `copybook_data.py` and `storage.py` shims are gone.
+- [dialects.md](dialects.md): `IBMEnterpriseCobol` is tables only; its
+  instance API and parallel EXEC / data-item classes were removed.
+- [ast-models.md](ast-models.md), [parser/orchestration.md](parser/orchestration.md),
+  [analysis.md](analysis.md), [analysis/data-use.md](analysis/data-use.md),
+  [analysis/sql-cics-ims.md](analysis/sql-cics-ims.md), [lexer.md](lexer.md),
+  [preprocessing.md](preprocessing.md), [tests.md](tests.md): dropped the
+  removed `PluginManager`, factory validators, `io_diagnostics`, model setters
+  and helpers.
 
 ## 2026-11-08 -- statement dispatch cache removed
 

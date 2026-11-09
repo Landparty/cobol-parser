@@ -594,27 +594,6 @@ class PathResolver:
         """
         return validate_path_within_directory(file_path, base_directory)
 
-    def get_suggestions(self, member_name: str) -> list[str]:
-        """
-        Get suggestions for a possibly misspelled copybook name.
-
-        Args:
-            member_name: The copybook name to find suggestions for
-
-        Returns:
-            List of similar copybook names
-        """
-        return suggest_similar_copybooks(member_name, self.search_config)
-
-    def list_available(self) -> list[str]:
-        """
-        List all available copybook names.
-
-        Returns:
-            List of copybook member names
-        """
-        return get_available_copybooks(self.search_config)
-
 
 __all__ = [
     "normalize_path",

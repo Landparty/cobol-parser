@@ -40,10 +40,10 @@ that one. CLI flags for every subcommand live in [cli.md](cli.md).
 | Source | Topic file |
 |--------|-----------|
 | `generators/flowchart.py` | [flowchart.md](generators/flowchart.md) |
-| `generators/copybook_data.py` (re-export shim) | [record-data.md](generators/record-data.md) |
-| `generators/data/options.py`, `errors.py`, `layout.py`, `layout_offsets.py`, `values.py`, `storage.py` (→ `cobolparser/_storage.py`), `editing.py`, `encoding.py`, `dataset.py`, `copybook.py`, `__init__.py` | [record-data.md](generators/record-data.md) |
+| `layout/__init__.py`, `options.py`, `errors.py`, `fields.py`, `offsets.py`, `values.py`, `copybook.py` (byte widths: `cobolparser/_storage.py`) | [record-data.md](generators/record-data.md) |
+| `generators/data/editing.py`, `encoding.py`, `dataset.py`, `copybook.py`, `__init__.py` | [record-data.md](generators/record-data.md) |
 | `generators/data/views.py`, `decoding.py`, `compare.py` (+ `copybook.select_record` / `fd_record_length`) | [decode-compare.md](generators/decode-compare.md) |
-| `generators/data/program_layout.py`, `bundle.py` | [fixtures.md](generators/fixtures.md) |
+| `layout/program.py`, `generators/data/bundle.py` | [fixtures.md](generators/fixtures.md) |
 | `generators/program_fixtures.py`, `scenarios.py`, `verification.py` | [fixtures.md](generators/fixtures.md) |
 | `generators/__init__.py` (lazy exports) | this page |
 

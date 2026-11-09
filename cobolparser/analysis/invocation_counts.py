@@ -103,7 +103,7 @@ from .const_fold import (
 if TYPE_CHECKING:
     # generators/__init__.py reaches this module through program_fixtures,
     # so a top-level import of the layout index would be circular.
-    from ..generators.data.program_layout import ProgramLayoutIndex
+    from ..layout.program import ProgramLayoutIndex
 
 #: Statement types `BoundaryInventoryAnalyzer` turns into boundaries -- the
 #: only ones a BoundaryRef's (paragraph, line) is matched against, so a

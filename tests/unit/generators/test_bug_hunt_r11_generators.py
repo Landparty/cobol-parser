@@ -22,7 +22,7 @@ from cobolparser.generators.data.encoding import (
     EncodingOptions,
     RecordFormat,
 )
-from cobolparser.generators.data.options import DataGeneratorOptions
+from cobolparser.layout.options import DataGeneratorOptions
 from cobolparser.models.ast_base import SourceLocation
 from cobolparser.models.data_items import PictureClause
 

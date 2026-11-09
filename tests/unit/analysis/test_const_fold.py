@@ -15,7 +15,7 @@ import pytest
 
 from cobolparser import parse_cobol
 from cobolparser.analysis.const_fold import ConstantFolder
-from cobolparser.generators.data.program_layout import ProgramLayoutIndex
+from cobolparser.layout.program import ProgramLayoutIndex
 
 _HEADER = """\
        IDENTIFICATION DIVISION.

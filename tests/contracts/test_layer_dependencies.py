@@ -59,17 +59,19 @@ LAYERS: dict[str, int] = {
     "parsers": 5,
     "parser": 6,
     "batch": 7,
+    # Record layout: byte facts both analyzers and generators read.
+    "layout": 8,
     # Readers of the AST.
-    "analysis": 8,
-    "generators": 9,
+    "analysis": 9,
+    "generators": 10,
     # Multi-file analysis and front ends.
-    "_facts_cache": 10,
-    "scan": 11,
-    "config": 12,
-    "mcp": 13,
-    "cli": 14,
-    "": 15,
-    "__main__": 16,
+    "_facts_cache": 11,
+    "scan": 12,
+    "config": 13,
+    "mcp": 14,
+    "cli": 15,
+    "": 16,
+    "__main__": 17,
 }
 
 
@@ -85,13 +87,6 @@ class Known:
 
 KNOWN_UPWARD: tuple[Known, ...] = (
     Known(
-        "cobolparser.models.program",
-        "cobolparser.analysis",
-        eager_ok=False,
-        reason="CobolProgram convenience methods (find_dead_code(), the "
-        "intrinsic-function list) call analyzers; public API.",
-    ),
-    Known(
         "cobolparser.lexer",
         "cobolparser.preprocess",
         eager_ok=False,
@@ -104,15 +99,6 @@ KNOWN_UPWARD: tuple[Known, ...] = (
         eager_ok=False,
         reason="parse_cobol_with_expansion() is an expand-then-parse "
         "orchestrator, and the debug-lines warning is shared with the parser.",
-    ),
-    Known(
-        "cobolparser.analysis",
-        "cobolparser.generators.data",
-        eager_ok=True,
-        reason="the record-layout modules (layout, options, values, "
-        "layout_offsets, program_layout, copybook) are byte-layout facts the "
-        "analyzers need; generators/__init__.py is lazy so the import order "
-        "never matters.",
     ),
 )
 

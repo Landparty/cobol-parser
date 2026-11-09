@@ -10,7 +10,7 @@ caveat, and every consumer of ``ConditionNameItem.values`` saw two values.
 from __future__ import annotations
 
 from cobolparser import parse_cobol
-from cobolparser.generators.data.layout_offsets import compute_program_data_items
+from cobolparser.layout.offsets import compute_program_data_items
 
 SOURCE = """\
        IDENTIFICATION DIVISION.

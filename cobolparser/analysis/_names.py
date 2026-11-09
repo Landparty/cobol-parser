@@ -188,11 +188,6 @@ def qualified_references(text: str, skip_words: frozenset[str]) -> set[str]:
     return refs
 
 
-def bare_names(refs: set[str]) -> set[str]:
-    """The plain names of :func:`qualified_references` output."""
-    return {ref.split(QUALIFIER_SEPARATOR, 1)[0] for ref in refs}
-
-
 #: What a dynamic CALL candidate is stripped of before it is read as a
 #: program name: blanks, the LOW-VALUES / HIGH-VALUES bytes, and quotes.
 _CALLEE_STRIP = " \x00\xff'\""

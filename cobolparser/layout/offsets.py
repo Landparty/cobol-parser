@@ -17,21 +17,21 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
-from ...models.data_items import CobolDataItem, ConditionNameItem, RenamesItem
-from ...models.program import CobolProgram, CobolSection
-from .layout import (
-    FieldCategory,
-    _classify,
-    condition_ranges,
-    condition_values_exhaustive,
-    expand_condition_values,
-)
-from .storage import (
+from .._storage import (
     BINARY_USAGES,
     FLOAT_USAGES,
     POINTER_USAGES,
     is_known_usage,
     storage_size,
+)
+from ..models.data_items import CobolDataItem, ConditionNameItem, RenamesItem
+from ..models.program import CobolProgram, CobolSection
+from .fields import (
+    FieldCategory,
+    _classify,
+    condition_ranges,
+    condition_values_exhaustive,
+    expand_condition_values,
 )
 
 _SECTION_NAMES = ("FILE", "WORKING-STORAGE", "LOCAL-STORAGE", "LINKAGE")
@@ -172,7 +172,7 @@ def _find_misnested_level_77_items(item: CobolDataItem) -> list[CobolDataItem]:
     return found
 
 
-def _elementary_byte_length(item: CobolDataItem) -> int:
+def elementary_byte_length(item: CobolDataItem) -> int:
     """One occurrence's real storage byte length.
 
     Delegates to :func:`.storage.storage_size`, which is the package's one
@@ -337,7 +337,7 @@ def _layout_item(
         picture = None
         usage = item.usage.upper() if item.usage else None
     else:
-        one_occurrence_length = _elementary_byte_length(item)
+        one_occurrence_length = elementary_byte_length(item)
         picture = item.picture_clause.pattern if item.picture_clause else None
         usage = (item.usage or "DISPLAY").upper()
 
@@ -387,7 +387,7 @@ def compute_record_layout(record: CobolDataItem) -> list[LayoutItem]:
         # 77-level elementary item or 01-level elementary item -- the
         # record root represents itself, not an empty group, so it needs
         # its own elementary byte length rather than defaulting to 0.
-        record_length = _elementary_byte_length(record)
+        record_length = elementary_byte_length(record)
     else:
         record_length, _ = _layout_siblings(
             data_children, (record.name,), 0, False, out
@@ -443,9 +443,9 @@ def _alignment(item: CobolDataItem) -> int:
         return 0
     usage = (item.usage or "DISPLAY").upper()
     if usage in BINARY_USAGES or usage in FLOAT_USAGES:
-        return _elementary_byte_length(item)
+        return elementary_byte_length(item)
     if usage == "INDEX" or usage in POINTER_USAGES:
-        return _elementary_byte_length(item)
+        return elementary_byte_length(item)
     return 0
 
 

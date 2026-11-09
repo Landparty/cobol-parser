@@ -62,7 +62,7 @@ class DataTools(BaseTools):
         with no data file, the layout's views (its REDEFINES overlays)."""
         from ...generators.data.decoding import RecordDecoder, RecordDecodingError
         from ...generators.data.encoding import RecordFormat
-        from ...generators.data.errors import CopybookLayoutError
+        from ...layout.errors import CopybookLayoutError
 
         if skip < 0:
             raise ToolError("skip cannot be negative")
@@ -300,9 +300,9 @@ class DataTools(BaseTools):
         each with the values every mocked boundary supplies and what to
         assert afterwards."""
         from ...analysis.boundary_inventory import BoundaryInventoryAnalyzer
-        from ...generators.data.options import DataGeneratorOptions
-        from ...generators.data.program_layout import ProgramLayoutIndex
         from ...generators.program_fixtures import ProgramFixtureGenerator
+        from ...layout.options import DataGeneratorOptions
+        from ...layout.program import ProgramLayoutIndex
 
         modes = ("happy", "branches", "all")
         chosen_mode = (mode or "happy").strip().lower()

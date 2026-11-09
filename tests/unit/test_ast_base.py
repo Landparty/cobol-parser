@@ -204,31 +204,6 @@ class TestASTNode:
         assert len(parent.children) == 1
         assert child.parent == parent
 
-    def test_get_child_at_valid_indices(self):
-        """Test getting children at valid indices."""
-        parent = ConcreteASTNode("Parent", SourceLocation(1, 1))
-        child1 = ConcreteASTNode("Child1", SourceLocation(2, 1))
-        child2 = ConcreteASTNode("Child2", SourceLocation(3, 1))
-        child3 = ConcreteASTNode("Child3", SourceLocation(4, 1))
-
-        parent.add_child(child1)
-        parent.add_child(child2)
-        parent.add_child(child3)
-
-        assert parent.get_child_at(0) == child1
-        assert parent.get_child_at(1) == child2
-        assert parent.get_child_at(2) == child3
-
-    def test_get_child_at_invalid_indices(self):
-        """Test getting children at invalid indices."""
-        parent = ConcreteASTNode("Parent", SourceLocation(1, 1))
-        child = ConcreteASTNode("Child", SourceLocation(2, 1))
-        parent.add_child(child)
-
-        assert parent.get_child_at(-1) is None
-        assert parent.get_child_at(1) is None
-        assert parent.get_child_at(100) is None
-
     def test_get_children_by_type(self):
         """Test filtering children by node type."""
         parent = ConcreteASTNode("Parent", SourceLocation(1, 1))

@@ -19,7 +19,7 @@ from cobolparser.analysis import const_fold
 from cobolparser.analysis.boundary_inventory import BoundaryInventoryAnalyzer
 from cobolparser.analysis.const_fold import ConstantFolder
 from cobolparser.generators import ProgramFixtureGenerator
-from cobolparser.generators.data.program_layout import ProgramLayoutIndex
+from cobolparser.layout.program import ProgramLayoutIndex
 
 _SOURCE = """\
        IDENTIFICATION DIVISION.

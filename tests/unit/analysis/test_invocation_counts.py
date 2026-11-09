@@ -7,7 +7,7 @@ import pytest
 from cobolparser import parse_cobol
 from cobolparser.analysis.boundary_inventory import BoundaryInventoryAnalyzer
 from cobolparser.analysis.invocation_counts import count_invocations
-from cobolparser.generators.data.program_layout import ProgramLayoutIndex
+from cobolparser.layout.program import ProgramLayoutIndex
 from cobolparser.models.statements.control import PerformStatement
 
 _HEADER = """\

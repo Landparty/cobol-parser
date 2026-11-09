@@ -120,13 +120,13 @@ if TYPE_CHECKING:
     # (reached via generators/__init__.py's import chain) constructs
     # ConstantFolder, so a top-level import of the program-layout index here
     # would be circular. Every use below is a type annotation only.
-    from ..generators.data.layout import FieldSpec
-    from ..generators.data.program_layout import ProgramLayoutIndex
+    from ..layout.fields import FieldSpec
+    from ..layout.program import ProgramLayoutIndex
 
 # FieldCategory has no such cycle (generators/data/layout.py has zero
 # dependency back into cobolparser.analysis) -- domains.py already imports it
 # the same way, unguarded.
-from ..generators.data.layout import FieldCategory, all_literal_operand
+from ..layout.fields import FieldCategory, all_literal_operand
 
 _NUMERIC_LITERAL_RE = re.compile(r"^[+-]?\d+(\.\d+)?$")
 _QUOTED_LITERAL_RE = re.compile(r'^(["\'])(.*)\1$', re.DOTALL)
@@ -514,7 +514,7 @@ def _group_paths(index: ProgramLayoutIndex, name: str) -> list[str]:
     # `ProgramLayoutIndex` import above -- a top-level import of
     # program_layout here would be circular (cobolparser.generators
     # constructs ConstantFolder).
-    from ..generators.data.program_layout import split_qualified_name
+    from ..layout.program import split_qualified_name
 
     split = split_qualified_name(name)
     if split is None:

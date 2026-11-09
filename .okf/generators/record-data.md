@@ -8,8 +8,10 @@ timestamp: 2026-10-15T00:00:00Z
 
 # Copybook Record Data
 
-The generation half of `cobolparser/generators/data/` (`copybook_data.py` is a
-backwards-compatible re-export shim with zero API change): a copybook turns
+The generation half of `cobolparser/generators/data/`, over the record layout
+in `cobolparser/layout/` (field specs, offsets, copybook parsing, values,
+options; the layout package sits below `analysis` so analyzers can read it
+without importing `generators`): a copybook turns
 into a flat `list[FieldSpec]` (one column per elementary field), `ValueFactory`
 fills one row per record, and `GeneratedDataset` exports it as CSV or as a
 real record image (fixed or variable length). CLI: `gen-data` and `data-items`
@@ -222,7 +224,7 @@ Anything else — procedure text, `SELECT` clauses, an empty file — raises
 
 `include_redefines` / `include_filler` / `expand_occurs` / `max_occurs`
 override the first four. Occurrence expansion is additionally subject to a
-hard ceiling, `_MAX_OCCURS_HARD_CAP = 10_000` in `generators/data/layout.py`
+hard ceiling, `_MAX_OCCURS_HARD_CAP = 10_000` in `layout/fields.py`
 — applied on top of (never widened by) a caller's own `max_occurs`, so a
 pathological `OCCURS 5000000 TIMES` in the source cannot materialize
 millions of `FieldSpec`s. A second ceiling bounds nested tables
@@ -330,7 +332,7 @@ formatted with `allow_random_sign=False` — otherwise `88 ST-LOW VALUE 5` on a
 **Literal text.** `_literals.py`'s `quote_literal()` re-emits a decoded
 literal doubling each embedded `"`; its inverse `unquote_literal()` strips the
 delimiters *and* collapses the doubled delimiter. Every consumer reading a
-re-emitted literal back must use it — `generators/data/layout.py`
+re-emitted literal back must use it — `layout/fields.py`
 (`_strip_literal_quotes`, VALUE clauses), `analysis/constraints.py`
 (`_strip_quotes`, branch witnesses), `analysis/const_fold.py` (MOVE sources)
 — or `VALUE "A""B"` generates `A""B`. Pinned by
@@ -430,10 +432,8 @@ and the `USAGE` frozensets everything else classifies against. `layout.py`,
 `models.data_items.CobolDataItem.calculate_size` all defer to it, which is
 what stops a record image's field widths drifting from the offsets
 `data-items` reports. It lives at `cobolparser/_storage.py` (beside
-`_errors.py`, zero internal dependencies) rather than in this package because
-`generators.data.__init__` eagerly imports `program_layout`, which imports
-`cobolparser.models` — a model importing `generators.data.storage` would close
-an import cycle; `generators/data/storage.py` re-exports it. Two cases any
+`_errors.py`, zero internal dependencies) because the models need it too and
+sit below `cobolparser.layout`. Two cases any
 copy of the arithmetic must handle: `USAGE INDEX` has no PICTURE and must not
 be sized as zero bytes (that collapses every later offset), and a DISPLAY
 item with `SIGN IS SEPARATE` has a byte its PICTURE's character count does
@@ -955,8 +955,6 @@ bytes each *record* carries.
   special, fixed and floating insertion, zero suppression), round-trips of
   both, the all-`*` zero case, and record images through the public
   generator/decoder API (signed vs. unsigned value generation)
-* `tests/contracts/test_copybook_data_module_paths.py` — every `data/`
-  submodule import path and the `copybook_data.py` shim
 
 ## See also
 

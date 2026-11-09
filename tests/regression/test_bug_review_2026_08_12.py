@@ -27,11 +27,11 @@ from cobolparser.analysis.const_fold import ConstantFolder
 from cobolparser.analysis.constraints import ConstraintExtractor, FieldConstraint
 from cobolparser.analysis.domains import Witness, solve
 from cobolparser.generators import ProgramFixtureGenerator, ProgramLayoutIndex
-from cobolparser.generators.data.layout import FieldCategory, FieldSpec
-from cobolparser.generators.data.options import DataGeneratorOptions
-from cobolparser.generators.data.program_layout import ResolvedField
-from cobolparser.generators.data.values import ValueFactory
 from cobolparser.generators.scenarios import _picture_ceiling
+from cobolparser.layout.fields import FieldCategory, FieldSpec
+from cobolparser.layout.options import DataGeneratorOptions
+from cobolparser.layout.program import ResolvedField
+from cobolparser.layout.values import ValueFactory
 from cobolparser.models.ast_base import SourceLocation
 from cobolparser.models.data_items import CobolDataItem
 

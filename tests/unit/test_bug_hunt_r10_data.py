@@ -8,8 +8,8 @@ from __future__ import annotations
 
 from cobolparser import parse_cobol
 from cobolparser._storage import storage_size
-from cobolparser.generators.data.layout import expand_condition_values
-from cobolparser.generators.data.layout_offsets import compute_program_data_items
+from cobolparser.layout.fields import expand_condition_values
+from cobolparser.layout.offsets import compute_program_data_items
 from cobolparser.models.ast_base import SourceLocation
 from cobolparser.models.data_items import (
     CobolDataItem,

@@ -316,7 +316,7 @@ PERFORM UNTIL (`condition_tree`), EVALUATE and SEARCH WHEN (`condition_tree` nex
 to the raw `condition` text; #348). Class / sign / condition-name conditions
 (`A IS NUMERIC`) get a structured node while `metadata.raw_condition` stays
 populated. An AND / OR chain is split at every top-level operator in one
-pass (`find_top_level_operators`) and the legs folded from the left
+pass (`find_top_level_operators`; there is no single-operator variant) and the legs folded from the left
 (`_fold_logical`): up to `_MAX_LEFT_DEEP_LEGS` (64) legs the tree is the
 left-deep one it always was; a longer chain is paired neighbour by neighbour so
 its depth stays O(log n) for every recursive walker (`to_dict`, rendering, the

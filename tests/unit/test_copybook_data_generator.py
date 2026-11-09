@@ -15,7 +15,7 @@ from pathlib import Path
 
 import pytest
 
-from cobolparser.generators.copybook_data import (
+from cobolparser.generators.data import (
     CopybookDataGenerator,
     CopybookLayoutError,
     DataGeneratorOptions,
@@ -184,7 +184,7 @@ class TestFlattenRecord:
         # requires expanding it 1:1 into FieldSpecs when no caller-supplied
         # max_occurs is given. An internal hard ceiling protects against
         # a multi-million-row copybook exhausting memory.
-        from cobolparser.generators.data.layout import _MAX_OCCURS_HARD_CAP
+        from cobolparser.layout.fields import _MAX_OCCURS_HARD_CAP
 
         source = "01 R.\n  05 TBL OCCURS 50000 TIMES PIC X.\n"
         specs = _fields(source)
@@ -194,7 +194,7 @@ class TestFlattenRecord:
     def test_max_occurs_beyond_hard_cap_is_still_clamped(self):
         # The hard ceiling applies regardless of the caller's own config --
         # an explicit --max-occurs larger than the ceiling must not bypass it.
-        from cobolparser.generators.data.layout import _MAX_OCCURS_HARD_CAP
+        from cobolparser.layout.fields import _MAX_OCCURS_HARD_CAP
 
         source = "01 R.\n  05 TBL OCCURS 50000 TIMES PIC X.\n"
         specs = _fields(source, max_occurs=_MAX_OCCURS_HARD_CAP + 500)

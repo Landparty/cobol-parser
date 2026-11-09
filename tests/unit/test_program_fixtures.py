@@ -22,9 +22,9 @@ import pytest
 from cobolparser import parse_cobol
 from cobolparser.analysis.boundary_inventory import BoundaryInventoryAnalyzer
 from cobolparser.generators.data.bundle import BUNDLE_VERSION, _slugify
-from cobolparser.generators.data.errors import ProgramLayoutError
-from cobolparser.generators.data.program_layout import ProgramLayoutIndex
 from cobolparser.generators.program_fixtures import ProgramFixtureGenerator
+from cobolparser.layout.errors import ProgramLayoutError
+from cobolparser.layout.program import ProgramLayoutIndex
 
 # Resolved relative to this file rather than the process cwd, so the tests
 # also work when pytest runs from a directory that isn't the repo root.
@@ -89,7 +89,7 @@ class TestBundleAssembly:
             assert fixture.status  # some FILE-STATUS-shaped dict
 
     def test_read_generates_configured_row_count_and_at_end_terminal(self):
-        from cobolparser.generators.data.options import DataGeneratorOptions
+        from cobolparser.layout.options import DataGeneratorOptions
 
         bundle = ProgramFixtureGenerator(
             DataGeneratorOptions(rows=4)
@@ -810,7 +810,7 @@ def _tier2_bundle(seed: int = 7):
 
 
 def _bundle_for(source: str, *, mode: str = "branches", rows: int = 3):
-    from cobolparser.generators.data.options import DataGeneratorOptions
+    from cobolparser.layout.options import DataGeneratorOptions
 
     result = parse_cobol(source, filename="counts.cbl")
     assert result.ast is not None, result.errors
@@ -1495,7 +1495,7 @@ _RANDOM_READ_SOURCE = """\
 
 
 def _all_mode_scenarios(source: str, rows: int = 1) -> dict:
-    from cobolparser.generators.data.options import DataGeneratorOptions
+    from cobolparser.layout.options import DataGeneratorOptions
 
     result = parse_cobol(source, filename="failpath.cbl")
     assert result.ast is not None, result.errors
@@ -1914,8 +1914,8 @@ class TestFillerOwningConditionName:
         assert index.resolve("FLAG-TWO").spec.qualified_name == "IN-REC.FILLER#3"
 
     def test_plain_gen_data_still_omits_filler(self, filler):
-        from cobolparser.generators.data.layout import flatten_record
-        from cobolparser.generators.data.options import DataGeneratorOptions
+        from cobolparser.layout.fields import flatten_record
+        from cobolparser.layout.options import DataGeneratorOptions
 
         result = parse_cobol(_filler_flag_program(filler), filename="flg.cbl")
         record = ProgramLayoutIndex.build(result.ast).record_named("IN-REC")

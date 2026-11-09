@@ -17,7 +17,7 @@ import pytest
 from cobolparser import parse_cobol
 from cobolparser.analysis.const_fold import ConstantFolder
 from cobolparser.generators import ProgramLayoutIndex
-from cobolparser.generators.data.layout import FieldCategory
+from cobolparser.layout.fields import FieldCategory
 
 pytestmark = pytest.mark.integration
 

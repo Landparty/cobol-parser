@@ -127,11 +127,6 @@ def overview_text() -> str:
     return "\n".join(lines)
 
 
-def grouped_command_names() -> list[str]:
-    """Every command named in :data:`COMMAND_GROUPS`, in display order."""
-    return [name for _, commands in COMMAND_GROUPS for name, _ in commands]
-
-
 def suggest_command(word: str, known: frozenset[str] | set[str]) -> str | None:
     """The registered command *word* is most likely a typo of, if any."""
     matches = difflib.get_close_matches(word.lower(), sorted(known), n=1, cutoff=0.6)
@@ -166,3 +161,8 @@ class TopLevelParser(argparse.ArgumentParser):
         formatter.add_text(EXIT_CODES)
         formatter.add_text(DEFAULTS)
         return formatter.format_help()
+
+
+def grouped_command_names() -> list[str]:
+    """Every command named in :data:`COMMAND_GROUPS`, in display order."""
+    return [name for _, commands in COMMAND_GROUPS for name, _ in commands]

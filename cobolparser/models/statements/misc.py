@@ -162,10 +162,6 @@ class SelectStatement(CobolStatement):
         self.file_status_qualifiers = list(qualifiers or [])
         self.file_status_vsam_qualifiers = list(vsam_qualifiers or [])
 
-    def set_relative_key(self, key: str) -> None:
-        """Set the RELATIVE KEY clause."""
-        self.relative_key = key
-
     def set_reserve_areas(self, areas: int) -> None:
         """Set the RESERVE clause."""
         self.reserve_areas = areas
@@ -239,24 +235,6 @@ class CopyStatement(CobolStatement):
         self.library_name: str | None = None
         self.suppressions: list[str] = []
         self.replacements: list[dict[str, str]] = []
-
-    def set_copybook_name(self, name: str) -> None:
-        """Set the copybook name."""
-        self.copybook_name = name
-        self._add_unique_operand(name, front=True)
-
-    def set_library_name(self, library: str) -> None:
-        """Set the IN/OF library name."""
-        self.library_name = library
-        self._add_unique_operand(library)
-
-    def add_suppression(self, suppression: str) -> None:
-        """Add a SUPPRESS phrase."""
-        self.suppressions.append(suppression)
-
-    def add_replacement(self, old_text: str, new_text: str) -> None:
-        """Add a REPLACING phrase."""
-        self.replacements.append({"old_text": old_text, "new_text": new_text})
 
     def to_dict(self) -> dict[str, Any]:
         """Convert COPY statement to dictionary representation."""

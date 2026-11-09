@@ -17,7 +17,7 @@ from cobolparser.analysis.boundary_inventory import BoundaryInventoryAnalyzer
 from cobolparser.analysis.constraints import ConstraintExtractor, FieldConstraint
 from cobolparser.analysis.domains import Witness, solve
 from cobolparser.generators import ProgramLayoutIndex
-from cobolparser.generators.data.layout import FieldCategory, FieldSpec
+from cobolparser.layout.fields import FieldCategory, FieldSpec
 
 pytestmark = pytest.mark.integration
 

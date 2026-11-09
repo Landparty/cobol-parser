@@ -1848,7 +1848,7 @@ def _member_fields(member_path: str) -> tuple[list[str], str | None]:
 
     # Imported lazily: the generators package pulls in the whole fixture
     # stack, which a call-graph build has no use for.
-    from ..generators.data.copybook import parse_copybook_records
+    from ..layout.copybook import parse_copybook_records
     from ..models.data_items import CobolDataItem
 
     # A ``:TAG:``-named item's real name only exists once a COPY ... REPLACING

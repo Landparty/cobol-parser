@@ -409,7 +409,7 @@ def test_scan_with_copybooks_honours_debug_lines(copy_program) -> None:
 
 
 def test_program_layout_index_takes_debug_lines(copy_program) -> None:
-    from cobolparser.generators.data.program_layout import ProgramLayoutIndex
+    from cobolparser.layout.program import ProgramLayoutIndex
 
     index = ProgramLayoutIndex.from_file(
         str(copy_program), copybook_paths=["cpy"], debug_lines=True

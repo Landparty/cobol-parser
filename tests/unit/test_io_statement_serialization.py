@@ -74,11 +74,6 @@ class TestIOReadStatementSerialization:
         assert stmt.metadata["uses_lock"] is True
         assert stmt.lock_scope == "record"
 
-    def test_set_retry(self):
-        stmt = IOReadStatement(LOC)
-        stmt.set_retry(3)
-        assert stmt.retry_count == 3
-
     def test_set_at_end_clause(self):
         stmt = IOReadStatement(LOC)
         stmt.set_at_end_clause([])
@@ -108,24 +103,6 @@ class TestIOReadStatementSerialization:
         stmt.set_not_invalid_key_clause([inner])
         assert stmt.not_invalid_key_clause == [inner]
         assert inner.parent is stmt
-
-    def test_to_dict_complete(self):
-        stmt = IOReadStatement(LOC)
-        stmt.set_file_name("CUST-FILE")
-        stmt.set_record_name("CUST-REC")
-        stmt.set_into("WS-BUFFER")
-        stmt.set_key("CUST-KEY")
-        stmt.set_access_mode("NEXT")
-        stmt.set_lock_mode(with_lock=True)
-        stmt.set_retry(5)
-        d = stmt.to_dict()
-        assert d["file_name"] == "CUST-FILE"
-        assert d["record_name"] == "CUST-REC"
-        assert d["into_target"] == "WS-BUFFER"
-        assert d["key_name"] == "CUST-KEY"
-        assert d["access_mode"] == "NEXT"
-        assert d["with_lock"] is True
-        assert d["retry_count"] == 5
 
 
 class TestIOWriteStatementSerialization:
@@ -174,23 +151,6 @@ class TestIOWriteStatementSerialization:
         assert stmt.not_invalid_key_clause == [inner]
         assert inner.parent is stmt
 
-    def test_set_retry(self):
-        stmt = IOWriteStatement(LOC)
-        stmt.set_retry(10)
-        assert stmt.retry_count == 10
-
-    def test_set_lock(self):
-        stmt = IOWriteStatement(LOC)
-        stmt.set_lock(True)
-        assert stmt.with_lock is True
-        assert stmt.metadata["uses_lock"] is True
-        assert stmt.lock_scope == "record"
-
-    def test_set_delete(self):
-        stmt = IOWriteStatement(LOC)
-        stmt.set_delete(True)
-        assert stmt.delete_record is True
-
     def test_set_from(self):
         stmt = IOWriteStatement(LOC)
         stmt.set_from("WS-BUFFER")
@@ -203,44 +163,14 @@ class TestIOWriteStatementSerialization:
         assert stmt.record_name == "OUTPUT-REC"
         assert "OUTPUT-REC" in stmt.operands
 
-    def test_to_dict_complete(self):
-        stmt = IOWriteStatement(LOC)
-        stmt.set_record_name("OUTPUT-REC")
-        stmt.set_from("WS-DATA")
-        stmt.set_advancing("AFTER", lines=3)
-        stmt.set_lock(True)
-        stmt.set_retry(2)
-        d = stmt.to_dict()
-        assert d["record_name"] == "OUTPUT-REC"
-        assert d["from_clause"] == "WS-DATA"
-        assert d["advancing_clause"]["type"] == "AFTER"
-        assert d["with_lock"] is True
-        assert d["retry_count"] == 2
-
 
 class TestIOOpenStatementSerialization:
     """Cover IOOpenStatement setters and to_dict()."""
-
-    def test_set_reel_unit_control(self):
-        stmt = IOOpenStatement(LOC)
-        stmt.set_reel_unit_control("reel")
-        assert stmt.reel_unit_control == "REEL"
-        assert stmt.metadata["has_reel_unit"] is True
 
     def test_set_reposition(self):
         stmt = IOOpenStatement(LOC)
         stmt.set_reposition(True)
         assert stmt.with_reposition is True
-
-    def test_to_dict(self):
-        stmt = IOOpenStatement(LOC)
-        stmt.set_open_mode("I-O")
-        stmt.add_file("CUST-FILE")
-        stmt.set_reel_unit_control("unit")
-        d = stmt.to_dict()
-        assert d["open_mode"] == "I-O"
-        assert "CUST-FILE" in d["file_names"]
-        assert d["reel_unit_control"] == "UNIT"
 
 
 class TestIOCloseStatementSerialization:
@@ -319,46 +249,10 @@ class TestIOAcceptStatementSerialization:
         stmt.set_position()
         assert stmt.metadata["has_position"] is False
 
-    def test_set_cursor(self):
-        stmt = IOAcceptStatement(LOC)
-        stmt.set_cursor(True)
-        assert stmt.with_cursor is True
-
-    def test_set_color(self):
-        stmt = IOAcceptStatement(LOC)
-        stmt.set_color("RED")
-        assert stmt.color_attribute == "RED"
-
-    def test_set_beep(self):
-        stmt = IOAcceptStatement(LOC)
-        stmt.set_beep(True)
-        assert stmt.with_beep is True
-
     def test_set_no_echo(self):
         stmt = IOAcceptStatement(LOC)
         stmt.set_no_echo(True)
         assert stmt.with_no_echo is True
-
-    def test_to_dict_complete(self):
-        stmt = IOAcceptStatement(LOC)
-        stmt.set_target("WS-INPUT")
-        stmt.set_from("ENVIRONMENT")
-        stmt.set_environment_name("PATH")
-        stmt.set_position(line=3, column=20)
-        stmt.set_cursor(True)
-        stmt.set_color("BLUE")
-        stmt.set_beep(True)
-        stmt.set_no_echo(True)
-        d = stmt.to_dict()
-        assert d["target"] == "WS-INPUT"
-        assert d["from_source"] == "ENVIRONMENT"
-        assert d["environment_name"] == "PATH"
-        assert d["at_line"] == 3
-        assert d["at_column"] == 20
-        assert d["with_cursor"] is True
-        assert d["color_attribute"] == "BLUE"
-        assert d["with_beep"] is True
-        assert d["with_no_echo"] is True
 
 
 class TestIORewriteStatementSerialization:
@@ -389,24 +283,6 @@ class TestIORewriteStatementSerialization:
         assert stmt.not_invalid_key_clause == [inner]
         assert inner.parent is stmt
 
-    def test_set_lock(self):
-        stmt = IORewriteStatement(LOC)
-        stmt.set_lock(True)
-        assert stmt.with_lock is True
-        assert stmt.metadata["uses_lock"] is True
-
-    def test_to_dict(self):
-        stmt = IORewriteStatement(LOC)
-        stmt.set_file_name("CUST-FILE")
-        stmt.set_record_name("CUST-REC")
-        stmt.set_lock(True)
-        d = stmt.to_dict()
-        assert d["file_name"] == "CUST-FILE"
-        assert d["record_name"] == "CUST-REC"
-        assert d["with_lock"] is True
-        assert d["invalid_key_clause"] == []
-        assert d["not_invalid_key_clause"] == []
-
 
 class TestIODeleteStatementSerialization:
     """Cover IODeleteStatement setters and to_dict()."""
@@ -429,20 +305,6 @@ class TestIODeleteStatementSerialization:
         stmt.set_not_invalid_key_clause([inner])
         assert stmt.not_invalid_key_clause == [inner]
         assert inner.parent is stmt
-
-    def test_set_lock(self):
-        stmt = IODeleteStatement(LOC)
-        stmt.set_lock(True)
-        assert stmt.with_lock is True
-        assert stmt.metadata["uses_lock"] is True
-
-    def test_to_dict(self):
-        stmt = IODeleteStatement(LOC)
-        stmt.set_file_name("CUST-FILE")
-        stmt.set_lock(True)
-        d = stmt.to_dict()
-        assert d["file_name"] == "CUST-FILE"
-        assert d["with_lock"] is True
 
 
 class TestIOStartStatementSerialization:

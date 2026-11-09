@@ -760,22 +760,3 @@ def find_top_level_operators(tokens: list[str], op: str) -> list[int]:
         elif depth == 0 and tok.upper() == op:
             found.append(i)
     return found
-
-
-def find_top_level_operator(tokens: list[str], op: str) -> int | None:
-    """Index of the rightmost ``op`` token outside any parentheses.
-
-    Returns the rightmost match so the resulting tree is left-associative.
-    Operators nested inside parentheses are ignored. Returns ``None`` when
-    no top-level occurrence exists.
-    """
-    depth = 0
-    found: int | None = None
-    for i, tok in enumerate(tokens):
-        if tok == "(":
-            depth += 1
-        elif tok == ")":
-            depth -= 1
-        elif depth == 0 and tok.upper() == op:
-            found = i
-    return found

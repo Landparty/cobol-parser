@@ -268,7 +268,7 @@ def _byte_length(item: CobolDataItem) -> int | None:
     layout walker declines to size).
     """
     try:
-        from ..generators.data.layout_offsets import compute_record_layout
+        from ..layout.offsets import compute_record_layout
 
         layout = compute_record_layout(item)
     except Exception:  # noqa: BLE001 - length is optional, never fatal

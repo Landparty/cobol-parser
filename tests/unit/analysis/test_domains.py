@@ -12,8 +12,8 @@ import pytest
 
 from cobolparser.analysis.constraints import FieldConstraint
 from cobolparser.analysis.domains import Unsatisfiable, Witness, solve
-from cobolparser.generators.data.layout import FieldCategory, FieldSpec
-from cobolparser.generators.data.program_layout import ResolvedField
+from cobolparser.layout.fields import FieldCategory, FieldSpec
+from cobolparser.layout.program import ResolvedField
 from cobolparser.models.ast_base import SourceLocation
 from cobolparser.models.data_items import CobolDataItem
 

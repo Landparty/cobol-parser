@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import pytest
 
-from cobolparser.generators.data.storage import (
+from cobolparser._storage import (
     binary_byte_length,
     packed_byte_length,
     storage_size,

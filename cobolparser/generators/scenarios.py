@@ -48,8 +48,8 @@ from ..analysis.program_flow import (
     FlowEdgeType,
     ProgramFlowReport,
 )
+from ..layout.fields import FieldCategory, FieldSpec
 from .data.bundle import _unique_names
-from .data.layout import FieldCategory, FieldSpec
 
 # Boundary categories the empty-input family cares about -- an "input"
 # boundary is one a program reads *from*.

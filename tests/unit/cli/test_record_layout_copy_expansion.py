@@ -23,8 +23,8 @@ from cobolparser.generators.data.copybook import (
     parse_copybook_records,
 )
 from cobolparser.generators.data.decoding import RecordDecoder
-from cobolparser.generators.data.errors import CopybookLayoutError
-from cobolparser.generators.data.options import DataGeneratorOptions
+from cobolparser.layout.errors import CopybookLayoutError
+from cobolparser.layout.options import DataGeneratorOptions
 
 OUTER = (
     "       01 OUT-REC.\n"

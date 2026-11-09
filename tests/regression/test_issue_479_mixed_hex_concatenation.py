@@ -17,7 +17,7 @@ from cobolparser import ErrorRecoveryMode, parse_cobol
 from cobolparser.generators import CopybookDataGenerator, DataGeneratorOptions
 from cobolparser.generators.data.decoding import RecordDecoder
 from cobolparser.generators.data.encoding import Charset, EncodingOptions
-from cobolparser.generators.data.layout import concatenated_literal_cell
+from cobolparser.layout.fields import concatenated_literal_cell
 from cobolparser.lexer import CobolLexer, TokenType
 
 SOURCE = "\n".join(

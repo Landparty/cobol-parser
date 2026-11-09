@@ -406,7 +406,7 @@ def _cmd_ims_dli(args: argparse.Namespace) -> None:
 
 
 def _cmd_data_items(args: argparse.Namespace) -> None:
-    from ...generators.data.layout_offsets import compute_program_data_items
+    from ...layout.offsets import compute_program_data_items
 
     args._wrap_copybook_fragment = True
     ast, prof = _parse_or_fail(args)

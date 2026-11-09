@@ -124,18 +124,6 @@ class TestRegistryEdgeCases:
         assert registry.get_all_parsers()[0] is parser
         assert registry.get_all_parsers()[1] is parser
 
-    def test_unregister_parser_removes_first_occurrence(self):
-        """Test that unregister removes first occurrence if duplicate registered."""
-        registry = StatementParserRegistry()
-        parser = DisplayStatementParser()
-
-        registry.register(parser)
-        registry.register(parser)
-        assert len(registry) == 2
-
-        registry.unregister(parser)
-        assert len(registry) == 1
-
     def test_register_with_invalid_position_appends(self):
         """Test that invalid position parameter appends parser."""
         registry = StatementParserRegistry()
@@ -278,24 +266,3 @@ class TestRegistryIntegrationScenarios:
             registry.register(parser)
 
         assert len(registry) == 4
-
-    def test_reregister_parser_at_different_position(self):
-        """Test moving parser to different priority position."""
-        registry = StatementParserRegistry()
-        parser1 = DisplayStatementParser()
-        parser2 = MoveStatementParser()
-        parser3 = IfStatementParser()
-
-        # Initial order: D, M, I
-        registry.register(parser1)
-        registry.register(parser2)
-        registry.register(parser3)
-
-        # Remove and re-register at different position
-        registry.unregister(parser3)
-        registry.register(parser3, position=0)  # Move to front
-
-        parsers = registry.get_all_parsers()
-        assert parsers[0] is parser3
-        assert parsers[1] is parser1
-        assert parsers[2] is parser2

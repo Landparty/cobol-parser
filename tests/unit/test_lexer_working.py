@@ -195,18 +195,6 @@ class TestCobolLexerTokenTypes:
 class TestCobolLexerUtilityMethods:
     """Test lexer utility methods."""
 
-    def test_get_tokens_method(self):
-        """Test get_tokens method."""
-        lexer = CobolLexer("       IDENTIFICATION DIVISION.")
-
-        # Should return tokens
-        tokens = lexer.get_tokens()
-        assert len(tokens) > 0
-
-        # Second call should return same result (cached)
-        tokens2 = lexer.get_tokens()
-        assert len(tokens2) == len(tokens)
-
     def test_tokenize_cobol_function(self):
         """Test the tokenize_cobol convenience function."""
         source = "       IDENTIFICATION DIVISION."

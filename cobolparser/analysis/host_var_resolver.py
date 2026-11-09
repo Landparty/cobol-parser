@@ -350,21 +350,3 @@ class HostVariableResolver:
     # ------------------------------------------------------------------
     # Convenience helpers
     # ------------------------------------------------------------------
-
-    def get_symbol_table(self) -> dict[str, CobolDataItem]:
-        """Return the data-item symbol table built during the last :meth:`resolve` call.
-
-        Returns:
-            Mapping of upper-cased data-item name → :class:`CobolDataItem`.
-        """
-        return dict(self._symbol_table)
-
-    def get_column_index(self) -> dict[str, DB2ColumnDefinition]:
-        """Return the DB2 column index built from DECLARE TABLE statements.
-
-        Returns:
-            Mapping of column name, in its DCLGEN host-variable form
-            (``CUST_ID`` -> ``CUST-ID``, see :func:`dclgen_name`) →
-            :class:`DB2ColumnDefinition`.
-        """
-        return dict(self._column_index)

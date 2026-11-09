@@ -60,15 +60,6 @@ def _directive(stmt: Any) -> tuple[str, str | None] | None:
     return condition, (match.group(3).upper() if match.group(3) else None)
 
 
-def whenever_goto_target(stmt: Any) -> str | None:
-    """The procedure a ``WHENEVER ... GO TO`` names, else ``None``.
-
-    ``None`` for every other SQL statement and for the ``CONTINUE`` action.
-    """
-    directive = _directive(stmt)
-    return directive[1] if directive else None
-
-
 def _is_executable(stmt: ExecSQLStatement) -> bool:
     text = " ".join((stmt.sql_text or "").upper().split())
     if text.startswith(_EXECUTABLE_DECLARE_PREFIXES):

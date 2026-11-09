@@ -19,8 +19,8 @@ from cobolparser.generators.data.encoding import (
     EncodingOptions,
     encode_record,
 )
-from cobolparser.generators.data.layout import flatten_record
-from cobolparser.generators.data.options import DataGeneratorOptions
+from cobolparser.layout.fields import flatten_record
+from cobolparser.layout.options import DataGeneratorOptions
 
 COPYBOOK = """       01  CUST-REC.
            05  CUST-ID         PIC 9(6).

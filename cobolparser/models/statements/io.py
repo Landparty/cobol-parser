@@ -35,32 +35,7 @@ class InvalidKeyClauseMixin:
             self.add_child(stmt)  # type: ignore[attr-defined]
 
 
-class LockClauseMixin:
-    """Shared LOCK flag setter for IO statements (REWRITE, DELETE).
-
-    Sets the ``with_lock`` flag and the ``uses_lock`` metadata marker.
-    """
-
-    with_lock: bool
-
-    def set_lock(self, with_lock: bool = True) -> None:
-        """Set the LOCK flag."""
-        self.with_lock = with_lock
-        if with_lock:
-            self.metadata["uses_lock"] = True  # type: ignore[attr-defined]
-
-
-class RetryClauseMixin:
-    """Shared RETRY clause setter for IO statements (READ, WRITE)."""
-
-    retry_count: int | None
-
-    def set_retry(self, count: int) -> None:
-        """Set the RETRY clause count."""
-        self.retry_count = count
-
-
-class IOReadStatement(RetryClauseMixin, InvalidKeyClauseMixin, CobolStatement):
+class IOReadStatement(InvalidKeyClauseMixin, CobolStatement):
     """AST node for READ statements with comprehensive IBM Enterprise COBOL variation support.
 
     Contract: contracts/io-statement-ast.md
@@ -170,7 +145,7 @@ class IOReadStatement(RetryClauseMixin, InvalidKeyClauseMixin, CobolStatement):
         return result
 
 
-class IOWriteStatement(RetryClauseMixin, InvalidKeyClauseMixin, CobolStatement):
+class IOWriteStatement(InvalidKeyClauseMixin, CobolStatement):
     """AST node for WRITE statements with comprehensive IBM Enterprise COBOL variation support.
 
     Contract: contracts/io-statement-ast.md
@@ -252,10 +227,6 @@ class IOWriteStatement(RetryClauseMixin, InvalidKeyClauseMixin, CobolStatement):
         if self.advancing_clause:
             self.metadata["uses_advancing"] = True
 
-    def set_delete(self, delete: bool = True) -> None:
-        """Set the VSAM DELETE flag."""
-        self.delete_record = delete
-
     def set_at_eop_clause(self, statements: list["CobolStatement"]) -> None:
         """Set the AT END-OF-PAGE clause."""
         self.at_eop_clause = statements
@@ -267,13 +238,6 @@ class IOWriteStatement(RetryClauseMixin, InvalidKeyClauseMixin, CobolStatement):
         self.not_at_eop_clause = statements
         for stmt in statements or []:
             self.add_child(stmt)
-
-    def set_lock(self, with_lock: bool = True) -> None:
-        """Set the LOCK flag."""
-        self.with_lock = with_lock
-        if with_lock:
-            self.metadata["uses_lock"] = True
-            self.lock_scope = "record"
 
     def to_dict(self) -> dict[str, Any]:
         """Convert WRITE statement to dictionary representation per contract."""
@@ -367,11 +331,6 @@ class IOOpenStatement(CobolStatement):
     def set_reversed(self, reversed_mode: bool = True) -> None:
         """Record the ``REVERSED`` option (sequential input read backwards)."""
         self.reversed_mode = reversed_mode
-
-    def set_reel_unit_control(self, control: str) -> None:
-        """Set the REEL/UNIT control (contract field)."""
-        self.reel_unit_control = control.upper()
-        self.metadata["has_reel_unit"] = True
 
     def to_dict(self) -> dict[str, Any]:
         """Convert OPEN statement to dictionary representation per contract."""
@@ -514,18 +473,6 @@ class IOAcceptStatement(CobolStatement):
         if line is not None or column is not None:
             self.metadata["has_position"] = True
 
-    def set_cursor(self, with_cursor: bool = True) -> None:
-        """Set the WITH CURSOR flag."""
-        self.with_cursor = with_cursor
-
-    def set_color(self, attribute: str) -> None:
-        """Set the COLOR attribute."""
-        self.color_attribute = attribute
-
-    def set_beep(self, with_beep: bool = True) -> None:
-        """Set the BEEP flag."""
-        self.with_beep = with_beep
-
     def set_no_echo(self, with_no_echo: bool = True) -> None:
         """Set the NO ECHO flag."""
         self.with_no_echo = with_no_echo
@@ -573,7 +520,7 @@ class IOAcceptStatement(CobolStatement):
         return result
 
 
-class IORewriteStatement(InvalidKeyClauseMixin, LockClauseMixin, CobolStatement):
+class IORewriteStatement(InvalidKeyClauseMixin, CobolStatement):
     """IBM Enterprise COBOL REWRITE statement AST node."""
 
     def __init__(self, location: SourceLocation):
@@ -620,7 +567,7 @@ class IORewriteStatement(InvalidKeyClauseMixin, LockClauseMixin, CobolStatement)
         return result
 
 
-class IODeleteStatement(InvalidKeyClauseMixin, LockClauseMixin, CobolStatement):
+class IODeleteStatement(InvalidKeyClauseMixin, CobolStatement):
     """IBM Enterprise COBOL DELETE statement AST node."""
 
     def __init__(self, location: SourceLocation):

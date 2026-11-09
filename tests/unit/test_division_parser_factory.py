@@ -58,19 +58,6 @@ class MockDivisionParser(BaseDivisionParser):
 class TestDivisionParserFactory:
     """Tests for DivisionParserFactory."""
 
-    def test_factory_creation(self):
-        """Factory can be created with empty registry."""
-        factory = DivisionParserFactory()
-        assert len(factory.get_registered_divisions()) == 0
-
-    def test_register_parser(self):
-        """Parser can be registered."""
-        factory = DivisionParserFactory()
-        factory.register_parser(DivisionType.IDENTIFICATION, MockDivisionParser)
-
-        assert len(factory.get_registered_divisions()) == 1
-        assert DivisionType.IDENTIFICATION in factory.get_registered_divisions()
-
     def test_register_parser_invalid_class(self):
         """Registering non-class raises TypeError."""
         factory = DivisionParserFactory()
@@ -181,29 +168,6 @@ class TestDivisionParserFactory:
 
         with pytest.raises(DivisionNotFoundError):
             factory.parse_division(stream)
-
-    def test_reset_instances(self):
-        """Resetting instances clears cached parser instances."""
-        factory = DivisionParserFactory()
-        factory.register_parser(DivisionType.IDENTIFICATION, MockDivisionParser)
-
-        parser1 = factory.get_parser(DivisionType.IDENTIFICATION)
-        factory.reset_instances()
-        parser2 = factory.get_parser(DivisionType.IDENTIFICATION)
-
-        assert parser1 is not parser2  # Different instances after reset
-
-    def test_clear_registry(self):
-        """Clearing registry removes all parsers."""
-        factory = DivisionParserFactory()
-        factory.register_parser(DivisionType.IDENTIFICATION, MockDivisionParser)
-        factory.register_parser(DivisionType.DATA, MockDivisionParser)
-
-        assert len(factory.get_registered_divisions()) == 2
-
-        factory.clear_registry()
-
-        assert len(factory.get_registered_divisions()) == 0
 
 
 class TestBaseDivisionParser:

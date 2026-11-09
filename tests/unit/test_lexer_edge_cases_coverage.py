@@ -61,22 +61,6 @@ class TestReadNumericLiteralScientific:
 class TestUnterminatedStringHandling:
     """Cover unterminated string handling via direct method calls."""
 
-    def test_read_string_from_text_unterminated_short(self):
-        """Short unterminated strings produce errors via read_string_from_text."""
-        lexer = CobolLexer("", free_form=True)
-        tok, pos = lexer.read_string_from_text("'X", 0, 0, 0)
-        assert tok.type == TokenType.STRING_LITERAL
-        assert len(lexer.errors) >= 1
-
-    def test_read_string_from_text_unterminated_long(self):
-        """Longer unterminated strings are permissive (multi-line compat)."""
-        lexer = CobolLexer("", free_form=True)
-        tok, pos = lexer.read_string_from_text(
-            "'THIS IS A LONG STRING VALUE WITHOUT CLOSING", 0, 0, 0
-        )
-        assert tok.type == TokenType.STRING_LITERAL
-        assert tok.value == "THIS IS A LONG STRING VALUE WITHOUT CLOSING"
-
     def test_try_single_line_string_unterminated(self):
         """_try_single_line_string returns unterminated flag."""
         lexer = CobolLexer("", free_form=True)

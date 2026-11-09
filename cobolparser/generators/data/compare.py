@@ -46,9 +46,9 @@ from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
+from ...layout.errors import CopybookLayoutError
+from ...layout.fields import FieldCategory
 from .decoding import DecodedField, DecodedRecord, DecodeResult, RecordDecoder
-from .errors import CopybookLayoutError
-from .layout import FieldCategory
 from .views import RecordView
 
 DifferenceKind = Literal["changed", "missing", "extra"]

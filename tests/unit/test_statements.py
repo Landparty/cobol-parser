@@ -1031,32 +1031,6 @@ class TestCallStatement:
         assert call_stmt.is_dynamic
         assert call_stmt.possible_values == []  # Empty until analyzed
 
-    def test_add_possible_value(self):
-        """Test adding a possible value to a dynamic CALL."""
-        location = SourceLocation(1, 1)
-        call_stmt = CallStatement(location)
-
-        call_stmt.set_called_program("WS-PROG", is_dynamic=True)
-        call_stmt.add_possible_value("PROG1")
-        call_stmt.add_possible_value("PROG2")
-
-        assert len(call_stmt.possible_values) == 2
-        assert "PROG1" in call_stmt.possible_values
-        assert "PROG2" in call_stmt.possible_values
-
-    def test_add_possible_value_no_duplicates(self):
-        """Test that adding duplicate values doesn't create duplicates."""
-        location = SourceLocation(1, 1)
-        call_stmt = CallStatement(location)
-
-        call_stmt.set_called_program("WS-PROG", is_dynamic=True)
-        call_stmt.add_possible_value("PROG1")
-        call_stmt.add_possible_value("PROG1")  # Duplicate
-        call_stmt.add_possible_value("PROG2")
-
-        assert len(call_stmt.possible_values) == 2
-        assert call_stmt.possible_values.count("PROG1") == 1
-
     def test_set_possible_values(self):
         """Test setting all possible values at once."""
         location = SourceLocation(1, 1)
@@ -1069,40 +1043,6 @@ class TestCallStatement:
         assert "PROG-A" in call_stmt.possible_values
         assert "PROG-B" in call_stmt.possible_values
         assert "PROG-C" in call_stmt.possible_values
-
-    def test_possible_values_returns_copy(self):
-        """Test that possible_values property returns a copy."""
-        location = SourceLocation(1, 1)
-        call_stmt = CallStatement(location)
-
-        call_stmt.set_called_program("WS-PROG", is_dynamic=True)
-        call_stmt.add_possible_value("PROG1")
-
-        # Get values and modify
-        values = call_stmt.possible_values
-        values.append("MODIFIED")
-
-        # Verify original is not affected
-        assert "MODIFIED" not in call_stmt.possible_values
-        assert len(call_stmt.possible_values) == 1
-
-    def test_to_dict_includes_dynamic_fields(self):
-        """Test that to_dict includes is_dynamic and possible_values."""
-        location = SourceLocation(1, 1)
-        call_stmt = CallStatement(location)
-
-        call_stmt.set_called_program("WS-PROG", is_dynamic=True)
-        call_stmt.add_possible_value("PROG1")
-        call_stmt.add_possible_value("PROG2")
-
-        result = call_stmt.to_dict()
-
-        assert "is_dynamic" in result
-        assert "possible_values" in result
-        assert result["is_dynamic"]
-        assert len(result["possible_values"]) == 2
-        assert "PROG1" in result["possible_values"]
-        assert "PROG2" in result["possible_values"]
 
     def test_to_dict_static_call(self):
         """Test to_dict for static CALL statement."""
@@ -1787,82 +1727,6 @@ class TestFunctionCall:
         assert len(func_call.children) == 1
         assert arith_expr in func_call.children
 
-    def test_set_function_type_intrinsic(self):
-        """Test setting function type to INTRINSIC."""
-        location = SourceLocation(1, 1)
-        func_call = FunctionCall("DATE", location)
-
-        func_call.set_function_type("INTRINSIC")
-
-        assert func_call.function_type == "INTRINSIC"
-
-    def test_set_function_type_user_defined(self):
-        """Test setting function type to USER_DEFINED."""
-        location = SourceLocation(1, 1)
-        func_call = FunctionCall("MY-CUSTOM-FUNC", location)
-
-        func_call.set_function_type("USER_DEFINED")
-
-        assert func_call.function_type == "USER_DEFINED"
-
-    def test_function_call_to_dict_simple(self):
-        """Test FunctionCall to_dict with simple arguments."""
-        location = SourceLocation(115, 28)
-        func_call = FunctionCall("UPPER-CASE", location)
-
-        func_call.add_argument("WS-INPUT-TEXT")
-        func_call.set_function_type("INTRINSIC")
-
-        result = func_call.to_dict()
-
-        # Check base expression properties
-        assert result["node_type"] == "Expression"
-        assert result["expression_type"] == "FUNCTION"
-
-        # Check function-specific properties
-        assert result["function_name"] == "UPPER-CASE"
-        assert result["function_type"] == "INTRINSIC"
-        assert result["arguments"] == ["WS-INPUT-TEXT"]
-
-    def test_function_call_to_dict_expression_arguments(self):
-        """Test FunctionCall to_dict with expression arguments."""
-        location = SourceLocation(1, 1)
-        func_call = FunctionCall("CALC-DISTANCE", location)
-
-        # Add arithmetic expression argument
-        expr1 = ArithmeticExpression("-", SourceLocation(1, 10))
-        expr1.set_left_operand("X2")
-        expr1.set_right_operand("X1")
-
-        # Add another arithmetic expression
-        expr2 = ArithmeticExpression("-", SourceLocation(1, 20))
-        expr2.set_left_operand("Y2")
-        expr2.set_right_operand("Y1")
-
-        func_call.add_argument(expr1)
-        func_call.add_argument(expr2)
-        func_call.set_function_type("USER_DEFINED")
-
-        result = func_call.to_dict()
-
-        assert result["function_name"] == "CALC-DISTANCE"
-        assert result["function_type"] == "USER_DEFINED"
-        assert len(result["arguments"]) == 2
-
-        # Check first expression argument
-        arg1 = result["arguments"][0]
-        assert isinstance(arg1, dict)
-        assert arg1["operator"] == "-"
-        assert arg1["left_operand"] == "X2"
-        assert arg1["right_operand"] == "X1"
-
-        # Check second expression argument
-        arg2 = result["arguments"][1]
-        assert isinstance(arg2, dict)
-        assert arg2["operator"] == "-"
-        assert arg2["left_operand"] == "Y2"
-        assert arg2["right_operand"] == "Y1"
-
     def test_function_call_to_dict_mixed_arguments(self):
         """Test FunctionCall to_dict with mixed argument types."""
         location = SourceLocation(1, 1)
@@ -1896,28 +1760,6 @@ class TestFunctionCall:
 
         assert result["function_name"] == "CURRENT-DATE"
         assert result["arguments"] == []
-
-    def test_nested_function_calls(self):
-        """Test nested FunctionCall as arguments."""
-        location = SourceLocation(1, 1)
-        outer_func = FunctionCall("LENGTH", location)
-
-        # Create inner function call
-        inner_func = FunctionCall("TRIM", SourceLocation(1, 10))
-        inner_func.add_argument("WS-INPUT-STRING")
-        inner_func.set_function_type("INTRINSIC")
-
-        # Use inner function as argument to outer function
-        outer_func.add_argument(inner_func)
-
-        result = outer_func.to_dict()
-
-        assert result["function_name"] == "LENGTH"
-        assert len(result["arguments"]) == 1
-
-        inner_result = result["arguments"][0]
-        assert inner_result["function_name"] == "TRIM"
-        assert inner_result["arguments"] == ["WS-INPUT-STRING"]
 
 
 class TestEdgeCasesAndErrorConditions:

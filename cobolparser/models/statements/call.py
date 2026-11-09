@@ -71,11 +71,6 @@ class CallStatement(CobolStatement):
         """Get possible values for dynamic call target."""
         return list(self._possible_values)
 
-    def add_possible_value(self, value: str) -> None:
-        """Add a possible value for dynamic call."""
-        if value not in self._possible_values:
-            self._possible_values.append(value)
-
     def set_possible_values(self, values: list[str]) -> None:
         """Set all possible values."""
         # Deduplicate and sort: a set's iteration order varies per process

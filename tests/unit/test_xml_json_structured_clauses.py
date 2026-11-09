@@ -291,8 +291,8 @@ def test_json_converting_does_not_swallow_a_following_json_statement():
 
 def test_gen_fixtures_counts_no_call_inside_json_exception_handler():
     from cobolparser.analysis.boundary_inventory import BoundaryInventoryAnalyzer
-    from cobolparser.generators.data.program_layout import ProgramLayoutIndex
     from cobolparser.generators.program_fixtures import ProgramFixtureGenerator
+    from cobolparser.layout.program import ProgramLayoutIndex
 
     result = parse_cobol(
         _converting_program("JSON PARSE WS-J INTO WS-REC", "FROM "),

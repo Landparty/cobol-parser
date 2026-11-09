@@ -191,23 +191,8 @@ def _code_text(source: str, *, blank_literals: bool, fixed_format: bool) -> str:
     return "\n".join(out)
 
 
-def _declared_currency_symbols(
-    source: str, fixed_format: bool = False
-) -> frozenset[str]:
-    """The PICTURE currency symbols a SPECIAL-NAMES paragraph declares.
-
-    A clause without ``PICTURE SYMBOL`` declares its sign as the symbol, so
-    only a one-character sign counts there. Digits and the letters the
-    PICTURE grammar already uses are left out; any other letter counts,
-    though it lexes as (part of) a word. A clause inside a comment declares
-    nothing.
-    """
-    return frozenset(declared_currency_signs(source, fixed_format))
-
-
 def declared_currency_signs(source: str, fixed_format: bool = False) -> dict[str, str]:
-    """Each declared PICTURE currency symbol (as
-    :func:`_declared_currency_symbols` picks them) mapped to the currency
+    """Each declared PICTURE currency symbol mapped to the currency
     string it stands for: ``CURRENCY SIGN IS 'EUR' WITH PICTURE SYMBOL '#'``
     is ``{"#": "EUR"}``, and ``CURRENCY SIGN IS '#'`` is ``{"#": "#"}``.
     What an edited picture's currency positions display."""
@@ -1587,8 +1572,7 @@ class CobolLexer:
 
         location = SourceLocation(line_num + 1, start_col + start_pos, 1)
         # Use the same fast single-line reader as the plain-string path so the
-        # error-suppression behaviour matches and we avoid the slower
-        # ``read_string_from_text``.
+        # error-suppression behaviour matches.
         token, new_pos, unterminated = self._try_single_line_string(
             text, quote_pos, line_num, start_col
         )
@@ -1639,62 +1623,6 @@ class CobolLexer:
                         "odd number of hex digits (each byte needs two)"
                     )
         return token, new_pos
-
-    def read_string_from_text(
-        self, text: str, start_pos: int, line_num: int, start_col: int
-    ) -> tuple[Token, int]:
-        """Read string literal from text starting at position."""
-        quote_char = text[start_pos]
-        location = SourceLocation(line_num + 1, start_col + start_pos, 1)
-        value = ""
-        pos = start_pos + 1
-
-        while pos < len(text):
-            char = text[pos]
-            if char == quote_char:
-                pos += 1
-                # Check for doubled quote
-                if pos < len(text) and text[pos] == quote_char:
-                    value += quote_char
-                    pos += 1
-                else:
-                    break
-            else:
-                value += char
-                pos += 1
-
-        # Check if string was unterminated
-        if pos >= len(text) and (pos == start_pos + 1 or text[pos - 1] != quote_char):
-            # For COBOL multi-line strings, be more permissive only in specific contexts
-            # Check if this could be a legitimate multi-line continuation
-            current_line = self.lines[line_num] if line_num < len(self.lines) else ""
-            is_multi_line_context = (
-                not self.free_form
-                and len(current_line) > 6
-                and current_line[_FF_INDICATOR] == "-"  # Continuation line
-                and line_num > 0  # Not the first line
-                and (
-                    "VALUE"
-                    in self.lines[line_num - 1].upper()  # Previous line has VALUE
-                    or any(
-                        '"' in line or "'" in line
-                        for line in self.lines[max(0, line_num - 2) : line_num]
-                    )
-                )  # Recent quotes
-            )
-
-            if is_multi_line_context:
-                # Be permissive: this is a legitimate fixed-format continuation line
-                pass
-            else:
-                # Emit error for truly unterminated strings
-                self.errors.append(
-                    LexerError(
-                        "Unterminated string literal", location, quote_char + value
-                    )
-                )
-
-        return Token(TokenType.STRING_LITERAL, value, location, quote=quote_char), pos
 
     def _try_single_line_string(
         self, text: str, start_pos: int, line_num: int, start_col: int
@@ -2747,12 +2675,6 @@ class CobolLexer:
         more = len(unique) - self._STRAY_LINES_SHOWN
         suffix = f" and {more} more" if more > 0 else ""
         return f"line{'s' if len(unique) != 1 else ''} {shown}{suffix}"
-
-    def get_tokens(self) -> list[Token]:
-        """Get the list of tokens (tokenize if not already done)."""
-        if not self.tokens:
-            self.tokenize()
-        return self.tokens
 
     def get_errors(self) -> list[LexerError]:
         """Get lexer errors encountered during tokenization."""

@@ -31,7 +31,7 @@ from cobolparser.generators import (
     RecordDecoder,
 )
 from cobolparser.generators.data.copybook import parse_copybook_records
-from cobolparser.generators.data.layout import expand_condition_values, flatten_record
+from cobolparser.layout.fields import expand_condition_values, flatten_record
 from cobolparser.models.ast_base import SourceLocation
 from cobolparser.models.data_items import ConditionNameItem, PictureClause
 

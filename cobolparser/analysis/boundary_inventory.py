@@ -11,7 +11,7 @@ mockymock -> cobol-parser, never the reverse; see that module's own
 docstring in the sibling repo).
 
 Each boundary's record/field layout is resolved through a
-:class:`~cobolparser.generators.data.program_layout.ProgramLayoutIndex`
+:class:`~cobolparser.layout.program.ProgramLayoutIndex`
 built for the same program (Phase 1).
 """
 
@@ -76,7 +76,7 @@ if TYPE_CHECKING:
     # BoundaryInventoryAnalyzer -- so a top-level import here would be
     # circular. Every use below is a type annotation only; `from __future__
     # import annotations` keeps it a lazy string at runtime.
-    from ..generators.data.program_layout import ProgramLayoutIndex
+    from ..layout.program import ProgramLayoutIndex
 
 # -- statement-walk discipline ------------------------------------------------
 #

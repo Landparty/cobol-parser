@@ -58,7 +58,7 @@ from cobolparser import CobolLexer, Token, TokenType, tokenize_cobol, LexerError
 
 lexer = CobolLexer(source, filename="<string>",
                    dialect=DialectType.IBM_ENTERPRISE, free_form=False)
-tokens: list[Token] = lexer.tokenize()     # also lexer.get_tokens()
+tokens: list[Token] = lexer.tokenize()
 lexer.get_errors() / lexer.has_errors()    # list[LexerError]
 lexer.get_warnings() / lexer.has_warnings()
 lexer.decimal_point_is_comma               # bool, from SPECIAL-NAMES
@@ -142,7 +142,7 @@ re-emitted and read back:
 | `QUOTED_LITERAL_RE` | a quoted literal inside operand/condition text, typed prefix included only when no word character precedes it (so `WS-X"..."` keeps its `X`) -- used by `unused_variables` |
 
 Any consumer reading a re-emitted literal back must use `unquote_literal`,
-not strip the delimiters: `generators/data/layout.py` (VALUE clauses),
+not strip the delimiters: `layout/fields.py` (VALUE clauses),
 `analysis/constraints.py` (branch witnesses) and `analysis/const_fold.py`
 (MOVE sources) all do. Delimiter-only stripping makes `VALUE "A""B"` generate
 `A""B` and `MOVE '"'` fold to two quote characters. Pinned by
@@ -164,7 +164,7 @@ X"41"` -> `values == ['X"41"']`). Pinned by
 ## DECIMAL-POINT IS COMMA
 
 `declares_decimal_point_comma(source, fixed_format)` scans the whole source up
-front (the same way `_declared_currency_symbols` does) for `DECIMAL-POINT [IS]
+front (the same way `declared_currency_signs` does) for `DECIMAL-POINT [IS]
 COMMA`, over `_code_text()` -- the source with `*>` comments, fixed-format
 comment lines and literal text blanked, so a commented-out or quoted clause
 declares nothing;
@@ -244,7 +244,7 @@ items and the operand of `SET ptr TO NULL` / `IF ptr = NULL`; lexed as
 `IDENTIFIER` they would be indistinguishable from a data-name reference. The
 set is one class attribute that `read_word_from_text` consults via `self.`.
 `analysis/move_type_checker.py`,
-`analysis/constraints.py` and `generators/data/values.py` carry their own
+`analysis/constraints.py` and `layout/values.py` carry their own
 `NULL`/`NULLS` lists that must agree with it. Pinned by
 `tests/regression/test_null_pointer_value_clause.py` and
 `tests/unit/test_lexer.py::TestCobolLexerFigurativeConstants::test_null_figurative_constants`.

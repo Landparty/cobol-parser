@@ -16,7 +16,7 @@ from cobolparser.generators import CopybookDataGenerator, DataGeneratorOptions
 from cobolparser.generators.data.decoding import RecordDecoder
 from cobolparser.generators.data.editing import deedit_numeric, edit_numeric
 from cobolparser.generators.data.encoding import EncodingOptions, encoding_caveats
-from cobolparser.generators.data.layout import flatten_record
+from cobolparser.layout.fields import flatten_record
 
 
 def _program(currency: str, fields: str) -> str:

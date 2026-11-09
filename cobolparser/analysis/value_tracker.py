@@ -388,9 +388,9 @@ class DynamicCallAnalyzer:
     def _item_length(item: CobolDataItem) -> int:
         """One occurrence's storage length of an elementary item."""
         # Imported here: the generators package imports the analysis one.
-        from ..generators.data.layout_offsets import _elementary_byte_length
+        from ..layout.offsets import elementary_byte_length
 
-        return _elementary_byte_length(item)
+        return elementary_byte_length(item)
 
     @classmethod
     def _item_size(cls, item: CobolDataItem) -> int | None:
@@ -816,7 +816,7 @@ class DynamicCallAnalyzer:
         if not tracked:
             return {}
         # Imported here: the generators package imports the analysis one.
-        from ..generators.data.layout_offsets import compute_record_layout
+        from ..layout.offsets import compute_record_layout
 
         items: dict[str, list[CobolDataItem]] = {}
         for node in nodes:

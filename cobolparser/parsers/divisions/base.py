@@ -324,32 +324,3 @@ class BaseDivisionParser(IDivisionParser, ABC):
             AST node representing the parsed division
         """
         pass
-
-    def _skip_to_next_section_or_division(self, token_stream: ITokenStream) -> None:
-        """Skip tokens until reaching next section or division.
-
-        Utility method for error recovery: scans forward to find a SECTION keyword
-        or another division keyword, allowing parsing to continue after errors.
-
-        Args:
-            token_stream: Token stream to scan
-        """
-        section_keywords = {
-            "SECTION",
-            "FILE",
-            "WORKING-STORAGE",
-            "LOCAL-STORAGE",
-            "LINKAGE",
-            "IDENTIFICATION",
-            "ENVIRONMENT",
-            "DATA",
-            "PROCEDURE",
-            "CONFIGURATION",
-            "INPUT-OUTPUT",
-        }
-
-        while not token_stream.is_empty():
-            token = token_stream.peek(0)
-            if token and token.value.upper() in section_keywords:
-                break
-            token_stream.consume()

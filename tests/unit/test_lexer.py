@@ -970,20 +970,6 @@ class TestCobolLexerLevelNumbers:
 class TestCobolLexerMethods:
     """Unit tests for lexer utility methods."""
 
-    def test_get_tokens_caches_result(self):
-        """Test that get_tokens caches the tokenization result."""
-        from cobolparser.lexer import CobolLexer
-
-        lexer = CobolLexer("       IDENTIFICATION DIVISION.")
-
-        # First call should tokenize
-        tokens1 = lexer.get_tokens()
-        assert len(tokens1) > 0
-
-        # Second call should return cached result
-        tokens2 = lexer.get_tokens()
-        assert tokens1 is tokens2  # Same object
-
     def test_has_errors_method(self):
         """Test has_errors method."""
         from cobolparser.lexer import CobolLexer

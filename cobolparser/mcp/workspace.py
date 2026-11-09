@@ -784,7 +784,7 @@ class Workspace:
     def _parse(self, path: Path) -> ParsedProgram:
         from .._lines import split_source_lines
         from ..analysis.lint import source_column_offsets
-        from ..generators.data.copybook import (
+        from ..layout.copybook import (
             WRAPPER_HEAD_LINES,
             wrap_copybook_fragment,
         )

@@ -459,10 +459,6 @@ class FunctionCall(CobolExpression):
         if isinstance(argument, CobolExpression):
             self.add_child(argument)
 
-    def set_function_type(self, func_type: str) -> None:
-        """Set the function type (INTRINSIC or USER_DEFINED)."""
-        self.function_type = func_type
-
     def to_dict(self) -> dict[str, Any]:
         """Convert function call to dictionary representation."""
         result = super().to_dict()

@@ -12,7 +12,6 @@ from cobolparser.analysis.const_fold import ConstantFolder
 from cobolparser.analysis.dclgen_check import DclgenChecker
 from cobolparser.analysis.dead_code import DeadCodeAnalyzer
 from cobolparser.analysis.ims_segment_analyzer import IMSSegmentAnalyzer
-from cobolparser.analysis.io_diagnostics import IODiagnosticHelper, IOErrorCode
 from cobolparser.analysis.move_type_checker import MoveTypeChecker
 from cobolparser.analysis.program_flow import FlowEdgeType, ProgramFlowAnalyzer
 from cobolparser.analysis.value_tracker import DynamicCallAnalyzer
@@ -254,16 +253,6 @@ def test_dclgen_not_null_after_type_words_is_not_nullable():
 # ---------------------------------------------------------------------------
 # IODiagnosticHelper
 # ---------------------------------------------------------------------------
-
-
-def test_rewrite_is_valid_on_a_record_sequential_file():
-    assert (
-        IODiagnosticHelper.validate_io_statement_type("REWRITE", "SEQUENTIAL") is None
-    )
-    assert (
-        IODiagnosticHelper.validate_io_statement_type("REWRITE", "LINE SEQUENTIAL")
-        == IOErrorCode.IO_REWRITE_INVALID_ORG
-    )
 
 
 # ---------------------------------------------------------------------------
