@@ -15,7 +15,7 @@ from pathlib import Path
 import pytest
 
 from cobolparser import ErrorRecoveryMode, parse_cobol
-from cobolparser.generators.data.layout_offsets import compute_program_data_items
+from cobolparser.layout.offsets import compute_program_data_items
 
 pytestmark = pytest.mark.integration
 

@@ -1286,7 +1286,7 @@ class TestCalculateSizeRegressions:
         the caller happened to ask.
         """
         from cobolparser import parse_cobol
-        from cobolparser.generators.data.layout_offsets import compute_record_layout
+        from cobolparser.layout.offsets import compute_record_layout
 
         source = """\
        IDENTIFICATION DIVISION.

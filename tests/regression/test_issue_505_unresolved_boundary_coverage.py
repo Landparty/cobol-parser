@@ -10,7 +10,7 @@ from __future__ import annotations
 from cobolparser import ErrorRecoveryMode, parse_cobol
 from cobolparser.analysis.boundary_inventory import BoundaryInventoryAnalyzer
 from cobolparser.generators import ProgramFixtureGenerator
-from cobolparser.generators.data.program_layout import ProgramLayoutIndex
+from cobolparser.layout.program import ProgramLayoutIndex
 
 
 def _program(statements: str) -> str:

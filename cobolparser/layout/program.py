@@ -14,15 +14,15 @@ import re
 from dataclasses import dataclass
 from typing import Any
 
-from ...models.ast_base import SourceLocation
-from ...models.data_items import CobolDataItem, ConditionNameItem
-from ...models.program import CobolProgram, CobolSection
-from ...models.statements.misc import SelectStatement
-from ...parser import parse_cobol
-from ...preprocess import CircularReferenceError, CopybookNotFoundError
-from ...preprocess.copybook_expander import parse_cobol_with_expansion
+from ..models.ast_base import SourceLocation
+from ..models.data_items import CobolDataItem, ConditionNameItem
+from ..models.program import CobolProgram, CobolSection
+from ..models.statements.misc import SelectStatement
+from ..parser import parse_cobol
+from ..preprocess import CircularReferenceError, CopybookNotFoundError
+from ..preprocess.copybook_expander import parse_cobol_with_expansion
 from .errors import ProgramLayoutError
-from .layout import (
+from .fields import (
     FieldCategory,
     FieldSpec,
     _link_odo_counters,

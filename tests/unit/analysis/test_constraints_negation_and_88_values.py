@@ -26,7 +26,7 @@ from cobolparser.analysis.boundary_inventory import BoundaryInventoryAnalyzer
 from cobolparser.analysis.constraints import ConstraintExtractor
 from cobolparser.analysis.domains import Witness, solve
 from cobolparser.generators import ProgramLayoutIndex
-from cobolparser.generators.data.layout import condition_values_exhaustive
+from cobolparser.layout.fields import condition_values_exhaustive
 
 _HEAD = """\
        IDENTIFICATION DIVISION.

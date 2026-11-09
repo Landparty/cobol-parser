@@ -24,7 +24,7 @@ from cobolparser.generators.data.copybook import (
 )
 from cobolparser.generators.data.decoding import RecordDecoder
 from cobolparser.generators.data.encoding import Charset, EncodingOptions
-from cobolparser.generators.data.options import DataGeneratorOptions
+from cobolparser.layout.options import DataGeneratorOptions
 
 PROGRAM = """\
        IDENTIFICATION DIVISION.

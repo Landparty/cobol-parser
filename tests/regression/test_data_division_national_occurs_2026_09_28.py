@@ -24,7 +24,7 @@ from cobolparser.generators.data import (
     EncodingOptions,
     RecordDecoder,
 )
-from cobolparser.generators.data.layout_offsets import compute_program_data_items
+from cobolparser.layout.offsets import compute_program_data_items
 
 HEADER = """\
        IDENTIFICATION DIVISION.

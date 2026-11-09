@@ -19,7 +19,7 @@ from cobolparser.generators.data.encoding import (
     encode_field,
     record_length,
 )
-from cobolparser.generators.data.options import DataGeneratorOptions
+from cobolparser.layout.options import DataGeneratorOptions
 from cobolparser.generators.data.views import build_record_views
 
 FLAT = """

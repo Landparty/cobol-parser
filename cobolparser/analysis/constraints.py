@@ -25,7 +25,7 @@ from dataclasses import field as dataclass_field
 from typing import TYPE_CHECKING, Any
 
 from .._literals import is_quoted_literal, typed_literal_content, unquote_literal
-from ..generators.data.layout import (
+from ..layout.fields import (
     FieldCategory,
     all_literal_operand,
     condition_values_exhaustive,
@@ -74,7 +74,7 @@ if TYPE_CHECKING:
     # boundary_inventory.py's own ProgramLayoutIndex import. Every use below
     # is a type annotation only; `from __future__ import annotations` keeps
     # it a lazy string at runtime.
-    from ..generators.data.program_layout import ProgramLayoutIndex, ResolvedField
+    from ..layout.program import ProgramLayoutIndex, ResolvedField
 
 # -- statement-walk discipline ------------------------------------------------
 #

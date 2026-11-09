@@ -42,14 +42,14 @@ from functools import partial
 from typing import Any
 
 from ...models.data_items import CobolDataItem
-from .layout import (
+from ...layout.fields import (
     FieldSpec,
     HiddenCounter,
     flatten_overlay_view,
     flatten_record,
     occurs_expansion_caveats,
 )
-from .options import DataGeneratorOptions
+from ...layout.options import DataGeneratorOptions
 
 #: Levels that name no storage of their own: 66 RENAMES and 88 condition
 #: names.  ``_flatten_into`` skips both, and the overlay scan has to skip
@@ -561,7 +561,7 @@ def _align_columns(
     own view, and ``compare --view ... --key AMT`` would stop finding the
     key.  The overlay's own fields keep their short name unless that is
     taken, then the qualified path, then a numeric suffix -- the same
-    fallbacks :func:`.layout._assign_columns` uses.
+    fallbacks :func:`cobolparser.layout.fields.assign_columns` uses.
     """
     keyed = [(spec, base_columns.get(_column_key(spec))) for spec in specs]
     used = {column for _, column in keyed if column is not None}

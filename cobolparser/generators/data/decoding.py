@@ -76,10 +76,10 @@ from .encoding import (
     RecordFormat,
     hex_literal_cell_for,
 )
-from .errors import CopybookLayoutError
-from .layout import FieldCategory, FieldSpec, HiddenCounter, VaryingLength
-from .options import DataGeneratorOptions
-from .storage import (
+from ...layout.errors import CopybookLayoutError
+from ...layout.fields import FieldCategory, FieldSpec, HiddenCounter, VaryingLength
+from ...layout.options import DataGeneratorOptions
+from ..._storage import (
     BINARY_NATIVE_USAGES,
     BINARY_USAGES,
     FLOAT_USAGES,

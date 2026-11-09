@@ -11,8 +11,8 @@ from cobolparser import UnusedVariableAnalyzer, parse_cobol
 from cobolparser.analysis.boundary_inventory import BoundaryInventoryAnalyzer
 from cobolparser.analysis.constraints import ConstraintExtractor
 from cobolparser.analysis.domains import Unsatisfiable, Witness, solve
-from cobolparser.generators.data.options import DataGeneratorOptions
-from cobolparser.generators.data.program_layout import ProgramLayoutIndex
+from cobolparser.layout.options import DataGeneratorOptions
+from cobolparser.layout.program import ProgramLayoutIndex
 from cobolparser.generators.data.views import build_record_views
 
 # ---------------------------------------------------------------------------

@@ -15,7 +15,7 @@ from cobolparser import parse_cobol
 from cobolparser.analysis import HostVariableResolver
 from cobolparser.analysis.field_lineage import FieldFlowAnalyzer
 from cobolparser.generators import CopybookDataGenerator, DataGeneratorOptions
-from cobolparser.generators.data.layout_offsets import compute_program_data_items
+from cobolparser.layout.offsets import compute_program_data_items
 from cobolparser.models.data_items import CobolDataItem
 
 COPYBOOK = """\

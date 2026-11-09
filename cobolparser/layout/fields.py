@@ -9,14 +9,14 @@ from decimal import Decimal, InvalidOperation
 from enum import StrEnum
 from typing import Any
 
-from ..._literals import typed_literal_content, unquote_literal
-from ...models.data_items import (
+from .._literals import typed_literal_content, unquote_literal
+from ..models.data_items import (
     CobolDataItem,
     ConditionNameItem,
     PictureClause,
 )
 from .options import DataGeneratorOptions
-from .storage import FLOAT_USAGES, storage_size
+from .._storage import FLOAT_USAGES, storage_size
 
 
 class FieldCategory(StrEnum):
@@ -1117,7 +1117,7 @@ def flatten_record(
         ignore_own_redefines=ignore_root_redefines,
     )
     _link_odo_counters(specs)
-    _assign_columns(specs, opts)
+    assign_columns(specs, opts)
     return specs
 
 
@@ -1525,7 +1525,7 @@ def occurs_expansion_caveats(
     return caveats
 
 
-def _assign_columns(specs: list[FieldSpec], opts: DataGeneratorOptions) -> None:
+def assign_columns(specs: list[FieldSpec], opts: DataGeneratorOptions) -> None:
     """Give every spec a unique CSV header.
 
     COBOL permits the same data name in different groups (disambiguated by

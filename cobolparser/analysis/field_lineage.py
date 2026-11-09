@@ -876,7 +876,7 @@ class FieldFlowAnalyzer:
         return blocks
 
     def _index_items(self, ast: CobolProgram) -> None:
-        from ..generators.data.layout_offsets import compute_program_data_items
+        from ..layout.offsets import compute_program_data_items
 
         # One block per 01/77 record: the layout emits the record root first,
         # then its subordinates with every group *after* its own children.
@@ -1302,7 +1302,7 @@ class FieldFlowAnalyzer:
                     keys.append(alternate["key"])
             self._record_keys[file_name] = [str(k) for k in keys]
         try:
-            from ..generators.data.program_layout import ProgramLayoutIndex
+            from ..layout.program import ProgramLayoutIndex
 
             index = ProgramLayoutIndex.build(ast)
         except Exception as exc:  # pragma: no cover - defensive

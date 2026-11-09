@@ -8,7 +8,7 @@ warning that did not mention the lost values).
 from __future__ import annotations
 
 from cobolparser import parse_cobol
-from cobolparser.generators.data.layout import expand_condition_values
+from cobolparser.layout.fields import expand_condition_values
 from cobolparser.models.data_items import ConditionNameItem
 
 

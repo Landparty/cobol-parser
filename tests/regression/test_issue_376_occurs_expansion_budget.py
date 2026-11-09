@@ -18,9 +18,9 @@ from cobolparser.generators import (
     ProgramFixtureGenerator,
     ProgramLayoutIndex,
 )
-from cobolparser.generators.data import layout
+from cobolparser.layout import fields as layout
 from cobolparser.generators.data.copybook import parse_copybook_records
-from cobolparser.generators.data.layout import (
+from cobolparser.layout.fields import (
     _MAX_EXPANDED_OCCURRENCES,
     flatten_record,
     occurs_expansion_caveats,

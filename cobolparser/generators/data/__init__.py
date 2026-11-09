@@ -137,8 +137,8 @@ from .encoding import (
     record_length,
     row_record_length,
 )
-from .errors import CopybookLayoutError, ProgramLayoutError
-from .layout import (
+from ...layout.errors import CopybookLayoutError, ProgramLayoutError
+from ...layout.fields import (
     FieldCategory,
     FieldSpec,
     OdoControl,
@@ -148,10 +148,10 @@ from .layout import (
     present_indexes,
     unresolved_odo_counters,
 )
-from .options import DataGeneratorOptions
-from .program_layout import FileFacts, ProgramLayoutIndex, ResolvedField
-from .storage import binary_byte_length, packed_byte_length, storage_size
-from .values import ValueFactory
+from ...layout.options import DataGeneratorOptions
+from ...layout.program import FileFacts, ProgramLayoutIndex, ResolvedField
+from ..._storage import binary_byte_length, packed_byte_length, storage_size
+from ...layout.values import ValueFactory
 from .views import PlacedField, RecordView, RecordViews, build_record_views
 
 __all__ = [

@@ -21,7 +21,7 @@ from cobolparser import parse_cobol
 from cobolparser.analysis.boundary_inventory import BoundaryInventoryAnalyzer
 from cobolparser.analysis.constraints import ConstraintExtractor, FieldConstraint
 from cobolparser.generators import ProgramFixtureGenerator, ProgramLayoutIndex
-from cobolparser.generators.data.options import DataGeneratorOptions
+from cobolparser.layout.options import DataGeneratorOptions
 from cobolparser.generators.verification import satisfies
 
 NESTED_SOURCE = """\
@@ -355,8 +355,8 @@ class TestSatisfies:
     def test_numeric_class_on_alphanumeric_field_needs_every_position(self):
         """ "00000000" in a PIC X(10) is padded with two spaces: NOT
         NUMERIC, so a THEN arm seeded with it must not read as verified."""
-        from cobolparser.generators.data.layout import FieldCategory, FieldSpec
-        from cobolparser.generators.data.program_layout import ResolvedField
+        from cobolparser.layout.fields import FieldCategory, FieldSpec
+        from cobolparser.layout.program import ResolvedField
         from cobolparser.models.ast_base import SourceLocation
         from cobolparser.models.data_items import CobolDataItem
 

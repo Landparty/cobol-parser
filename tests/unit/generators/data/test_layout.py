@@ -1,12 +1,12 @@
 from __future__ import annotations
 
 from cobolparser.generators.data.copybook import parse_copybook_records
-from cobolparser.generators.data.layout import (
+from cobolparser.layout.fields import (
     condition_ranges,
     expand_condition_values,
     flatten_record,
 )
-from cobolparser.generators.data.options import DataGeneratorOptions
+from cobolparser.layout.options import DataGeneratorOptions
 from cobolparser.models.ast_base import SourceLocation
 from cobolparser.models.data_items import PictureClause
 

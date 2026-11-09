@@ -14,7 +14,7 @@ from pathlib import Path
 from cobolparser import parse_cobol
 from cobolparser.analysis.business_rules import BusinessRuleExtractor
 from cobolparser.analysis.xref import XrefAnalyzer, is_special_register
-from cobolparser.generators.data.layout_offsets import compute_program_data_items
+from cobolparser.layout.offsets import compute_program_data_items
 
 ENTERPRISE = Path(__file__).resolve().parents[1] / "samples" / "enterprise"
 

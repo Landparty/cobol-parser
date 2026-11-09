@@ -416,7 +416,7 @@ class _OffsetLookup:
         path[-1] = root.name
         layout = self._layouts.get(id(root))
         if layout is None:
-            from ..generators.data.layout_offsets import compute_record_layout
+            from ..layout.offsets import compute_record_layout
 
             layout = {}
             try:

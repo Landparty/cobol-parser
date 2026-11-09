@@ -50,8 +50,8 @@ from decimal import ROUND_DOWN, Context, Decimal, InvalidOperation
 from enum import StrEnum
 
 from .editing import edit_numeric, is_float_picture
-from .errors import CopybookLayoutError
-from .layout import (
+from ...layout.errors import CopybookLayoutError
+from ...layout.fields import (
     FieldCategory,
     FieldSpec,
     LiteralCell,
@@ -62,7 +62,7 @@ from .layout import (
     unresolved_odo_counters,
     value_clause_hex_bytes,
 )
-from .storage import (
+from ..._storage import (
     BINARY_NATIVE_USAGES,
     BINARY_USAGES,
     FIXED_SIZE_USAGES,

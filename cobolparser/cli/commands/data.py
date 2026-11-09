@@ -229,7 +229,7 @@ def _encoding_options(args: argparse.Namespace) -> Any:
 
 
 def _cmd_gen_data(args: argparse.Namespace) -> None:
-    from ...generators.copybook_data import (
+    from ...generators.data import (
         CopybookDataGenerator,
         CopybookLayoutError,
         DataGeneratorOptions,
@@ -604,7 +604,7 @@ def _cmd_decode(args: argparse.Namespace) -> None:
         RecordDecodingError,
         decoded_hex_dump,
     )
-    from ...generators.data.errors import CopybookLayoutError
+    from ...layout.errors import CopybookLayoutError
 
     # Checked here rather than left to the decoder: a negative --record-length
     # surfaced as "the layout is zero bytes long", --record-length 0 was
@@ -801,7 +801,7 @@ def _compare_fail(message: str) -> NoReturn:
 def _cmd_compare(args: argparse.Namespace) -> None:
     from ...generators.data.compare import CompareError, compare_files
     from ...generators.data.decoding import RecordDecoder, RecordDecodingError
-    from ...generators.data.errors import CopybookLayoutError
+    from ...layout.errors import CopybookLayoutError
 
     if args.max_differences is not None and args.max_differences < 0:
         _compare_fail("--max-differences cannot be negative")
@@ -955,7 +955,7 @@ def _verification_reasons(verification: dict[str, Any]) -> list[str]:
 
 
 def _cmd_gen_fixtures(args: argparse.Namespace) -> None:
-    from ...generators.data.errors import ProgramLayoutError
+    from ...layout.errors import ProgramLayoutError
     from ...generators.program_fixtures import ProgramFixtureGenerator
 
     generator = ProgramFixtureGenerator()
@@ -992,7 +992,7 @@ def _cmd_gen_fixtures(args: argparse.Namespace) -> None:
         )
         return
 
-    from ...generators.data.options import DataGeneratorOptions
+    from ...layout.options import DataGeneratorOptions
 
     try:
         options = DataGeneratorOptions(rows=args.rows, max_occurs=args.max_occurs)

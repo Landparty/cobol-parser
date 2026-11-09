@@ -14,7 +14,7 @@ from __future__ import annotations
 from cobolparser import parse_cobol
 from cobolparser.analysis.boundary_inventory import BoundaryInventoryAnalyzer
 from cobolparser.generators import ProgramFixtureGenerator, ProgramLayoutIndex
-from cobolparser.generators.data.options import DataGeneratorOptions
+from cobolparser.layout.options import DataGeneratorOptions
 from cobolparser.generators.scenarios import PlannedScenario
 
 _SOURCE = """\

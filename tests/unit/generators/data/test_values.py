@@ -1,4 +1,4 @@
-"""Unit tests for ValueFactory (cobolparser.generators.data.values).
+"""Unit tests for ValueFactory (cobolparser.layout.values).
 
 test_copybook_data_generator.py already covers value generation end-to-end
 through a real copybook; this file targets ValueFactory's semantic-text
@@ -16,9 +16,9 @@ from decimal import Decimal
 
 import pytest
 
-from cobolparser.generators.data.layout import FieldCategory, FieldSpec
-from cobolparser.generators.data.options import DataGeneratorOptions
-from cobolparser.generators.data.values import ValueFactory
+from cobolparser.layout.fields import FieldCategory, FieldSpec
+from cobolparser.layout.options import DataGeneratorOptions
+from cobolparser.layout.values import ValueFactory
 
 
 def _spec(

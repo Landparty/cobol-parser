@@ -313,7 +313,7 @@ class TestSignedNationalWidth:
         assert (implicit, explicit, unsigned) == (12, 12, 10)
 
     def test_data_items_offsets_follow(self):
-        from cobolparser.generators.data.layout_offsets import (
+        from cobolparser.layout.offsets import (
             compute_program_data_items,
         )
 

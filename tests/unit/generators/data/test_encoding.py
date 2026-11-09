@@ -43,8 +43,8 @@ from cobolparser.generators.data.encoding import (
     hex_dump,
     record_length,
 )
-from cobolparser.generators.data.layout import LiteralCell, flatten_record
-from cobolparser.generators.data.options import DataGeneratorOptions
+from cobolparser.layout.fields import LiteralCell, flatten_record
+from cobolparser.layout.options import DataGeneratorOptions
 
 
 def specs_for(copybook: str):

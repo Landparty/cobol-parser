@@ -30,14 +30,14 @@ from cobolparser.generators.data.encoding import (
     record_length,
     row_record_length,
 )
-from cobolparser.generators.data.layout import (
+from cobolparser.layout.fields import (
     VaryingLength,
     flatten_record,
     occurrence_count,
     present_indexes,
     unresolved_odo_counters,
 )
-from cobolparser.generators.data.options import DataGeneratorOptions
+from cobolparser.layout.options import DataGeneratorOptions
 
 # One counter, one table, and a field *after* the table -- which is the case
 # that separates a real variable-length record from a truncated one: ORD-TOTAL

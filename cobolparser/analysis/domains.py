@@ -5,7 +5,7 @@ rule. Given a :class:`~.layout.FieldSpec` and the
 :class:`~.constraints.FieldConstraint` conjuncts that apply to it, narrows a
 small domain lattice (numeric interval, text allow/deny set, or an enumerated
 level-88 domain) and picks a deterministic witness -- always rendered through
-:meth:`~cobolparser.generators.data.values.ValueFactory.render` so a solved
+:meth:`~cobolparser.layout.values.ValueFactory.render` so a solved
 value can never violate the field's PICTURE, the same invariant the copybook
 generator's own value providers already guarantee.
 """
@@ -18,9 +18,9 @@ import re
 from dataclasses import dataclass, field
 from decimal import ROUND_CEILING, ROUND_FLOOR, Decimal, InvalidOperation, localcontext
 
-from ..generators.data.layout import FieldCategory, FieldSpec
-from ..generators.data.options import DataGeneratorOptions
-from ..generators.data.values import ValueFactory
+from ..layout.fields import FieldCategory, FieldSpec
+from ..layout.options import DataGeneratorOptions
+from ..layout.values import ValueFactory
 from .constraints import FieldConstraint
 
 # Mirrors values.py's own _FIGURATIVE_CONSTANTS (re-derived locally rather

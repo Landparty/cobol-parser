@@ -14,7 +14,7 @@ from cobolparser.analysis._files import same_record_area_groups
 from cobolparser.analysis.const_fold import ConstantFolder
 from cobolparser.analysis.field_lineage import FieldFlowAnalyzer
 from cobolparser.generators import ProgramFixtureGenerator
-from cobolparser.generators.data.program_layout import ProgramLayoutIndex
+from cobolparser.layout.program import ProgramLayoutIndex
 
 
 def _source(io_control: str, procedure: str) -> str:

@@ -440,7 +440,7 @@ def _record_layout(root: CobolDataItem, response: Response) -> list[dict[str, An
     """*root*'s byte layout, with what it cannot vouch for (``SYNCHRONIZED``
     slack, partial level-88 values) flagged and carried as caveats -- the
     same flags ``data-items`` reports (#488)."""
-    from ...generators.data.layout_offsets import (
+    from ...layout.offsets import (
         compute_record_layout,
         flag_record_layout,
     )
@@ -571,7 +571,7 @@ def _layout_index(
     The layout's ``unresolved`` lines are kept under :data:`_UNRESOLVED_KEY`
     for :func:`_layout_caveats` to carry the ones that bear on an answer.
     """
-    from ...generators.data.layout_offsets import compute_program_data_items
+    from ...layout.offsets import compute_program_data_items
 
     try:
         with stdout_to_stderr():

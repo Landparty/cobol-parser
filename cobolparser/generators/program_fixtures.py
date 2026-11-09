@@ -44,11 +44,11 @@ from .data.bundle import (
     FixtureBundle,
     Scenario,
 )
-from .data.errors import ProgramLayoutError
-from .data.layout import FieldSpec, _assign_columns, flatten_record
-from .data.options import DataGeneratorOptions
-from .data.program_layout import ProgramLayoutIndex
-from .data.values import ValueFactory
+from ..layout.errors import ProgramLayoutError
+from ..layout.fields import FieldSpec, assign_columns, flatten_record
+from ..layout.options import DataGeneratorOptions
+from ..layout.program import ProgramLayoutIndex
+from ..layout.values import ValueFactory
 from .scenarios import (
     PlannedScenario,
     ScenarioCoverage,
@@ -871,7 +871,7 @@ class ProgramFixtureGenerator:
         if len({spec.column for spec in unique}) == len(unique):
             return unique
         copies = [dataclasses.replace(spec) for spec in unique]
-        _assign_columns(copies, self.options)
+        assign_columns(copies, self.options)
         return copies
 
     def _fields_for_name(self, name: str, index: ProgramLayoutIndex) -> list[FieldSpec]:

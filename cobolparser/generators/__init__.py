@@ -1,17 +1,8 @@
 """Code generators for COBOL parser."""
 
 
-# Lazy import (mirrors cobolparser.analysis.__init__): cobolparser.generators
-# eagerly re-exporting every submodule at package-init time was the root
-# cause of a recurring circular import -- program_fixtures.py (reached via
-# this package's own init chain) genuinely depends at runtime on
-# cobolparser.analysis.constraints / .domains / .program_flow, which in turn
-# are reachable from cobolparser.analysis modules that need generators.data.*
-# utilities. Importing any single one of those as the *first* touch of the
-# package used to fail with "partially initialized module" -- found three
-# times over (bundle.py, boundary_inventory.py, constraints.py, domains.py)
-# before this fix addressed the actual root cause instead of patching each
-# occurrence individually.
+# Lazy re-exports: importing ``cobolparser.generators`` should not pull in
+# every generator (``program_fixtures`` loads most of ``cobolparser.analysis``).
 def __getattr__(name: str) -> object:
     if name in (
         "CopybookDataGenerator",
@@ -23,7 +14,7 @@ def __getattr__(name: str) -> object:
         "flatten_record",
         "parse_copybook_records",
     ):
-        from .copybook_data import (
+        from .data import (
             CopybookDataGenerator,
             CopybookLayoutError,
             DataGeneratorOptions,

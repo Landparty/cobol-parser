@@ -1,4 +1,4 @@
-"""Unit tests for ProgramLayoutIndex (cobolparser.generators.data.program_layout).
+"""Unit tests for ProgramLayoutIndex (cobolparser.layout.program).
 
 Covers FD/record resolution, FileFacts merging (SELECT + FD/SD clauses),
 name resolution (bare / qualified / level-88), section lookups, and the

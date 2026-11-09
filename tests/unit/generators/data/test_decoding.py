@@ -31,8 +31,8 @@ from cobolparser.generators.data.encoding import (
     RecordFormat,
     encode_record,
 )
-from cobolparser.generators.data.layout import flatten_record, present_indexes
-from cobolparser.generators.data.options import DataGeneratorOptions
+from cobolparser.layout.fields import flatten_record, present_indexes
+from cobolparser.layout.options import DataGeneratorOptions
 from cobolparser.generators.data.views import build_record_views
 
 EVERY_USAGE = """

@@ -13,7 +13,7 @@ from .encoding import EncodingOptions, encode_record, hex_dump
 from .encoding import minimum_record_length as _minimum_record_length
 from .encoding import record_length as _record_length
 from .encoding import row_record_length as _row_record_length
-from .layout import FieldSpec, VaryingLength
+from ...layout.fields import FieldSpec, VaryingLength
 
 # Line terminator shared by every CSV output path. Deliberately "\n" rather
 # than the csv module's RFC 4180 "\r\n": both GeneratedDataset.to_csv and

@@ -370,7 +370,7 @@ def _layout_length(item: CobolDataItem) -> int | None:
         if _usage(node) in ("NATIONAL", "UTF-8", "DISPLAY-1"):
             return None
     try:
-        from ..generators.data.layout_offsets import compute_record_layout
+        from ..layout.offsets import compute_record_layout
 
         layout = compute_record_layout(item)
     except Exception:  # noqa: BLE001 - a length is optional

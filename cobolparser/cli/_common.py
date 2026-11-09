@@ -449,7 +449,7 @@ def _do_parse(args: argparse.Namespace) -> tuple[Any, Any]:
         # data-items on a bare copybook: parse it the way gen-data does,
         # inside a program skeleton, instead of as a program with no
         # divisions (an empty answer with exit 0, #536).
-        from ..generators.data.copybook import wrap_copybook_fragment
+        from ..layout.copybook import wrap_copybook_fragment
 
         wrapped = wrap_copybook_fragment(source)
         if wrapped is not None:

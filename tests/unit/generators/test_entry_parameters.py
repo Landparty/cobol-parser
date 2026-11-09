@@ -10,7 +10,7 @@ import json
 from cobolparser import parse_cobol
 from cobolparser.analysis.boundary_inventory import BoundaryInventoryAnalyzer
 from cobolparser.analysis.constraints import ConstraintExtractor
-from cobolparser.generators.data.program_layout import ProgramLayoutIndex
+from cobolparser.layout.program import ProgramLayoutIndex
 from cobolparser.generators.program_fixtures import ProgramFixtureGenerator
 
 CALCSUB = """\
