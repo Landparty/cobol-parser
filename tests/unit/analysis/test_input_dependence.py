@@ -460,3 +460,79 @@ def test_sort_input_procedure_runs_on_an_event():
     )
     report, _lines = _analyze(source)
     assert "FEED-PARA" not in report.unreachable({}).paragraphs
+
+
+@pytest.mark.parametrize(
+    "condition, reason",
+    [
+        (
+            "IF FUNCTION CURRENT-DATE(1:4) > '2025'",
+            "reads the clock (FUNCTION CURRENT-DATE)",
+        ),
+        ("IF FUNCTION RANDOM > 0.5", "reads the environment (FUNCTION RANDOM)"),
+    ],
+)
+def test_environment_function_in_a_decision_is_input_dependent(condition, reason):
+    # #857: the function in the decision's own operands, not via a MOVE.
+    source = _program(
+        "       MAIN-PARA.\n"
+        f"           {condition}\n"
+        "               DISPLAY 'LATE'\n"
+        "           END-IF\n"
+        "           STOP RUN.\n",
+    )
+    report, lines = _analyze(source)
+    decision = report.decision("IF", _line_of(lines, condition))
+    assert decision is not None and decision.input_dependent
+    assert decision.reason == reason
+    assert report.unreachable({("IF", decision.line): {0}}).outcomes == {}
+
+
+def test_nested_program_decision_on_a_global_item_is_input_dependent():
+    # #857: INNER reads OUTER's GLOBAL WS-FLAG, filled from a READ.
+    source = (
+        "       IDENTIFICATION DIVISION.\n"
+        "       PROGRAM-ID. OUTER.\n"
+        "       ENVIRONMENT DIVISION.\n"
+        "       INPUT-OUTPUT SECTION.\n"
+        "       FILE-CONTROL.\n"
+        "           SELECT IN-FILE ASSIGN TO INDD.\n"
+        "       DATA DIVISION.\n"
+        "       FILE SECTION.\n"
+        "       FD  IN-FILE.\n"
+        "       01  IN-REC PIC X(10).\n"
+        "       WORKING-STORAGE SECTION.\n"
+        "       01  WS-FLAG PIC X VALUE 'N' GLOBAL.\n"
+        "       PROCEDURE DIVISION.\n"
+        "       MAIN-PARA.\n"
+        "           OPEN INPUT IN-FILE\n"
+        "           READ IN-FILE END-READ\n"
+        "           MOVE IN-REC(1:1) TO WS-FLAG\n"
+        "           CALL 'INNER'\n"
+        "           STOP RUN.\n"
+        "       IDENTIFICATION DIVISION.\n"
+        "       PROGRAM-ID. INNER.\n"
+        "       DATA DIVISION.\n"
+        "       WORKING-STORAGE SECTION.\n"
+        "       01  WS-LOCAL PIC X VALUE 'N'.\n"
+        "       PROCEDURE DIVISION.\n"
+        "       INNER-PARA.\n"
+        "           IF WS-FLAG = 'Y'\n"
+        "               DISPLAY 'YES'\n"
+        "           END-IF\n"
+        "           IF WS-LOCAL = 'Y'\n"
+        "               DISPLAY 'NEVER'\n"
+        "           END-IF\n"
+        "           GOBACK.\n"
+        "       END PROGRAM INNER.\n"
+        "       END PROGRAM OUTER.\n"
+    )
+    result = parse_cobol(source, filename="OUTER.cbl")
+    assert result.ast is not None, result.errors
+    inner = result.ast.contained_programs[0]
+    report = InputDependenceAnalyzer().analyze(inner)
+    lines = source.split("\n")
+    flag = report.decision("IF", _line_of(lines, "IF WS-FLAG = 'Y'"))
+    local = report.decision("IF", _line_of(lines, "IF WS-LOCAL = 'Y'"))
+    assert flag is not None and flag.input_dependent
+    assert local is not None and not local.input_dependent

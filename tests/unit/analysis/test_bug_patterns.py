@@ -871,3 +871,29 @@ def test_cli_lint_callee_path(tmp_path):
     )
     assert quiet.returncode == 0, quiet.stderr
     assert '"call-check"' not in quiet.stdout.split('"rules_run"')[1].split("]")[0]
+
+
+def test_comp5_receiver_is_judged_by_native_capacity():
+    # #853: PIC 9(2) COMP-5 is a halfword holding 0-65535 on Enterprise COBOL.
+    data = """\
+    WORKING-STORAGE SECTION.
+    01  P5           PIC 9(2) COMP-5.
+    01  F5           PIC 9(5) COMP-5.
+    01  C2           PIC 9(2) COMP.
+    01  N3           PIC 9(3) VALUE 500.
+    01  N6           PIC 9(6).
+    01  N12          PIC 9(12).
+    """
+    procedure = """\
+    MOVE 500 TO P5
+    MOVE N3 TO P5
+    COMPUTE P5 = N3 + 1
+    MOVE N3 TO C2
+    MOVE N6 TO P5
+    MOVE N6 TO F5
+    MOVE N12 TO F5
+    GOBACK.
+    """
+    found = _findings(_program(data, procedure), "truncation")
+    # C2 (plain COMP, TRUNC(STD)) keeps its PICTURE; P5 holds 4 digits, F5 9.
+    assert [f.symbol for f in found] == ["C2", "P5", "F5"]

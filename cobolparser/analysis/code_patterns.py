@@ -76,6 +76,7 @@ from dataclasses import dataclass, field
 from decimal import Decimal, InvalidOperation
 from typing import Any
 
+from ..models.data_items import CobolDataItem
 from ..models.program import CobolProgram
 from ..models.statements.arithmetic import ArithmeticStatement, ComputeStatement
 from ..models.statements.base import CobolExpression
@@ -99,6 +100,7 @@ from .bug_patterns import (
     _item_capacity,
     _nested_lists,
     _parse_operand,
+    _receiving_capacity,
     walk_statements,
 )
 from .program_flow import ProgramFlowReport
@@ -612,6 +614,10 @@ def _stop_run_in_subprogram(ctx: _Context) -> list[BugFinding]:
     nested = getattr(ctx.ast, "enclosing_program", None) is not None
     if not using and not nested:
         return []
+    if not nested and _is_jcl_parm_using(ctx, using):
+        # A batch main program receiving its EXEC PARM= (#852): there is no
+        # COBOL caller, and STOP RUN is the right way to end it.
+        return []
     why = "its PROCEDURE DIVISION has USING" if using else "it is a nested program"
     findings: list[BugFinding] = []
     for stmt in ctx.statements():
@@ -631,6 +637,56 @@ def _stop_run_in_subprogram(ctx: _Context) -> list[BugFinding]:
                 )
             )
     return findings
+
+
+_HALFWORD_USAGES = frozenset(
+    {
+        "COMP",
+        "COMP-4",
+        "COMP-5",
+        "BINARY",
+        "COMPUTATIONAL",
+        "COMPUTATIONAL-4",
+        "COMPUTATIONAL-5",
+    }
+)
+
+
+def _is_jcl_parm_using(ctx: _Context, using: list[Any]) -> bool:
+    """True for the z/OS ``EXEC PGM=...,PARM=`` linkage shape: one USING
+    item whose first elementary item is a binary halfword length
+    (``PIC S9(4) COMP`` / ``COMP-5`` / ``BINARY``)."""
+    if len(using) != 1:
+        return False
+    operand = _parse_operand(str(using[0]))
+    if operand is None:
+        return False
+    candidates = [
+        item for item in ctx.data.by_name.get(operand.name, []) if item.level == 1
+    ]
+    if len(candidates) != 1:
+        return False
+    first = candidates[0]
+    while True:
+        children = [
+            c
+            for c in first.children
+            if isinstance(c, CobolDataItem) and c.level not in (66, 88)
+        ]
+        if not children:
+            break
+        first = children[0]
+    if first is candidates[0]:
+        return False
+    if str(first.usage or "").upper() not in _HALFWORD_USAGES:
+        return False
+    capacity = _item_capacity(first)
+    return (
+        capacity is not None
+        and capacity.numeric
+        and capacity.decimal_digits == 0
+        and 1 <= capacity.integer_digits <= 4
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -718,7 +774,9 @@ def _pointer_too_small(ctx: _Context) -> list[BugFinding]:
         target = ctx.data.resolve(field_ref)
         if pointer is None or target is None:
             continue
-        pointer_cap = _item_capacity(pointer)
+        # The runtime stores into the pointer: a COMP-5 pointer holds its
+        # native binary range, not its PICTURE digits (#853).
+        pointer_cap = _receiving_capacity(pointer)
         if pointer_cap is None or not pointer_cap.numeric:
             continue
         length = _field_length(target)
