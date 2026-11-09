@@ -21,8 +21,8 @@ from cobolparser import parse_cobol
 from cobolparser.analysis.boundary_inventory import BoundaryInventoryAnalyzer
 from cobolparser.analysis.constraints import ConstraintExtractor, FieldConstraint
 from cobolparser.generators import ProgramFixtureGenerator, ProgramLayoutIndex
-from cobolparser.layout.options import DataGeneratorOptions
 from cobolparser.generators.verification import satisfies
+from cobolparser.layout.options import DataGeneratorOptions
 
 NESTED_SOURCE = """\
        IDENTIFICATION DIVISION.

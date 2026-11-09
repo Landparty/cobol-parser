@@ -178,35 +178,6 @@ class TestSuppressClause:
         assert "ranges" in result
         assert "lines" in result
 
-    def test_get_suppressed_lines_all(self):
-        """Test get_suppressed_lines when suppress_all is True."""
-        clause = SuppressClause(suppress_all=True)
-        lines = clause.get_suppressed_lines()
-
-        # suppress_all returns empty set (handled separately)
-        assert lines == set()
-
-    def test_get_suppressed_lines_single(self):
-        """Test get_suppressed_lines with single lines."""
-        clause = SuppressClause(single_lines=[5, 10, 15])
-        lines = clause.get_suppressed_lines()
-
-        assert lines == {5, 10, 15}
-
-    def test_get_suppressed_lines_ranges(self):
-        """Test get_suppressed_lines with line ranges."""
-        clause = SuppressClause(line_ranges=[(10, 12), (20, 22)])
-        lines = clause.get_suppressed_lines()
-
-        assert lines == {10, 11, 12, 20, 21, 22}
-
-    def test_get_suppressed_lines_combined(self):
-        """Test get_suppressed_lines with both ranges and singles."""
-        clause = SuppressClause(line_ranges=[(1, 3)], single_lines=[5, 7])
-        lines = clause.get_suppressed_lines()
-
-        assert lines == {1, 2, 3, 5, 7}
-
 
 class TestExpansionStatistics:
     """Tests for ExpansionStatistics dataclass."""

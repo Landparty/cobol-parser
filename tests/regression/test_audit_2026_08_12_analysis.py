@@ -39,9 +39,9 @@ from cobolparser.analysis.crud_matrix import CRUDMatrixGenerator
 from cobolparser.analysis.domains import Witness, solve
 from cobolparser.analysis.program_flow import ProgramFlowAnalyzer
 from cobolparser.generators import ProgramLayoutIndex
+from cobolparser.generators.scenarios import ScenarioPlanner
 from cobolparser.layout.fields import FieldCategory, FieldSpec
 from cobolparser.layout.program import ResolvedField
-from cobolparser.generators.scenarios import ScenarioPlanner
 from cobolparser.models.ast_base import SourceLocation
 from cobolparser.models.data_items import CobolDataItem
 

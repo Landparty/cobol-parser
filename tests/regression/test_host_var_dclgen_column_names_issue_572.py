@@ -9,7 +9,6 @@ unresolved even when a column described it.
 
 from cobolparser import DclgenChecker, parse_cobol
 from cobolparser.analysis import HostVariableResolver
-from cobolparser.analysis.host_var_resolver import dclgen_name
 
 _DECLARE = """\
        IDENTIFICATION DIVISION.
@@ -61,14 +60,6 @@ def test_host_variable_without_data_item_falls_back_to_its_column():
     assert info.data_item is None
     assert info.db2_column.name == "CUST_ID"
     assert info.picture == info.db2_column.cobol_picture
-
-
-def test_column_index_is_keyed_by_the_dclgen_name():
-    result = parse_cobol(_DECLARE + _DCLCUST + _PROC)
-    resolver = HostVariableResolver()
-    resolver.resolve(result.ast)
-    assert set(resolver.get_column_index()) == {"CUST-ID", "CUST-NAME", "BAL"}
-    assert dclgen_name(" cust_id ") == "CUST-ID"
 
 
 def test_dclgen_checker_agrees_with_the_resolver():

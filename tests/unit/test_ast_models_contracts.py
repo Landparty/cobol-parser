@@ -203,22 +203,6 @@ class TestIOReadStatementContract:
         assert d["invalid_key_clause"] == []
         assert d["retry_count"] is None
 
-    def test_to_dict_with_values(self):
-        stmt = IOReadStatement(_loc())
-        stmt.set_file_name("CUSTOMER-FILE")
-        stmt.set_into("WS-CUSTOMER-REC")
-        stmt.set_key("CUST-ID")
-        stmt.set_access_mode("NEXT")
-        stmt.set_lock_mode(with_lock=True)
-        stmt.set_retry(3)
-        d = stmt.to_dict()
-        assert d["file_name"] == "CUSTOMER-FILE"
-        assert d["into_target"] == "WS-CUSTOMER-REC"
-        assert d["key_name"] == "CUST-ID"
-        assert d["access_mode"] == "NEXT"
-        assert d["with_lock"] is True
-        assert d["retry_count"] == 3
-
     def test_to_dict_at_end_clause_serialized(self):
         stmt = IOReadStatement(_loc())
         inner = ContinueStatement(_loc())
@@ -264,19 +248,6 @@ class TestIOWriteStatementContract:
         assert d["advancing_clause"]["type"] == "BEFORE"
         assert d["advancing_clause"]["value"] == 2
 
-    def test_to_dict_delete_flag(self):
-        stmt = IOWriteStatement(_loc())
-        stmt.set_delete(True)
-        d = stmt.to_dict()
-        assert d["delete_record"] is True
-
-    def test_to_dict_lock_scope(self):
-        stmt = IOWriteStatement(_loc())
-        stmt.set_lock(True)
-        d = stmt.to_dict()
-        assert d["with_lock"] is True
-        assert d["lock_scope"] == "record"
-
 
 class TestIOOpenStatementContract:
     def test_to_dict_required_keys(self):
@@ -297,12 +268,6 @@ class TestIOOpenStatementContract:
         assert d["open_mode"] == "INPUT"
         assert "CUSTOMER-FILE" in d["file_names"]
         assert "ORDER-FILE" in d["file_names"]
-
-    def test_to_dict_reel_unit_control(self):
-        stmt = IOOpenStatement(_loc())
-        stmt.set_reel_unit_control("REEL")
-        d = stmt.to_dict()
-        assert d["reel_unit_control"] == "REEL"
 
 
 class TestIOCloseStatementContract:
@@ -363,14 +328,6 @@ class TestIOAcceptStatementContract:
         assert d["at_line"] == 5
         assert d["at_column"] == 10
 
-    def test_to_dict_beep_and_no_echo(self):
-        stmt = IOAcceptStatement(_loc())
-        stmt.set_beep(True)
-        stmt.set_no_echo(True)
-        d = stmt.to_dict()
-        assert d["with_beep"] is True
-        assert d["with_no_echo"] is True
-
     def test_to_dict_environment_name(self):
         stmt = IOAcceptStatement(_loc())
         stmt.set_environment_name("PATH")
@@ -388,12 +345,6 @@ class TestIORewriteStatementContract:
         assert "invalid_key_clause" in d
         assert "not_invalid_key_clause" in d
         assert "with_lock" in d
-
-    def test_to_dict_with_lock(self):
-        stmt = IORewriteStatement(_loc())
-        stmt.set_lock(True)
-        d = stmt.to_dict()
-        assert d["with_lock"] is True
 
 
 class TestIODeleteStatementContract:
@@ -531,16 +482,6 @@ class TestCopyStatementContract:
         assert "library_name" in d
         assert "suppressions" in d
         assert "replacements" in d
-
-    def test_to_dict_with_replacements(self):
-        stmt = CopyStatement(_loc())
-        stmt.set_copybook_name("EMPREC")
-        stmt.add_replacement(":TAG:", "EMP")
-        d = stmt.to_dict()
-        assert d["copybook_name"] == "EMPREC"
-        assert len(d["replacements"]) == 1
-        assert d["replacements"][0]["old_text"] == ":TAG:"
-        assert d["replacements"][0]["new_text"] == "EMP"
 
 
 class TestContinueStatementContract:

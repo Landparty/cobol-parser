@@ -68,14 +68,7 @@ def test_categories_match_the_reference_list():
 
 @pytest.mark.parametrize("name", _NOT_LE_SERVICES)
 def test_names_not_in_the_reference_are_not_services(name):
-    assert IBMEnterpriseCobol().is_le_callable_service(name) is False
-    assert IBMEnterpriseCobol().get_le_service_info(name) is None
-
-
-def test_ceetrec_is_not_described_as_unregistering_a_handler():
-    info = IBMEnterpriseCobol().get_le_service_info("CEETREC")
-    assert info is not None
-    assert "handler" not in info["description"].lower()
+    assert name not in IBMEnterpriseCobol.IBM_LE_CALLABLE_SERVICES
 
 
 def test_issue_repro_language_env():

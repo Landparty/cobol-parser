@@ -611,42 +611,6 @@ class TestASTQuery:
 
         # Data item search implementation complete
 
-    def test_find_procedures(self):
-        """Test finding procedures in AST."""
-        # This test will verify procedure search:
-        # 1. Find all procedures
-        # 2. Find paragraphs vs sections
-        # 3. Find by name patterns
-        # 4. Find by statement content
-
-        from cobolparser.models.program import (
-            CobolDivision,
-            CobolParagraph,
-            CobolProgram,
-            CobolSection,
-        )
-
-        # Create program with procedures
-        program = CobolProgram("PROC-QUERY-TEST", SourceLocation(1, 1))
-        proc_div = CobolDivision("PROCEDURE", SourceLocation(10, 1))
-        program.add_division(proc_div)
-
-        # Add sample procedures
-        main_para = CobolParagraph("MAIN-PARAGRAPH", SourceLocation(15, 5))
-        process_sect = CobolSection("PROCESS-SECTION", SourceLocation(20, 5))
-        proc_div.add_procedure(main_para)
-        proc_div.add_procedure(process_sect)
-
-        # Test procedure queries
-        all_procs = program.get_procedures()
-        assert len(all_procs) > 0
-
-        # Find by type
-        paragraphs = program.find_procedures(proc_type="PARAGRAPH")
-        sections = program.find_procedures(proc_type="SECTION")
-
-        assert len(paragraphs) + len(sections) == len(all_procs)
-
     def test_find_statements(self):
         """Test finding statements in AST."""
         # This test will verify statement search:

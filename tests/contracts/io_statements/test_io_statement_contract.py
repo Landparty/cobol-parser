@@ -112,18 +112,6 @@ class TestWriteStatementContract:
         assert result["advancing_clause"]["value"] == "PAGE"
         assert result["advancing_clause"]["unit"] == "CHANNEL"
 
-    def test_write_statement_delete_record(self):
-        """Verify WriteStatement can mark record for deletion."""
-        location = SourceLocation(line=20, column=1)
-        stmt = IOWriteStatement(location)
-        stmt.set_record_name("INDEXED-RECORD")
-        stmt.set_delete(True)
-
-        result = stmt.to_dict()
-
-        assert "delete_record" in result
-        assert result["delete_record"] is True
-
 
 class TestOpenStatementContract:
     """Contract tests for OpenStatement AST node."""
@@ -264,48 +252,6 @@ class TestAcceptStatementContract:
         assert result["at_line"] == 10
         assert "at_column" in result
         assert result["at_column"] == 20
-
-    def test_accept_statement_display_attributes(self):
-        """Verify AcceptStatement with display attributes."""
-        location = SourceLocation(line=50, column=1)
-        stmt = IOAcceptStatement(location)
-        stmt.set_target("SCREEN-INPUT")
-        stmt.set_cursor()
-        stmt.set_color("YELLOW")
-        stmt.set_beep()
-        stmt.set_no_echo()
-
-        result = stmt.to_dict()
-
-        assert result["with_cursor"] is True
-        assert result["color_attribute"] == "YELLOW"
-        assert result["with_beep"] is True
-        assert result["with_no_echo"] is True
-
-    def test_accept_statement_all_attributes(self):
-        """Verify AcceptStatement with all attributes combined."""
-        location = SourceLocation(line=50, column=1)
-        stmt = IOAcceptStatement(location)
-        stmt.set_target("FULL-INPUT")
-        stmt.set_from("ENVIRONMENT NAME")
-        stmt.set_position(5, 15)
-        stmt.set_cursor()
-        stmt.set_color("BRIGHT RED")
-        stmt.set_beep()
-
-        result = stmt.to_dict()
-
-        # All fields should be present
-        assert result["target"] == "FULL-INPUT"
-        assert result["from_source"] == "ENVIRONMENT NAME"
-        assert result["at_line"] == 5
-        assert result["at_column"] == 15
-        assert result["with_cursor"] is True
-        assert result["color_attribute"] == "BRIGHT RED"
-        assert result["with_beep"] is True
-
-        # Should be JSON serializable
-        json.dumps(result)
 
 
 class TestIOStatementParsedOutput:

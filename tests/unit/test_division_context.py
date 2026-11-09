@@ -219,32 +219,6 @@ class TestDivisionContextTracking:
                 stmt.division_name == "PROCEDURE"
             ), f"Nested statement {stmt.statement_type} has division {stmt.division_name}, expected PROCEDURE"
 
-    def test_get_division_context_method(self):
-        """Test the get_division_context method returns both division and section."""
-        source = """
-           IDENTIFICATION DIVISION.
-           PROGRAM-ID. TEST.
-           DATA DIVISION.
-           WORKING-STORAGE SECTION.
-           01 WS-VAR PIC X(10).
-        """
-        parser = CobolParser()
-        result = parser.parse(source)
-
-        assert result.success, f"Parse failed: {result.errors}"
-
-        data_items = result.ast.get_data_items()
-        assert len(data_items) > 0, "No data items found"
-
-        # Check context
-        context = data_items[0].get_division_context()
-        assert (
-            context["division"] == "DATA"
-        ), f"Expected DATA division, got {context['division']}"
-        assert (
-            context["section"] == "WORKING-STORAGE"
-        ), f"Expected WORKING-STORAGE section, got {context['section']}"
-
     def test_division_context_with_multiple_sections(self):
         """Test division context with multiple sections in DATA division."""
         source = """

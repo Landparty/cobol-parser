@@ -22,9 +22,9 @@ import pytest
 from cobolparser import parse_cobol
 from cobolparser.analysis.boundary_inventory import BoundaryInventoryAnalyzer
 from cobolparser.generators.data.bundle import BUNDLE_VERSION, _slugify
+from cobolparser.generators.program_fixtures import ProgramFixtureGenerator
 from cobolparser.layout.errors import ProgramLayoutError
 from cobolparser.layout.program import ProgramLayoutIndex
-from cobolparser.generators.program_fixtures import ProgramFixtureGenerator
 
 # Resolved relative to this file rather than the process cwd, so the tests
 # also work when pytest runs from a directory that isn't the repo root.

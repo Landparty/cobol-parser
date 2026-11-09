@@ -198,7 +198,7 @@ alternate FD records), but `flatten_record()` only makes columns unique
 `REC-B.AMT` would share one value and one header. `_unique_columns()`
 de-duplicates the combined list on `(qualified_name, subscripts)` (the same
 argument passed twice is one set of fields) and, only on a collision, re-runs
-`layout._assign_columns` over *copies* of the whole list (a spec from
+`layout.assign_columns` over *copies* of the whole list (a spec from
 `ProgramLayoutIndex.resolve()` is the index's own), so the colliding names
 become `REC-A.AMT` / `REC-B.AMT` and every other column keeps its short
 header.

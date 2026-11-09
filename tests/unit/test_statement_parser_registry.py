@@ -246,40 +246,6 @@ class TestStatementParserRegistryDispatch:
         assert found is good_parser
 
 
-class TestStatementParserRegistryUnregister:
-    """Test parser unregistration."""
-
-    def test_unregister_existing_parser(self):
-        """Test unregistering an existing parser."""
-        registry = StatementParserRegistry()
-        parser1 = MockStatementParser("parser1")
-        parser2 = MockStatementParser("parser2")
-
-        registry.register(parser1)
-        registry.register(parser2)
-        assert len(registry) == 2
-
-        result = registry.unregister(parser1)
-
-        assert result is True
-        assert len(registry) == 1
-        assert parser1 not in registry.get_all_parsers()
-        assert parser2 in registry.get_all_parsers()
-
-    def test_unregister_non_existing_parser(self):
-        """Test unregistering a parser that's not in registry."""
-        registry = StatementParserRegistry()
-        parser1 = MockStatementParser("parser1")
-        parser2 = MockStatementParser("parser2")
-
-        registry.register(parser1)
-
-        result = registry.unregister(parser2)
-
-        assert result is False
-        assert len(registry) == 1
-
-
 class TestStatementParserRegistryClear:
     """Test clearing the registry."""
 

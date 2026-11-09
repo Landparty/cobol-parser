@@ -124,65 +124,6 @@ class PerformanceBenchmark:
 
         return self.results["direct_creation"]
 
-    def benchmark_factory_with_metadata(
-        self, iterations: int = 1000
-    ) -> dict[str, float]:
-        """Benchmark factory node creation with metadata.
-
-        Args:
-            iterations: Number of nodes to create
-
-        Returns:
-            Dict with timing metrics
-        """
-        factory = ASTNodeFactory()
-        location = SourceLocation(1, 1)
-        metadata = {"priority": "high", "type": "output"}
-
-        def create_with_metadata():
-            node = factory.create(DisplayStatement, location)
-            factory.with_metadata(node, metadata)
-
-        total_time, avg_time = benchmark_function(create_with_metadata, iterations)
-
-        self.results["factory_with_metadata"] = {
-            "iterations": iterations,
-            "total_time_ms": total_time * 1000,
-            "avg_time_us": avg_time * 1_000_000,
-            "nodes_per_second": iterations / total_time,
-        }
-
-        return self.results["factory_with_metadata"]
-
-    def benchmark_factory_with_context(
-        self, iterations: int = 1000
-    ) -> dict[str, float]:
-        """Benchmark factory node creation with context.
-
-        Args:
-            iterations: Number of nodes to create
-
-        Returns:
-            Dict with timing metrics
-        """
-        factory = ASTNodeFactory()
-        location = SourceLocation(1, 1)
-
-        def create_with_context():
-            node = factory.create(DisplayStatement, location)
-            factory.with_context(node, "PROCEDURE", "MAIN")
-
-        total_time, avg_time = benchmark_function(create_with_context, iterations)
-
-        self.results["factory_with_context"] = {
-            "iterations": iterations,
-            "total_time_ms": total_time * 1000,
-            "avg_time_us": avg_time * 1_000_000,
-            "nodes_per_second": iterations / total_time,
-        }
-
-        return self.results["factory_with_context"]
-
     def benchmark_multiple_statement_types(
         self, iterations: int = 1000
     ) -> dict[str, float]:
@@ -282,8 +223,6 @@ def test_factory_performance_baseline():
     # Run benchmarks
     benchmark.benchmark_direct_creation(1000)
     benchmark.benchmark_factory_creation(1000)
-    benchmark.benchmark_factory_with_metadata(1000)
-    benchmark.benchmark_factory_with_context(1000)
     benchmark.benchmark_multiple_statement_types(1000)
 
     # Verify factory doesn't have excessive overhead

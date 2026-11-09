@@ -60,7 +60,7 @@ parser = CobolParser(
 
 `CobolParser.__init__(dialect=DialectType.IBM_ENTERPRISE,
 error_recovery=ErrorRecoveryMode.FAIL_FAST, memory_config=None,
-serialization_config=None, plugin_manager=None, free_form=False,
+serialization_config=None, free_form=False,
 initial_warnings=None, preprocess_fixed=None, debug_lines=False)`.
 `parse_cobol(source, filename="<string>", dialect=..., error_recovery=FAIL_FAST,
 free_form=False, preprocess_fixed=None, debug_lines=False,
@@ -300,9 +300,9 @@ and keeps the case. Every division parser stops at these markers (see
 |------|----------------|
 | `interfaces.py` | `ITokenStream`, `IDivisionParser`, `IStatementParser` ABCs; `ParseContext` (nested statement parsing; carries `host`, the registry, `known_data_names` and `condition_names` -- the level-88 names, #562) |
 | `token_stream.py` | `TokenStream` — `peek()`, `consume()`, `expect()`, configurable lookahead; `omitted_source_lines` |
-| `registry.py` | `StatementParserRegistry` — `register(parser, position=None)` / `unregister` / `clear` / `find_parser(stream)` / `get_all_parsers()`; first-match dispatch (registration order matters), uncached: every lookup asks the parsers in order, so a result never depends on earlier parses |
+| `registry.py` | `StatementParserRegistry` — `register(parser, position=None)` / `clear` / `find_parser(stream)` / `get_all_parsers()`; first-match dispatch (registration order matters), uncached: every lookup asks the parsers in order, so a result never depends on earlier parses |
 | `exceptions.py` | `TokenMismatch`, `UnexpectedEndOfInput`, `DivisionNotFoundError`, `UnknownStatementError`, `ValidationError` (all `ParseError` subclasses) |
-| `ast_factory.py` | `ASTNodeFactory` — validated node creation; `get_factory()` / `set_factory()` / `create_node(node_class, location, **kwargs)`; raises `NodeTypeError` / `FieldValidationError` (both `ValidationError`) |
+| `ast_factory.py` | `ASTNodeFactory` — validated node creation; `get_factory()` / `set_factory()` / `create_node(node_class, location, **kwargs)`; raises `ValidationError` when the node has no location or node type |
 | `_errors.py` (root) | `ParseError` base class — zero internal deps (avoids circular imports); re-exported by `plugins/core.py` |
 
 The division layer adds `parsers/divisions/base.py` (`BaseDivisionParser`,
@@ -335,7 +335,6 @@ All in `cobolparser/plugins/core.py` (re-exported by `cobolparser.plugins`).
 | `SerializationConfig` | dataclass: `include_metadata=True`, `include_source_locations=True`, `compact_format=False`; stamped onto every program unit after the parse |
 | `DialectType` | Enum — `IBM_ENTERPRISE` (default; the only dialect with behaviour behind it), `ANSI_COBOL`, `MICRO_FOCUS` |
 | `ParseStatistics` | `lines_processed`, `lines_parsed`, `tokens_processed`, `memory_peak_mb` (always 0.0), `parse_time_seconds`, `total_time_ms`, `error_count`, `warning_count`; `reset()` / `start_timing()` / `end_timing()` / `copy()` / `to_dict()` |
-| `PluginManager` | `register_plugin` / `unregister_plugin` / `get_plugin` / `get_active_plugins`; nothing in the parse consults it |
 
 Also defined there: `LexerError` -> `UnterminatedStringError`, and
 `MemoryLimitExceededError` (all `ParseError` subclasses).

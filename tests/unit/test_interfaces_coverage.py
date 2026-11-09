@@ -35,54 +35,6 @@ class TestParseContext:
         ctx = ParseContext(host)
         assert ctx.current_division is None
 
-    def test_parse_nested_statement_with_registry(self):
-        """parse_nested_statement dispatches to registry.find_parser when stream is provided."""
-        host = MagicMock()
-        mock_parser = MagicMock()
-        mock_parser.parse.return_value = "parsed_result"
-
-        registry = MagicMock()
-        registry.find_parser.return_value = mock_parser
-
-        stream = MagicMock()
-        stream.skip_whitespace_and_comments = MagicMock()
-
-        ctx = ParseContext(host, registry=registry)
-        result = ctx.parse_nested_statement(stream)
-
-        stream.skip_whitespace_and_comments.assert_called_once()
-        registry.find_parser.assert_called_once_with(stream)
-        assert result == "parsed_result"
-
-    def test_parse_nested_statement_registry_no_match(self):
-        """parse_nested_statement returns None when registry finds no matching parser."""
-        host = MagicMock()
-        registry = MagicMock()
-        registry.find_parser.return_value = None
-
-        stream = MagicMock()
-        stream.skip_whitespace_and_comments = MagicMock()
-
-        ctx = ParseContext(host, registry=registry)
-        result = ctx.parse_nested_statement(stream)
-        assert result is None
-
-    def test_parse_nested_statement_fallback_to_host(self):
-        """parse_nested_statement falls back to host.parse_statement without stream."""
-        host = MagicMock()
-        host.parse_statement.return_value = "host_result"
-        ctx = ParseContext(host)  # no registry
-        result = ctx.parse_nested_statement()
-        host.parse_statement.assert_called_once()
-        assert result == "host_result"
-
-    def test_parse_nested_statement_no_stream_no_host_method(self):
-        """parse_nested_statement returns None if no stream and host lacks parse_statement."""
-        host = object()  # no parse_statement
-        ctx = ParseContext(host)
-        result = ctx.parse_nested_statement()
-        assert result is None
-
     def test_error_with_token_location(self):
         """error() extracts location from token.location."""
         host = MagicMock()

@@ -300,9 +300,9 @@ class DataTools(BaseTools):
         each with the values every mocked boundary supplies and what to
         assert afterwards."""
         from ...analysis.boundary_inventory import BoundaryInventoryAnalyzer
+        from ...generators.program_fixtures import ProgramFixtureGenerator
         from ...layout.options import DataGeneratorOptions
         from ...layout.program import ProgramLayoutIndex
-        from ...generators.program_fixtures import ProgramFixtureGenerator
 
         modes = ("happy", "branches", "all")
         chosen_mode = (mode or "happy").strip().lower()

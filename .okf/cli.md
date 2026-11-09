@@ -62,7 +62,8 @@ Also `cli/_project_config.py` (the `cobol.yml` → argv merge),
 `_yaml.py` reader).
 
 `cobol-parser --help` prints the subcommands grouped by task (`cli/_help.py`
-`COMMAND_GROUPS`, rendered by `TopLevelParser.format_help()` instead of
+`COMMAND_GROUPS`, listed flat by `grouped_command_names()`, rendered by
+`TopLevelParser.format_help()` instead of
 argparse's flat `{parse,batch,...}` block), then a quick start, the exit
 codes and where defaults come from. Every registered subcommand must sit in
 exactly one group (`tests/unit/cli/test_cli_help_overview.py`), so a new one

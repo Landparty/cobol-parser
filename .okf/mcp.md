@@ -220,7 +220,7 @@ bad severity) raises `ToolError`, which the SDK returns as an error result.
   The same rules apply to every config source (found, `--config`, built in
   code).
 - **Bare copybooks.** `_parse()` wraps a source with no division header
-  (`wrap_copybook_fragment`, the gen-data skeleton) so `record_layout` on a
+  (`cobolparser.layout.copybook.wrap_copybook_fragment`, the gen-data skeleton) so `record_layout` on a
   `.cpy` finds its records, and `_unwrap_source_map()` maps the wrapped lines
   back to the file's own (skeleton lines map to nothing) -- through the
   expansion source map when copybook dirs are set (#536). Only a file that is

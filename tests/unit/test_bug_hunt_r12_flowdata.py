@@ -17,11 +17,11 @@ from cobolparser.generators import ProgramLayoutIndex
 from cobolparser.generators.data.copybook import CopybookDataGenerator
 from cobolparser.generators.data.decoding import RecordDecoder, RecordDecodingError
 from cobolparser.generators.data.encoding import EncodingOptions, RecordFormat
+from cobolparser.generators.scenarios import ScenarioPlanner
+from cobolparser.generators.verification import satisfies
 from cobolparser.layout.fields import FieldCategory, FieldSpec
 from cobolparser.layout.options import DataGeneratorOptions
 from cobolparser.layout.program import ResolvedField
-from cobolparser.generators.scenarios import ScenarioPlanner
-from cobolparser.generators.verification import satisfies
 
 
 def _ast(source: str):

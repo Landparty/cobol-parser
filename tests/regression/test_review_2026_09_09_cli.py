@@ -16,6 +16,7 @@ import pytest
 
 from cobolparser import CobolParser, SerializationConfig, parse_cobol
 from cobolparser.dialects.ibm_enterprise import IBMEnterpriseCobol
+from cobolparser.dialects.le_signatures import intrinsic_signature
 
 NESTED = textwrap.dedent("""\
            IDENTIFICATION DIVISION.
@@ -199,16 +200,12 @@ class TestFinding7DialectIntrinsicSignatures:
     """The dialect knew 5 of its 44 intrinsic signatures."""
 
     def test_every_intrinsic_has_a_signature(self) -> None:
-        dialect = IBMEnterpriseCobol()
         missing = [
             name
-            for name in dialect.IBM_INTRINSIC_FUNCTIONS
-            if dialect.get_intrinsic_function_signature(name) is None
+            for name in IBMEnterpriseCobol.IBM_INTRINSIC_FUNCTIONS
+            if intrinsic_signature(name) is None
         ]
         assert missing == []
-        sig = dialect.get_intrinsic_function_signature("numval-c")
-        assert sig is not None
-        assert sig["returns"] == "numeric"
 
 
 class TestFinding8ParseReportsProgramUnits:

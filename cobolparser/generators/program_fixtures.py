@@ -34,6 +34,11 @@ from ..analysis.invocation_counts import (
 )
 from ..analysis.program_flow import ProgramFlowAnalyzer
 from ..analysis.xref import ROLE_WRITE, XrefAnalyzer
+from ..layout.errors import ProgramLayoutError
+from ..layout.fields import FieldSpec, assign_columns, flatten_record
+from ..layout.options import DataGeneratorOptions
+from ..layout.program import ProgramLayoutIndex
+from ..layout.values import ValueFactory
 from ..models.program import CobolProgram
 from ..models.statements.call import CallStatement
 from ..models.statements.control import PerformStatement
@@ -44,11 +49,6 @@ from .data.bundle import (
     FixtureBundle,
     Scenario,
 )
-from ..layout.errors import ProgramLayoutError
-from ..layout.fields import FieldSpec, assign_columns, flatten_record
-from ..layout.options import DataGeneratorOptions
-from ..layout.program import ProgramLayoutIndex
-from ..layout.values import ValueFactory
 from .scenarios import (
     PlannedScenario,
     ScenarioCoverage,

@@ -15,7 +15,6 @@ import pytest
 
 from cobolparser.core.ast_factory import (
     ASTNodeFactory,
-    NodeTypeError,
     create_node,
     get_factory,
     set_factory,
@@ -73,55 +72,6 @@ class TestASTNodeFactoryAPIContract:
         assert node.location == location
         assert node.location.line == 10
         assert node.location.column == 5
-
-    def test_factory_with_metadata_returns_node_for_chaining(self):
-        """Factory.with_metadata() must return the same node for method chaining."""
-        factory = ASTNodeFactory()
-        node = factory.create(DisplayStatement, SourceLocation(1, 1))
-
-        result = factory.with_metadata(node, {"key": "value"})
-
-        assert result is node
-        assert node.get_metadata("key") == "value"
-
-    def test_factory_with_context_returns_node_for_chaining(self):
-        """Factory.with_context() must return the same node for method chaining."""
-        factory = ASTNodeFactory()
-        node = factory.create(DisplayStatement, SourceLocation(1, 1))
-
-        result = factory.with_context(node, "PROCEDURE", "MAIN")
-
-        assert result is node
-        assert node.division_name == "PROCEDURE"
-        assert node.section_name == "MAIN"
-
-    def test_factory_validate_node_type_returns_bool(self):
-        """Factory.validate_node_type() must return True on success."""
-        factory = ASTNodeFactory()
-        node = factory.create(DisplayStatement, SourceLocation(1, 1))
-
-        result = factory.validate_node_type(node, DisplayStatement)
-
-        assert isinstance(result, bool)
-        assert result is True
-
-    def test_factory_get_creation_count_returns_int(self):
-        """Factory.get_creation_count() must return integer count."""
-        factory = ASTNodeFactory()
-        initial = factory.get_creation_count()
-
-        factory.create(DisplayStatement, SourceLocation(1, 1))
-        factory.create(MoveStatement, SourceLocation(2, 1))
-
-        assert factory.get_creation_count() == initial + 2
-
-    def test_factory_get_validation_errors_returns_list(self):
-        """Factory.get_validation_errors() must return list of strings."""
-        factory = ASTNodeFactory()
-
-        errors = factory.get_validation_errors()
-
-        assert isinstance(errors, list)
 
 
 class TestStatementParserFactoryIntegration:
@@ -258,110 +208,3 @@ class TestFactoryNodeTypeContract:
 
         with pytest.raises(TypeError):
             factory.create(NotANode, location)  # type: ignore
-
-
-class TestFactoryValidationContract:
-    """Contract tests for factory validation methods."""
-
-    def test_validate_node_type_raises_on_mismatch(self):
-        """validate_node_type() must raise exception on type mismatch."""
-        factory = ASTNodeFactory()
-        display_node = factory.create(DisplayStatement, SourceLocation(1, 1))
-
-        with pytest.raises(NodeTypeError):
-            factory.validate_node_type(display_node, MoveStatement)
-
-    def test_validate_required_fields_accepts_valid_node(self):
-        """validate_required_fields() must succeed for valid nodes."""
-        factory = ASTNodeFactory()
-        node = factory.create(DisplayStatement, SourceLocation(1, 1))
-
-        result = factory.validate_required_fields(
-            node, ["location", "node_type"], "DisplayStatement"
-        )
-
-        assert result is True
-
-    def test_validate_field_types_accepts_valid_types(self):
-        """validate_field_types() must succeed for valid field types."""
-        factory = ASTNodeFactory()
-        node = factory.create(DisplayStatement, SourceLocation(1, 1))
-
-        result = factory.validate_field_types(
-            node, {"location": SourceLocation, "node_type": str}, "DisplayStatement"
-        )
-
-        assert result is True
-
-
-class TestFactoryMetadataContract:
-    """Contract tests for factory metadata features."""
-
-    def test_metadata_persistence_after_creation(self):
-        """Metadata set via with_metadata() must persist on node."""
-        factory = ASTNodeFactory()
-        node = factory.create(DisplayStatement, SourceLocation(1, 1))
-        metadata = {"priority": "high", "version": "1.0"}
-
-        factory.with_metadata(node, metadata)
-
-        # Verify metadata persists
-        assert node.get_metadata("priority") == "high"
-        assert node.get_metadata("version") == "1.0"
-
-    def test_context_assignment_persists(self):
-        """Context set via with_context() must persist on node."""
-        factory = ASTNodeFactory()
-        node = factory.create(DisplayStatement, SourceLocation(1, 1))
-
-        factory.with_context(node, "PROCEDURE", "MAIN-SECTION")
-
-        assert node.division_name == "PROCEDURE"
-        assert node.section_name == "MAIN-SECTION"
-
-    def test_method_chaining_fluent_interface(self):
-        """Factory methods must support method chaining."""
-        factory = ASTNodeFactory()
-
-        node = (
-            factory.create(DisplayStatement, SourceLocation(1, 1))
-            # Note: We can't chain directly since create returns ASTNode,
-            # only methods on factory can chain. This test verifies create returns correct type
-        )
-
-        assert isinstance(node, DisplayStatement)
-
-        # Test chaining with_metadata and with_context
-        result = factory.with_metadata(node, {"key": "val"})
-        result = factory.with_context(result, "DATA")
-
-        assert result.get_metadata("key") == "val"
-        assert result.division_name == "DATA"
-
-
-class TestFactoryErrorHandlingContract:
-    """Contract tests for factory error handling."""
-
-    def test_factory_records_error_count(self):
-        """Factory must track number of creation events."""
-        factory = ASTNodeFactory()
-        initial = factory.get_creation_count()
-
-        for i in range(5):
-            factory.create(DisplayStatement, SourceLocation(i, 1))
-
-        assert factory.get_creation_count() == initial + 5
-
-    def test_clear_validation_errors_empties_log(self):
-        """clear_validation_errors() must empty the error log."""
-        factory = ASTNodeFactory()
-
-        # Add test errors
-        factory._validation_errors.append("Test error 1")
-        factory._validation_errors.append("Test error 2")
-
-        assert len(factory.get_validation_errors()) == 2
-
-        factory.clear_validation_errors()
-
-        assert len(factory.get_validation_errors()) == 0

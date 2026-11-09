@@ -333,7 +333,7 @@ class DeadCodeAnalyzer:
             ]
         # Only once every round is done: a section kept alive merely by one
         # of its paragraphs must not look *directly* referenced to a later
-        # downward pass (see ``_propagate_section_references``).
+        # downward pass (see ``_propagate_section_downward``).
         self._propagate_section_upward()
 
         # Build report
@@ -495,38 +495,10 @@ class DeadCodeAnalyzer:
             if e.key in declarative or e.section in declarative
         )
 
-    def _propagate_section_references(self) -> None:
-        """Propagate section references in both directions.
-
-        - Section → paragraphs: when a section is referenced, all its child
-          paragraphs are reachable (PERFORM section-name executes all of them).
-        - Paragraph → section: when any paragraph inside a section is referenced,
-          the section itself is also considered referenced so it is not falsely
-          reported as dead code.
-
-        Order matters here and is not interchangeable. Downward propagation
-        must run first, using only the references already collected by
-        ``_collect_references``/entry-point-marking/``_collect_fallthrough_refs``
-        -- i.e. sections that are *directly* referenced (PERFORM/GO TO the
-        section name itself, or falling into it). If upward ran first, a
-        section would gain "referenced" status merely because one of its own
-        paragraphs happens to be a PERFORM target, and the downward pass would
-        then broadcast that to every *sibling* paragraph too -- reviving
-        genuinely dead paragraphs that are neither PERFORMed/GONE TO nor
-        reachable by fall-through (a plain ``PERFORM child-para`` does not
-        execute the rest of its section, unlike ``PERFORM section-name``).
-        Running downward first means it only ever sees pre-existing direct
-        section references, so a paragraph-only reference can still protect
-        its *own* section from being reported dead (via the upward pass
-        below) without resurrecting unrelated siblings.
-        """
-        self._propagate_section_downward()
-        self._propagate_section_upward()
-
     def _propagate_section_downward(self) -> None:
         """A *directly* referenced section makes its paragraphs referenced
         (must run before the upward pass -- see
-        ``_propagate_section_references``).
+        ``_propagate_section_downward``).
 
         Entering a section runs its paragraphs in order, so a paragraph is
         reached only while the one before it (in the same section) was
@@ -738,7 +710,7 @@ class DeadCodeAnalyzer:
         The ENTRY statement's literal name is not a procedure name -- it is
         the paragraph physically holding the ENTRY statement that is the
         alternate entry point, so that paragraph (and, per
-        ``_propagate_section_references``, its enclosing section) must never
+        ``_propagate_section_downward``, its enclosing section) must never
         be reported as dead code. A blank/whitespace-only ENTRY literal isn't
         a real alternate entry point (matches the same filter
         ``program_flow/scanner.py``'s ``collect_entry_points`` applies), so
@@ -1091,7 +1063,7 @@ class DeadCodeAnalyzer:
         """Mark the procedures each ``p THRU q`` range actually runs.
 
         A range runs its procedures in source order, so -- like the section
-        walk in ``_propagate_section_references`` -- a member is reached
+        walk in ``_propagate_section_downward`` -- a member is reached
         only when the member before it was reached and does not terminate,
         or when control lands in it some other way (a GO TO / ALTER / ENTRY
         target, or a procedure fall-through already reached). Marking every

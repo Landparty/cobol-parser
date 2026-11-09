@@ -133,10 +133,8 @@ class CobolParagraph(ASTNode):           # CobolParagraph(paragraph_name, locati
 `find_program_unit`, `add_contained_program`); dialect queries (`has_sql` /
 `has_cics` / `has_ims`, `get_sql_statements` / `get_cics_statements` /
 `get_ims_statements`, `get_ims_interface_calls`, `uses_ims_interface`,
-`is_ims_dlitcbl_program`, `get_intrinsic_function_usages`,
-`uses_intrinsic_functions`, `get_le_callable_service_calls`,
-`uses_language_environment`); `find_statements_using_variable`,
-`find_dead_code`, `get_statistics`, `validate`; and
+`is_ims_dlitcbl_program`); `find_statements_using_variable`,
+`get_statistics`, `validate`; and
 `to_dict(config=None)` / `to_json(config_or_indent=None)` / `from_json()`.
 
 `get_all_statements()` walks contained programs too, and reaches handler
@@ -280,9 +278,9 @@ another division -- WORKING-STORAGE, LINKAGE, ... -- is not one, #508).
 there is no `created_at`: the JSON of one input is byte-identical run to run
 (`from_json` still skips a `created_at` from older output). `find_statements_using_variable(name)`
 matches a whole COBOL word, case-insensitively, outside quoted literals (not a
-substring: `WS-A` does not match `WS-AMOUNT`). `get_intrinsic_function_usages()`
-delegates to `LanguageEnvironmentAnalyzer` rather than running its own regex,
-which reports `OF` for `DLI-FUNCTION OF REC` and words inside literals.
+substring: `WS-A` does not match `WS-AMOUNT`). Intrinsic-function and LE
+usage is `LanguageEnvironmentAnalyzer`'s job; `CobolProgram` no longer
+imports any analyzer, so `models` stays below `analysis`.
 
 ## ASTNodeFactory
 
@@ -299,9 +297,7 @@ node.set_source("WS-A"); node.add_target("WS-B")
 Raises `TypeError` for a class that is not an `ASTNode` subclass or whose
 `__init__` does not take `location` first (`CobolDataItem`, `CobolSection`,
 ...: construct those directly), `ValidationError` when the created node has
-no location / node_type, `NodeTypeError` from a type check, and
-`FieldValidationError` from a validator registered with
-`register_validator()`. Keyword arguments go to the node's constructor, so
+no location / node_type. Keyword arguments go to the node's constructor, so
 they must be parameters it actually takes.
 
 ## Data items (`models/data_items.py`)
@@ -419,7 +415,7 @@ offsets and record images are built from.
   (6/0 and 0/5). `scaling_leading: bool | None` records the P
   run's direction -- `True` for `PPP9(3)` (leading, a fraction), `False` for
   `9(3)PPP` (trailing, a scaled integer), `None` when not P-scaled -- the one
-  place this is decided; `generators/data/layout.py`'s
+  place this is decided; `layout/fields.py`'s
   `FieldSpec.scaling_positions`/`stored_digits` read it (and `total_digits`)
   directly, and `analysis/move_type_checker.py`'s `_is_non_integer_picture`
   reads `decimal_digits` alone. See [generators.md](generators.md)'s P-scaling
@@ -544,11 +540,9 @@ time). Verified across the sample + NIST corpus: 18,121 records, 14
 differences, every one of them an ODO table.
 
 **Why `_storage.py` sits at the package root**, next to `_errors.py` and for
-the same reason: `cobolparser.generators.data.__init__` eagerly imports
-`program_layout`, which imports `cobolparser.models`, so a model importing
-`generators.data.storage` directly would close an import cycle.
-`generators/data/storage.py` is a re-export shim, so its importers are
-untouched.
+the same reason: the models (layer 2) need it as well as
+`cobolparser.layout` and the record encoders above it, so it must import
+nothing from the package.
 
 ## SQL statement nodes (`models/sql_statements.py`)
 
@@ -600,7 +594,7 @@ See [dialects.md](dialects.md) for the SQL details.
 | `communication.py` | `SendStatement`, `ReceiveStatement`, `EnableStatement`, `DisableStatement`, `PurgeStatement` (private base `_EnableDisableStatement`) |
 | `control.py` | `IfStatement` (`ended_by_end_if`, `period_after_end_if`: how it ended, not serialized), `EvaluateStatement`, `WhenClause`, `PerformStatement`, `GoStatement`, `StopStatement`, `SearchStatement`, `RaiseStatement`, `ResumeStatement` |
 | `data.py` | `MoveStatement`, `DisplayStatement`, `InitializeStatement`, `InspectStatement`, `SetStatement`, `StringStatement`, `UnstringStatement`, `ValidateStatement` |
-| `io.py` | `IOReadStatement`, `IOWriteStatement`, `IOOpenStatement`, `IOCloseStatement`, `IOAcceptStatement`, `IORewriteStatement`, `IODeleteStatement`, `IOStartStatement`, `IOUnlockStatement` (mixins `InvalidKeyClauseMixin`, `LockClauseMixin`, `RetryClauseMixin`) |
+| `io.py` | `IOReadStatement`, `IOWriteStatement`, `IOOpenStatement`, `IOCloseStatement`, `IOAcceptStatement`, `IORewriteStatement`, `IODeleteStatement`, `IOStartStatement`, `IOUnlockStatement` (mixin `InvalidKeyClauseMixin`) |
 | `legacy.py` | `ExhibitStatement`, `ExamineStatement`, `TransformStatement`, `EnterStatement`, `NoteStatement`, `ChainStatement`, `TraceStatement`, `ServiceStatement`, `TitleStatement` |
 | `misc.py` | `SelectStatement`, `CopyStatement`, `ContinueStatement`, `NextSentenceStatement`, `EjectStatement`, `SkipStatement`, `ExitStatement`, `GobackStatement`, `CancelStatement`, `AlterStatement`, `GenerateStatement`, `XmlJsonStatement`, `ReleaseStatement`, `ReturnStatement`, `UseStatement`, `SortStatement`, `MergeStatement`, `CommitStatement`, `RollbackStatement`, `InvokeStatement`, `AllocateStatement`, `FreeStatement` |
 | `report_writer.py` | `InitiateStatement`, `TerminateStatement`, `SuppressStatement` (private base `_ReportNameListStatement`) |

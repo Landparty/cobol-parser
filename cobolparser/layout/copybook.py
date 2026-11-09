@@ -19,7 +19,6 @@ from ..preprocess import PreprocessingError
 from ..preprocess.copybook_expander import parse_cobol_with_expansion
 from .errors import CopybookLayoutError
 
-
 # ---------------------------------------------------------------------------
 # Copybook parsing
 # ---------------------------------------------------------------------------

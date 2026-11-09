@@ -558,27 +558,6 @@ class TestHostVariableResolver:
         assert d["collision_count"] == 1
         assert "STATUS" in d["column_name_collisions"]
 
-    def test_symbol_table_accessible(self):
-        from cobolparser.analysis import HostVariableResolver
-
-        cobol = """\
-       IDENTIFICATION DIVISION.
-       PROGRAM-ID. TEST8.
-       DATA DIVISION.
-       WORKING-STORAGE SECTION.
-       01  WS-ALPHA    PIC X(5).
-       01  WS-NUM      PIC 9(3).
-       PROCEDURE DIVISION.
-       MAIN.
-           STOP RUN.
-"""
-        result = parse_cobol(cobol)
-        resolver = HostVariableResolver()
-        resolver.resolve(result.ast)
-        st = resolver.get_symbol_table()
-        assert "WS-ALPHA" in st
-        assert "WS-NUM" in st
-
 
 # ---------------------------------------------------------------------------
 # 6. End-to-end: full COBOL program resembling DCLGEN output

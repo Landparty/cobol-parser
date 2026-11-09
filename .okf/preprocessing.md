@@ -972,7 +972,7 @@ Pinned by `tests/regression/test_open_findings_high_regressions.py::TestH6PathRe
 (default `(".cpy", ".CPY", "")`, applied with `dataclasses.replace`, caller's
 config untouched) rather than the resolution extensions, which would suggest
 the program's own `.cbl` back; `""` stays for extensionless PDS downloads. In
-`get_available_copybooks` / `PathResolver.list_available()`, `""` lists only
+`get_available_copybooks`, `""` lists only
 extensionless files. Pinned by `tests/regression/test_copybook_suggestion_pool.py`.
 The name just looked up is never suggested back: an upper-cased stem equal to
 it is a file differing only in letter case, which `find_copybook_file` reports

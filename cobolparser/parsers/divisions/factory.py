@@ -142,31 +142,6 @@ class DivisionParserFactory:
 
         return parser.parse(token_stream)
 
-    def get_registered_divisions(self) -> list[DivisionType]:
-        """Get list of registered division types in order.
-
-        Returns:
-            List of DivisionType enums in registration order
-        """
-        return list(self._parser_order)
-
-    def reset_instances(self) -> None:
-        """Reset all parser instances (recreate on next access).
-
-        Useful for testing and state management.
-        """
-        self._parser_instances.clear()
-
-    def clear_registry(self) -> None:
-        """Clear the entire parser registry.
-
-        Use with caution - effectively disables all division parsing
-        until new parsers are registered.
-        """
-        self._parser_registry.clear()
-        self._parser_instances.clear()
-        self._parser_order.clear()
-
 
 # Global singleton instance (optional, for convenience)
 _default_factory: DivisionParserFactory | None = None

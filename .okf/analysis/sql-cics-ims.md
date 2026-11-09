@@ -33,7 +33,6 @@ themselves are in [../dialects.md](../dialects.md).
 from cobolparser.analysis import HostVariableResolver
 report: HostVarResolutionReport = HostVariableResolver().resolve(ast)   # .resolve(), not .analyze()
 # report.resolved / .unresolved / .declare_tables / .column_name_collisions
-# then .get_symbol_table() / .get_column_index() on the resolver
 ```
 
 Resolves SQL host variables (`:var-name`) in EXEC SQL blocks against WORKING-STORAGE
@@ -43,7 +42,7 @@ definitions.
 (`_` -> `-`, upper-cased) keys `_column_index` / `_column_table_map`, and a
 host variable is looked up the same way, so `:CUST-ID` gets `db2_column`
 `CUST_ID`, and a host variable with no DATA DIVISION item still resolves
-through its column. `get_column_index()` and `column_name_collisions` use
+through its column. `column_name_collisions` uses
 that form too (`CUST-ID`, not `CUST_ID`). Matching them verbatim paired only
 the columns with no underscore in their name (#572). `DclgenChecker` imports
 the same function, so the two cannot drift apart.
@@ -369,10 +368,9 @@ halfword-prefixed `vstring`. Adding a type id does not change
 COBOL Analyzer extension's hover, which reads it) is only as right as these
 lists.
 
-`IBMEnterpriseCobol.IBM_LE_SERVICE_INFO` is **derived** from this catalogue
-(merged over `_UNCATALOGUED_LE_SERVICE_INFO`, the leftovers), so the dialect's
-one-line metadata and the signatures cannot drift. Categories are cross-checked
-against `IBM_LE_SERVICE_CATEGORIES` per service by the same test module.
+Categories are cross-checked against
+`IBMEnterpriseCobol.IBM_LE_SERVICE_CATEGORIES` per service by the same test
+module.
 
 Exposed to non-Python consumers as `cobol-parser le-info` (see `.okf/cli.md`),
 which is what the VS Code extension's LE hover reads.

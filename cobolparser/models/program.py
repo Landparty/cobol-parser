@@ -16,7 +16,6 @@ from ..plugins import SerializationConfig
 from .ast_base import ASTNode, SourceLocation, ValidationResult
 
 if TYPE_CHECKING:
-    from ..analysis.dead_code import DeadCodeReport
     from .data_items import CobolDataItem
     from .statements import CobolStatement
 
@@ -147,13 +146,6 @@ class CobolDivision(ASTNode):
         # Add to the last paragraph
         if self.paragraphs:
             self.paragraphs[-1].add_statement(statement)
-
-    def add_procedure(self, procedure: Union["CobolParagraph", "CobolSection"]) -> None:
-        """Add a procedure (paragraph or section) to this division."""
-        if isinstance(procedure, CobolParagraph):
-            self.add_paragraph(procedure)
-        elif isinstance(procedure, CobolSection):
-            self.add_section(procedure)
 
     def get_section_by_name(
         self, name: str
@@ -661,17 +653,6 @@ class CobolProgram(ASTNode):
 
         return using_variable
 
-    def find_dead_code(self) -> "DeadCodeReport":
-        """Find unreferenced paragraphs and sections (dead code).
-
-        Returns:
-            A DeadCodeReport listing all unreferenced procedures.
-        """
-        from ..analysis.dead_code import DeadCodeAnalyzer
-
-        analyzer = DeadCodeAnalyzer()
-        return analyzer.analyze(self)
-
     def has_sql(self) -> bool:
         """Check if program uses EXEC SQL statements."""
         return bool(self.get_sql_statements())
@@ -745,58 +726,6 @@ class CobolProgram(ASTNode):
             (s.entry_name or "").upper() == "DLITCBL"  # type: ignore[attr-defined]
             for s in self.get_entry_statements()
         )
-
-    def get_le_callable_service_calls(self) -> list["CobolStatement"]:
-        """Get all CALL statements targeting IBM Language Environment services.
-
-        Detects any CALL whose static program name starts with ``CEE`` (the
-        IBM LE service naming prefix).  For dynamic calls, any entry in
-        ``CallStatement.possible_values`` (populated by
-        :class:`~cobolparser.analysis.value_tracker.DynamicCallAnalyzer`)
-        that is CEE-prefixed also qualifies.
-        """
-
-        def _is_cee(name: object) -> bool:
-            return isinstance(name, str) and name.strip("\"'").upper().startswith("CEE")
-
-        all_statements = self.get_all_statements()
-        le_calls = []
-        for stmt in all_statements:
-            if stmt.statement_type != "CALL":
-                continue
-            called = getattr(stmt, "called_program", None)
-            if _is_cee(called):
-                le_calls.append(stmt)
-                continue
-            if getattr(stmt, "is_dynamic", False):
-                possible = getattr(stmt, "possible_values", []) or []
-                if any(_is_cee(v) for v in possible):
-                    le_calls.append(stmt)
-        return le_calls
-
-    def uses_language_environment(self) -> bool:
-        """Return True if the program calls any IBM Language Environment service."""
-        return bool(self.get_le_callable_service_calls())
-
-    def get_intrinsic_function_usages(self) -> list[str]:
-        """Return a list of intrinsic function names referenced by the program.
-
-        Each ``FUNCTION <name>`` reference in the program's statements, in
-        the order it appears (duplicates included). Delegates to
-        :class:`~cobolparser.analysis.language_env_analyzer.LanguageEnvironmentAnalyzer`,
-        the one detector: this method used to run its own looser regex,
-        which took ``FUNCTION`` inside a data name (``DLI-FUNCTION OF REC``
-        -> ``OF``) or inside a quoted literal (``DISPLAY 'NO FUNCTION
-        HERE'`` -> ``HERE``) for an intrinsic-function call.
-        """
-        from ..analysis.language_env_analyzer import LanguageEnvironmentAnalyzer
-
-        report = LanguageEnvironmentAnalyzer().analyze(self)
-        return [usage.function_name for usage in report.intrinsic_usages]
-
-    def uses_intrinsic_functions(self) -> bool:
-        """Return True if the program uses any COBOL intrinsic functions."""
-        return bool(self.get_intrinsic_function_usages())
 
     def get_procedures(self) -> list["CobolProcedure"]:
         """Get all procedure paragraphs/sections in the program."""

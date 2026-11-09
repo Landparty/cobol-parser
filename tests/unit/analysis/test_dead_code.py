@@ -483,28 +483,6 @@ class TestDeadCodeReport:
 # ---------------------------------------------------------------------------
 
 
-class TestCobolProgramFindDeadCode:
-    """Tests for the find_dead_code() convenience method on CobolProgram."""
-
-    def test_find_dead_code_returns_report(self) -> None:
-        """find_dead_code() returns a DeadCodeReport.
-
-        MAIN-LOGIC ends with STOP RUN so it doesn't fall through into
-        UNREACHABLE.
-        """
-        prog = _make_program(
-            [
-                ("MAIN-LOGIC", [_stop_run()]),
-                ("UNREACHABLE", [_continue()]),
-            ]
-        )
-        report = prog.find_dead_code()
-
-        assert isinstance(report, DeadCodeReport)
-        assert report.dead_count == 1
-        assert report.dead_items[0].name == "UNREACHABLE"
-
-
 # ---------------------------------------------------------------------------
 # Tests: Integration with real COBOL parsing
 # ---------------------------------------------------------------------------
@@ -748,33 +726,6 @@ class TestDeadCodeIntegration:
         dead_names = [item.name for item in report.dead_items]
         assert "RUN-FLAG" not in dead_names
         assert "PARA-A" not in dead_names
-
-    def test_find_dead_code_convenience(self) -> None:
-        """CobolProgram.find_dead_code() works end-to-end.
-
-        USED-PARA ends with STOP RUN so it doesn't fall through into
-        DEAD-PARA.
-        """
-        source = """\
-       IDENTIFICATION DIVISION.
-       PROGRAM-ID. CONVTEST.
-       PROCEDURE DIVISION.
-       MAIN-LOGIC.
-           PERFORM USED-PARA
-           STOP RUN.
-       USED-PARA.
-           DISPLAY "USED"
-           STOP RUN.
-       DEAD-PARA.
-           DISPLAY "DEAD".
-"""
-        result = parse_cobol(source, filename="convtest.cbl")
-        assert result.ast is not None
-
-        report = result.ast.find_dead_code()
-
-        assert report.has_dead_code
-        assert report.dead_items[0].name == "DEAD-PARA"
 
 
 # ---------------------------------------------------------------------------

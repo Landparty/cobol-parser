@@ -88,6 +88,7 @@ COBOL source (.cbl/.cob)
   -> lexer.py      CobolLexer -> List[Token]
   -> parser.py     CobolParser -> ParseResult(ast, errors, warnings, statistics, expansion_source_map)
   -> models/       ASTNode classes with to_dict()/to_json()
+  -> layout/       record layout (field specs, offsets)
   -> analysis/, generators/, scan.py, mcp/
 ```
 
@@ -98,7 +99,8 @@ COBOL source (.cbl/.cob)
 | `cobolparser/parser.py`, `core/`, `parsers/` | `CobolParser`, `TokenStream`, `DivisionParserFactory`, <!-- okf:gen statement-parser-file-count -->33<!-- /okf:gen --> statement parser files | `.okf/parser.md` |
 | `cobolparser/models/` | `CobolProgram` and every AST node | `.okf/ast-models.md` |
 | `cobolparser/dialects/` | IBM Enterprise dialect, EXEC SQL/CICS/IMS, LE and intrinsic signatures | `.okf/dialects.md` |
-| `cobolparser/analysis/` | <!-- okf:gen analysis-module-count -->40<!-- /okf:gen --> analyzer modules plus `program_flow/` | `.okf/analysis.md` |
+| `cobolparser/layout/` | record layout: field specs, byte offsets, `ProgramLayoutIndex`, copybook record parsing (read by analysis and generators) | `.okf/generators/record-data.md` |
+| `cobolparser/analysis/` | <!-- okf:gen analysis-module-count -->39<!-- /okf:gen --> analyzer modules plus `program_flow/` | `.okf/analysis.md` |
 | `cobolparser/generators/` | flowcharts, copybook data and record images, decode/compare, `gen-fixtures` bundles and scenarios | `.okf/generators.md` |
 | `cobolparser/batch.py`, `scan.py`, `_facts_cache.py` | parallel parsing, multi-file analysis with per-file fault isolation, the on-disk cache | `.okf/batch.md` |
 | `cobolparser/jcl/` | JCL jobs, steps, DD bindings (through the `[jcl]` extra) | `.okf/jcl.md` |

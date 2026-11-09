@@ -29,7 +29,7 @@ Calling conventions shared by every analyzer are in
 * [IOSequenceAnalyzer](#iosequenceanalyzer)
 * [CRUDMatrixGenerator](#crudmatrixgenerator)
 * [DynamicCallAnalyzer](#dynamiccallanalyzer)
-* [IO coverage and diagnostics helpers](#io-coverage-and-diagnostics-helpers)
+* [IO coverage reporter](#io-coverage-reporter)
 * [See also](#see-also)
 
 ## Data names and references
@@ -43,8 +43,7 @@ procedure half of the rule is in [flow.md](flow.md)).
 - **Data items** — `_extract_identifiers` (unused_variables.py) returns
   references with their qualifiers, spelled `"AMT OF IN-REC"` (`IN` is
   normalized to `OF`), plus each qualifier as its own reference
-  (`_names.qualified_references`; `_names.bare_names` recovers plain
-  tokens). `_NameMatcher` resolves them: qualifiers must name enclosing
+  (`_names.qualified_references`). `_NameMatcher` resolves them: qualifiers must name enclosing
   items in ascending order (levels may be skipped); an unqualified
   reference to a shared name, or qualifiers matching no candidate (a
   file-name qualifier), count for every candidate. REDEFINES resolves to
@@ -671,7 +670,7 @@ compatible ones. Pinned by
 `PictureClause._parse_scaled_pattern` already sets `decimal_digits = P-count +
 9-count` for a leading-`P` picture (a *trailing*-`P` picture like `9(3)PPP` is
 a scaled *integer*, `decimal_digits == 0`). The same field
-`generators/data/layout.py`'s `FieldSpec.stored_digits`/`scaling_positions` and
+`layout/fields.py`'s `FieldSpec.stored_digits`/`scaling_positions` and
 `layout_offsets.py` (the `data-items` CLI) key off -- see the P-scaling note in
 [../generators.md](../generators.md).
 
@@ -1072,13 +1071,11 @@ REDEFINES, more than 4096 occurrences) are skipped. A write to either side is
 caught by the REDEFINES cluster of `_overlapping_names()`. Pinned by
 `tests/unit/test_dynamic_program_tables.py::TestRedefinesTable`.
 
-## IO coverage and diagnostics helpers
+## IO coverage reporter
 
 `io_coverage_reporter.py` (`IOCoverageReporter`, `CoverageStatus`, `TestType`,
 `IoCoverageArtifact`) builds machine-readable IO coverage reports, driven by
-`tools/io_coverage/`; `io_diagnostics.py` (`IOErrorCode`,
-`IODiagnosticHelper`) holds IO operation diagnostics. Neither is a program
-analyzer. `IOCoverageReporter.load_pytest_results` raises `ValueError` when the
+`tools/io_coverage/`. It is not a program analyzer. `IOCoverageReporter.load_pytest_results` raises `ValueError` when the
 pytest-results JSON root is not an object (the same "artifact must be a JSON
 object" check its CLI callers apply, see [../cli.md](../cli.md)), rather than
 failing later with an `AttributeError`. Pinned by

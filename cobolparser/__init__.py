@@ -29,13 +29,13 @@ Basic Usage:
     >>> json_output = ast.to_json()
 
 Advanced Usage:
-    >>> from cobolparser.dialects import IBMEnterpriseCobol
-    >>> from cobolparser.plugins import SerializationConfig
+    >>> from cobolparser.plugins import DialectType, SerializationConfig
     >>>
     >>> # Use IBM Enterprise COBOL dialect with custom serialization
-    >>> dialect = IBMEnterpriseCobol()
     >>> serialization = SerializationConfig(include_metadata=True)
-    >>> parser = CobolParser(dialect=dialect, serialization_config=serialization)
+    >>> parser = CobolParser(
+    ...     dialect=DialectType.IBM_ENTERPRISE, serialization_config=serialization
+    ... )
 
 Memory:
     ``MemoryConfiguration.max_memory_mb``, ``enable_streaming`` and
@@ -175,7 +175,6 @@ from .plugins.core import (
     MemoryConfiguration,
     ParseError,
     ParseStatistics,
-    PluginManager,
     SerializationConfig,
 )
 

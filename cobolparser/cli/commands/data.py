@@ -955,8 +955,8 @@ def _verification_reasons(verification: dict[str, Any]) -> list[str]:
 
 
 def _cmd_gen_fixtures(args: argparse.Namespace) -> None:
-    from ...layout.errors import ProgramLayoutError
     from ...generators.program_fixtures import ProgramFixtureGenerator
+    from ...layout.errors import ProgramLayoutError
 
     generator = ProgramFixtureGenerator()
     copybook_paths = args.copybook_path or None

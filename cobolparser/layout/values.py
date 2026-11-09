@@ -8,6 +8,7 @@ import string
 import struct
 from decimal import Context, Decimal, InvalidOperation, localcontext
 
+from .._storage import POINTER_USAGES, SINGLE_FLOAT_USAGES
 from ..models.data_items import PictureClause
 from .fields import (
     FieldCategory,
@@ -19,7 +20,6 @@ from .fields import (
     hex_literal_cell,
 )
 from .options import DataGeneratorOptions
-from .._storage import POINTER_USAGES, SINGLE_FLOAT_USAGES
 
 #: Significant digits each float usage can carry, mirroring
 #: ``decoding._FLOAT_DIGITS`` / ``_DOUBLE_DIGITS``.  The two must agree or the

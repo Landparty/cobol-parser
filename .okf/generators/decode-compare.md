@@ -318,12 +318,13 @@ adds pairing and field comparison, and decodes nothing itself.
 ## `select_record()`
 
 `select_record(records, record, filename)` (module-level in
-`data/copybook.py`; `CopybookDataGenerator._select_record` delegates to it)
+`cobolparser/layout/copybook.py`, re-exported by `generators/data/copybook.py`;
+`CopybookDataGenerator._select_record` delegates to it)
 picks the 01 a `--record` name means. Both halves of the package use it and
 must *agree*: generating from `--record CUST-REC` and decoding through
 `--record CUST-REC` must land on the same 01, or a round trip through the
 record image silently changes layout.
-The rest of `copybook.py` is generation-only (value drawing, `unique_fields`
+`generators/data/copybook.py` is otherwise generation-only (value drawing, `unique_fields`
 caveats, #526, the `record_image_gap` that makes short record images warn)
 and never reaches the decoder.
 

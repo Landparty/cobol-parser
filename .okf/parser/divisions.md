@@ -31,7 +31,7 @@ Individual statement parsers are in [statements.md](statements.md).
 
 | File | Division |
 |------|---------|
-| `factory.py` | `DivisionParserFactory`, `DivisionType` enum (IDENTIFICATION, ENVIRONMENT, DATA, PROCEDURE) |
+| `factory.py` | `DivisionParserFactory` (`register_parser` / `get_parser` / `find_parser` / `parse_division`), `DivisionType` enum (IDENTIFICATION, ENVIRONMENT, DATA, PROCEDURE) |
 | `base.py` | Base division parser with error recovery |
 | `identification.py` | IDENTIFICATION DIVISION |
 | `environment.py` | ENVIRONMENT DIVISION — division scan + AST node; section/SELECT parsing delegated to the two `environment_*.py` collaborators below |

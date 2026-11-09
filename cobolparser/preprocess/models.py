@@ -82,15 +82,6 @@ class SuppressClause:
             result["lines"] = self.single_lines
         return result
 
-    def get_suppressed_lines(self) -> set[int]:
-        """Get all suppressed line numbers."""
-        if self.suppress_all:
-            return set()  # Handled separately
-        lines = set(self.single_lines)
-        for start, end in self.line_ranges:
-            lines.update(range(start, end + 1))
-        return lines
-
 
 @dataclass
 class ExpansionStatistics:

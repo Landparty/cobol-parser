@@ -196,26 +196,6 @@ class ParseContext:
             else None
         )
 
-    def parse_nested_statement(self, stream: Any | None = None) -> Any | None:
-        """Parse a nested statement using the registry.
-
-        Args:
-            stream: Optional token stream to parse from
-
-        Returns:
-            Parsed statement or None
-        """
-        if stream is not None and self.registry:
-            if hasattr(stream, "skip_whitespace_and_comments"):
-                stream.skip_whitespace_and_comments()
-            parser = self.registry.find_parser(stream)
-            if parser:
-                return parser.parse(stream, self)
-            return None
-        if hasattr(self.host, "parse_statement"):
-            return self.host.parse_statement()
-        return None
-
     def error(self, message: str, token: Any | None = None) -> None:
         """Report an error with optional token location."""
         loc = None

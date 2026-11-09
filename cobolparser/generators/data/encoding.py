@@ -49,7 +49,17 @@ from dataclasses import dataclass
 from decimal import ROUND_DOWN, Context, Decimal, InvalidOperation
 from enum import StrEnum
 
-from .editing import edit_numeric, is_float_picture
+from ..._storage import (
+    BINARY_NATIVE_USAGES,
+    BINARY_USAGES,
+    FIXED_SIZE_USAGES,
+    FLOAT_USAGES,
+    PACKED_USAGES,
+    POINTER_USAGES,
+    SINGLE_FLOAT_USAGES,
+    binary_byte_length,
+    is_known_usage,
+)
 from ...layout.errors import CopybookLayoutError
 from ...layout.fields import (
     FieldCategory,
@@ -62,17 +72,7 @@ from ...layout.fields import (
     unresolved_odo_counters,
     value_clause_hex_bytes,
 )
-from ..._storage import (
-    BINARY_NATIVE_USAGES,
-    BINARY_USAGES,
-    FIXED_SIZE_USAGES,
-    FLOAT_USAGES,
-    PACKED_USAGES,
-    POINTER_USAGES,
-    SINGLE_FLOAT_USAGES,
-    binary_byte_length,
-    is_known_usage,
-)
+from .editing import edit_numeric, is_float_picture
 
 
 class RecordEncodingError(CopybookLayoutError):

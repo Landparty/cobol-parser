@@ -10,13 +10,13 @@ from enum import StrEnum
 from typing import Any
 
 from .._literals import typed_literal_content, unquote_literal
+from .._storage import FLOAT_USAGES, storage_size
 from ..models.data_items import (
     CobolDataItem,
     ConditionNameItem,
     PictureClause,
 )
 from .options import DataGeneratorOptions
-from .._storage import FLOAT_USAGES, storage_size
 
 
 class FieldCategory(StrEnum):

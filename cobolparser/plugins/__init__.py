@@ -14,7 +14,6 @@ from .core import (
     MemoryLimitExceededError,
     ParseError,
     ParseStatistics,
-    PluginManager,
     SerializationConfig,
     UnterminatedStringError,
 )
@@ -29,5 +28,4 @@ __all__ = [
     "UnterminatedStringError",
     "MemoryLimitExceededError",
     "ParseStatistics",
-    "PluginManager",
 ]

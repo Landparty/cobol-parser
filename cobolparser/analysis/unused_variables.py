@@ -387,8 +387,7 @@ def _extract_identifiers(operand: Any) -> set[str]:
     A qualified reference keeps its qualifiers (see
     ``_names.qualified_references``): ``"WS-A OF WS-GRP"`` yields
     ``"WS-A OF WS-GRP"`` and ``"WS-GRP"``, so two same-named fields in
-    different records can be told apart (issue #258). ``_names.bare_names``
-    recovers the plain token set.
+    different records can be told apart (issue #258).
 
     Deliberately over-inclusive: a token that isn't really a data-name
     (e.g. an intrinsic function name like ``UPPER-CASE``) only risks

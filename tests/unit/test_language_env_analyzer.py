@@ -159,43 +159,10 @@ _UNKNOWN_CEE_SERVICE = _MINIMAL_HEADER + _PROCEDURE_HEADER + """\
 
 class TestIBMEnterpriseCobolDialect:
     def setup_method(self):
-        self.dialect = IBMEnterpriseCobol()
-
-    def test_is_le_callable_service_known(self):
-        assert self.dialect.is_le_callable_service("CEEDATM")
-        assert self.dialect.is_le_callable_service("ceedatm")  # case-insensitive
-
-    def test_is_le_callable_service_unknown(self):
-        assert not self.dialect.is_le_callable_service("MYSUBR")
-        assert not self.dialect.is_le_callable_service("CBLTDLI")
-
-    def test_is_le_callable_service_ceetdli_known(self):
-        # CEETDLI is both IMS and LE interface
-        assert self.dialect.is_le_callable_service("CEETDLI")
-
-    def test_get_le_service_info_known(self):
-        info = self.dialect.get_le_service_info("CEEDATM")
-        assert info is not None
-        assert info["category"] == "datetime"
-        assert "description" in info
-        assert "parameters" in info
-
-    def test_get_le_service_info_unknown(self):
-        assert self.dialect.get_le_service_info("NONEXISTENT") is None
-
-    def test_get_le_service_info_case_insensitive(self):
-        assert self.dialect.get_le_service_info("ceegmt") is not None
+        self.dialect = IBMEnterpriseCobol
 
     def test_le_services_set_non_empty(self):
         assert len(self.dialect.IBM_LE_CALLABLE_SERVICES) >= 40
-
-    def test_get_dialect_info_includes_le_count(self):
-        info = self.dialect.get_dialect_info()
-        assert "le_callable_services" in info
-        assert info["le_callable_services"] >= 40
-
-    def test_supported_features_includes_le(self):
-        assert "le_callable_services" in self.dialect.supported_features
 
     def test_known_services_sampling(self):
         services = self.dialect.IBM_LE_CALLABLE_SERVICES
@@ -291,20 +258,6 @@ class TestLEAnalysisResult:
             ]
         )
         assert result.service_categories == {"datetime", "storage"}
-
-    def test_to_dict_keys(self):
-        result = LEAnalysisResult()
-        d = result.to_dict()
-        for key in (
-            "uses_intrinsic_functions",
-            "uses_language_environment",
-            "unique_functions",
-            "unique_services",
-            "service_categories",
-            "intrinsic_usages",
-            "le_service_calls",
-        ):
-            assert key in d, f"Missing key: {key}"
 
 
 # ── Test: COMPUTE with FUNCTION expression ────────────────────────────────────
@@ -444,14 +397,6 @@ class TestBothFunctionAndService:
         assert report.uses_intrinsic_functions
         assert report.uses_language_environment
 
-    def test_to_dict_complete(self):
-        report = self.analyzer.analyze(self.program)
-        d = report.to_dict()
-        assert d["uses_intrinsic_functions"] is True
-        assert d["uses_language_environment"] is True
-        assert len(d["intrinsic_usages"]) >= 1
-        assert len(d["le_service_calls"]) >= 1
-
 
 # ── Test: unknown CEE-prefixed service ────────────────────────────────────────
 
@@ -480,48 +425,6 @@ class TestUnknownCEEService:
 # ── Test: CobolProgram convenience methods ────────────────────────────────────
 
 
-class TestCobolProgramMethods:
-    def test_get_le_callable_service_calls_found(self):
-        program = _parse(_CALL_LE_SERVICE)
-        calls = program.get_le_callable_service_calls()
-        assert len(calls) == 1
-        assert calls[0].called_program == "CEEDATM"
-
-    def test_get_le_callable_service_calls_none(self):
-        program = _parse(_NO_LE_USAGE)
-        assert program.get_le_callable_service_calls() == []
-
-    def test_uses_language_environment_true(self):
-        program = _parse(_CALL_LE_SERVICE)
-        assert program.uses_language_environment()
-
-    def test_uses_language_environment_false(self):
-        program = _parse(_NO_LE_USAGE)
-        assert not program.uses_language_environment()
-
-    def test_get_intrinsic_function_usages_compute(self):
-        program = _parse(_COMPUTE_WITH_FUNCTION)
-        usages = program.get_intrinsic_function_usages()
-        assert "LENGTH" in usages
-
-    def test_get_intrinsic_function_usages_move(self):
-        program = _parse(_MOVE_WITH_FUNCTION)
-        usages = program.get_intrinsic_function_usages()
-        assert "UPPER-CASE" in usages
-
-    def test_get_intrinsic_function_usages_none(self):
-        program = _parse(_NO_LE_USAGE)
-        assert program.get_intrinsic_function_usages() == []
-
-    def test_uses_intrinsic_functions_true(self):
-        program = _parse(_COMPUTE_WITH_FUNCTION)
-        assert program.uses_intrinsic_functions()
-
-    def test_uses_intrinsic_functions_false(self):
-        program = _parse(_NO_LE_USAGE)
-        assert not program.uses_intrinsic_functions()
-
-
 # ── Test: dynamic CALL detection ─────────────────────────────────────────────
 #
 # Dynamic calls use a variable as the called program name.  The
@@ -538,7 +441,7 @@ class TestDynamicCallDetection:
         program = _parse(source)
         for stmt in program.get_all_statements():
             if stmt.statement_type == "CALL" and getattr(stmt, "is_dynamic", False):
-                stmt.add_possible_value(service_name)
+                stmt.set_possible_values([service_name])
         return program
 
     _DYNAMIC_CALL_SOURCE = (
@@ -575,10 +478,6 @@ class TestDynamicCallDetection:
         report = analyzer.analyze(program)
         call = next(c for c in report.le_service_calls if c.service_name == "CEEGMT")
         assert call.category == "datetime"
-
-    def test_program_method_detects_dynamic_le_call(self):
-        program = self._parse_and_inject(self._DYNAMIC_CALL_SOURCE, "CEEDATM")
-        assert program.uses_language_environment()
 
     def test_dynamic_call_unknown_program_ignored(self):
         """A dynamic CALL with no CEE-prefixed possible_values is not reported."""

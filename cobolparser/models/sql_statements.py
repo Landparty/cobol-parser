@@ -1164,11 +1164,6 @@ class ExecSQLStatement(CobolStatement):
             if match:
                 self.prepared_statement_name = match.group(1)
 
-    def add_host_variable(self, variable: str) -> None:
-        """Add a host variable used in the SQL statement."""
-        if variable not in self.host_variables:
-            self.host_variables.append(variable)
-
     def get_structured_output(self) -> SQLStatementInfo:
         """Get structured output with table, query, and cursor fields."""
         result = SQLStatementInfo()
@@ -1460,10 +1455,6 @@ class DynamicSQLStatement(ExecSQLStatement):
         self.statement_type = "DYNAMIC-SQL"
         self.dynamic_sql_text: str | None = None
         self.using_variables: list[str] = []
-
-    def set_dynamic_sql(self, sql: str) -> None:
-        """Set the dynamic SQL text."""
-        self.dynamic_sql_text = sql.strip()
 
     def add_using_variable(self, variable: str) -> None:
         """Add a variable to the USING clause."""

@@ -255,6 +255,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+* **Record layout moved to `cobolparser.layout` (breaking).** Field specs,
+  byte offsets, `ProgramLayoutIndex`, copybook record parsing, `ValueFactory`,
+  `DataGeneratorOptions` and the layout errors now live in a package below
+  `cobolparser.analysis`, which closes the last analysis -> generators import
+  loop. The old submodule paths are gone, with no aliases:
+  `cobolparser.generators.data.{layout,layout_offsets,program_layout,options,
+  values,errors,storage}` become `cobolparser.layout.{fields,offsets,program,
+  options,values,errors}` (byte widths: `cobolparser._storage`), and
+  `cobolparser.generators.copybook_data` is removed. The package-level names
+  in `cobolparser.generators` and `cobolparser.generators.data` still work.
+  `elementary_byte_length` and `assign_columns` lost their leading underscore.
+
 * **Layer dependencies are one way, and a test enforces it.** The package
   version lives in `cobolparser/_version.py` (still exported as
   `cobolparser.__version__`), so nothing below the facade imports
@@ -318,6 +330,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Removed
 
+* **Unused public surface (breaking).** Nothing in the library called these;
+  only their own tests did. `IBMEnterpriseCobol` keeps its lookup tables but
+  loses its instance methods (`validate_*`, `parse_exec_*`,
+  `create_comp3_data_item`, `is_*`, `get_*`) and the unused
+  `IBM_RESERVED_WORDS`, `CICS_COMMANDS` and `IBM_LE_SERVICE_INFO` tables; the
+  module's parallel `ExecSQLStatement`, `ExecCICSStatement`,
+  `ExecIMSStatement`, `IBMDataItem` and `IBMDataType` classes are gone (the
+  parser never built them). Also removed: `PluginManager` and
+  `CobolParser(plugin_manager=...)`, the `ASTNodeFactory` validator API
+  (`register_validator`, `validate_*`, `with_metadata`, `with_context`,
+  creation and error counters, `NodeTypeError`, `FieldValidationError`),
+  `cobolparser.analysis.io_diagnostics`, the `CobolProgram` analyzer
+  shortcuts (`find_dead_code`, `get_intrinsic_function_usages`,
+  `uses_intrinsic_functions`, `get_le_callable_service_calls`,
+  `uses_language_environment`; use `DeadCodeAnalyzer` and
+  `LanguageEnvironmentAnalyzer`), and setters on AST nodes the parser never
+  calls (READ/WRITE/OPEN/ACCEPT/COPY/SELECT/CALL/OCCURS/function nodes).
+* **Dead internal helpers** found by vulture: unused lexer, registry,
+  division-factory, path-resolver, host-variable-resolver and analysis
+  helpers.
 * **The statement dispatch cache.** `StatementParserRegistry.find_parser` no
   longer caches its result by the next few tokens. A parser whose `matches()`
   looked further ahead than the cache key could get the parser cached for an

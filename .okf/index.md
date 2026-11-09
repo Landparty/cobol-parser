@@ -71,17 +71,16 @@ layers must not form a cycle:
 3. `lexer`, `dialects`
 4. `preprocess`, `core`
 5. `parsers`, then `parser`, then `batch`
-6. `analysis`, then `generators`
-7. `_facts_cache`, `scan`, `config`, `mcp`, `cli`, then the `cobolparser`
+6. `layout` (record layout: field specs, offsets, `ProgramLayoutIndex`)
+7. `analysis`, then `generators`
+8. `_facts_cache`, `scan`, `config`, `mcp`, `cli`, then the `cobolparser`
    facade and `__main__`
 
 `tests/contracts/test_layer_dependencies.py` enforces it from the source
 (module-level, function-local and `TYPE_CHECKING` imports alike), fails on a
-module-level import loop anywhere, and keeps the four deliberate upward
-imports in `KNOWN_UPWARD` with their reasons: `CobolProgram` convenience
-methods calling analyzers, `tokenize_cobol` normalizing fixed-form source,
-`parse_cobol_with_expansion` living in `preprocess`, and `analysis` using the
-record-layout modules under `generators/data/`. Nothing below the facade
+module-level import loop anywhere, and keeps the two deliberate upward
+imports in `KNOWN_UPWARD` with their reasons: `tokenize_cobol` normalizing
+fixed-form source, and `parse_cobol_with_expansion` living in `preprocess`. Nothing below the facade
 imports from `cobolparser` itself: read the version from `_version`.
 
 ## History (not loaded by default)
@@ -108,7 +107,7 @@ it with `git config core.hooksPath .githooks`) and by the test suite:
   must run; backticked `cobolparser.*` names, class/function names and repo
   paths must exist; links and anchors must resolve; the CLI table in
   `cli.md` must match argparse; and counts the code can answer (there are
-  <!-- okf:gen analysis-module-count -->40<!-- /okf:gen --> analysis
+  <!-- okf:gen analysis-module-count -->39<!-- /okf:gen --> analysis
   modules, <!-- okf:gen tokentype-count -->245<!-- /okf:gen --> `TokenType`
   members, <!-- okf:gen cli-subcommand-count -->41<!-- /okf:gen -->
   subcommands) are written as `<!-- okf:gen NAME -->` spans that must equal

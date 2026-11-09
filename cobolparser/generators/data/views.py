@@ -41,7 +41,6 @@ from dataclasses import dataclass, field
 from functools import partial
 from typing import Any
 
-from ...models.data_items import CobolDataItem
 from ...layout.fields import (
     FieldSpec,
     HiddenCounter,
@@ -50,6 +49,7 @@ from ...layout.fields import (
     occurs_expansion_caveats,
 )
 from ...layout.options import DataGeneratorOptions
+from ...models.data_items import CobolDataItem
 
 #: Levels that name no storage of their own: 66 RENAMES and 88 condition
 #: names.  ``_flatten_into`` skips both, and the overlay scan has to skip

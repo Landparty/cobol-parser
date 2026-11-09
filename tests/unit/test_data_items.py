@@ -411,15 +411,6 @@ class TestOccursClause:
         # times property should return max_times for variable occurs
         assert occurs.times == 100
 
-    def test_indexed_by(self):
-        """Test INDEXED BY functionality."""
-        location = SourceLocation(1, 1)
-        occurs = OccursClause(location)
-
-        occurs.set_indexed_by("IDX1")
-
-        assert occurs.indexed_by == "IDX1"
-
     def test_times_property_edge_cases(self):
         """Test times property with edge cases."""
         location = SourceLocation(1, 1)
@@ -436,48 +427,6 @@ class TestOccursClause:
         occurs.min_times = 5
         occurs.max_times = 50
         assert occurs.times == 50  # Should return max_times
-
-    def test_occurs_to_dict(self):
-        """Test OccursClause to_dict() method."""
-        location = SourceLocation(3, 25)
-        occurs = OccursClause(location)
-        occurs.set_variable_occurs(1, 50, "WS-TABLE-SIZE")
-        occurs.set_indexed_by("IDX-TABLE")
-        occurs.set_metadata("test_key", "test_value")
-
-        result = occurs.to_dict()
-
-        assert result["node_type"] == "OccursClause"
-        assert result["min_times"] == 1
-        assert result["max_times"] == 50
-        assert result["depending_on"] == "WS-TABLE-SIZE"
-        assert result["indexed_by"] == "IDX-TABLE"
-        assert result["location"]["line"] == 3
-        assert result["location"]["column"] == 25
-        assert result["metadata"]["test_key"] == "test_value"
-
-    def test_occurs_combined_functionality(self):
-        """Test combining different OCCURS features."""
-        location = SourceLocation(1, 1)
-        occurs = OccursClause(location)
-
-        # Set variable occurs first
-        occurs.set_variable_occurs(5, 20, "WS-COUNT")
-        occurs.set_indexed_by("MY-INDEX")
-
-        assert occurs.min_times == 5
-        assert occurs.max_times == 20
-        assert occurs.depending_on == "WS-COUNT"
-        assert occurs.indexed_by == "MY-INDEX"
-
-        # Override with fixed occurs
-        occurs.set_fixed_occurs(15)
-
-        assert occurs.min_times == 15
-        assert occurs.max_times == 15
-        assert occurs.times == 15
-        # indexed_by should still be set
-        assert occurs.indexed_by == "MY-INDEX"
 
 
 class TestCobolDataItem:
@@ -960,47 +909,6 @@ def test_data_items_module_exports():
     # Test __all__ exports
     expected_exports = ["PictureClause", "OccursClause", "CobolDataItem"]
     assert all(export in data_items.__all__ for export in expected_exports)
-
-
-def test_data_items_integration():
-    """Test integration between different data item classes."""
-    location = SourceLocation(1, 1)
-
-    # Create a complex data item with all features
-    item = CobolDataItem("WS-COMPLEX-ITEM", 5, location)
-
-    # Add PICTURE clause
-    pic = PictureClause("S9(7)V99", location)
-    item.set_picture_clause(pic)
-
-    # Add USAGE clause
-    item.set_usage("COMP-3")
-
-    # Add VALUE clause
-    item.set_value_clause("ZERO")
-
-    # Add OCCURS clause
-    occurs = OccursClause(location)
-    occurs.set_variable_occurs(1, 100, "WS-TABLE-SIZE")
-    occurs.set_indexed_by("IDX-COMPLEX")
-    item.set_occurs_clause(occurs)
-
-    # Test that everything is properly integrated
-    assert item.picture_clause == pic
-    assert item.usage == "COMP-3"
-    assert item.value_clause == "ZERO"
-    assert item.occurs_clause == occurs
-
-    # Test size calculation with all features
-    # 9 digits COMP-3 = 5 bytes, * 100 occurrences = 500 bytes
-    assert item.calculate_size() == 500
-
-    # Test serialization includes all components
-    result = item.to_dict()
-    assert "picture_clause" in result
-    assert "occurs_clause" in result
-    assert result["value_clause"] == "ZERO"
-    assert result["usage"] == "COMP-3"
 
 
 def test_picture_clause_additional_coverage():

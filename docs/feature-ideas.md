@@ -151,8 +151,7 @@ paragraphs get renamed or reordered.
 
 ## 10. Formalize the plugin/extension API (S)
 
-`plugins/core.py` already has a `PluginManager`, but it's not documented as
-a public extension point anywhere in `.okf/` or the README, and there's no
+There is no plugin API today (an unused `PluginManager` was removed), and no
 entry-point (`pyproject.toml` `[project.entry-points]`) discovery mechanism
 for third-party analyzers. Given the analyzer shape is already consistent
 (`<Analyzer>().analyze(ast) -> Report`), documenting + wiring up

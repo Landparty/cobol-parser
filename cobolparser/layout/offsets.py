@@ -17,6 +17,13 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
+from .._storage import (
+    BINARY_USAGES,
+    FLOAT_USAGES,
+    POINTER_USAGES,
+    is_known_usage,
+    storage_size,
+)
 from ..models.data_items import CobolDataItem, ConditionNameItem, RenamesItem
 from ..models.program import CobolProgram, CobolSection
 from .fields import (
@@ -25,13 +32,6 @@ from .fields import (
     condition_ranges,
     condition_values_exhaustive,
     expand_condition_values,
-)
-from .._storage import (
-    BINARY_USAGES,
-    FLOAT_USAGES,
-    POINTER_USAGES,
-    is_known_usage,
-    storage_size,
 )
 
 _SECTION_NAMES = ("FILE", "WORKING-STORAGE", "LOCAL-STORAGE", "LINKAGE")

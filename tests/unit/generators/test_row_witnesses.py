@@ -14,8 +14,8 @@ from __future__ import annotations
 from cobolparser import parse_cobol
 from cobolparser.analysis.boundary_inventory import BoundaryInventoryAnalyzer
 from cobolparser.generators import ProgramFixtureGenerator, ProgramLayoutIndex
-from cobolparser.layout.options import DataGeneratorOptions
 from cobolparser.generators.scenarios import PlannedScenario
+from cobolparser.layout.options import DataGeneratorOptions
 
 _SOURCE = """\
        IDENTIFICATION DIVISION.

@@ -28,7 +28,6 @@ from .plugins.core import (
     MemoryConfiguration,
     ParseError,
     ParseStatistics,
-    PluginManager,
     SerializationConfig,
 )
 from .preprocess import (
@@ -170,7 +169,6 @@ class CobolParser:
         error_recovery: ErrorRecoveryMode = ErrorRecoveryMode.FAIL_FAST,
         memory_config: MemoryConfiguration | None = None,
         serialization_config: SerializationConfig | None = None,
-        plugin_manager: PluginManager | None = None,
         free_form: bool = False,
         initial_warnings: list[str] | None = None,
         preprocess_fixed: bool | None = None,
@@ -202,7 +200,6 @@ class CobolParser:
         self.error_recovery = error_recovery
         self.memory_config = memory_config or MemoryConfiguration()
         self.serialization_config = serialization_config or SerializationConfig()
-        self.plugin_manager = plugin_manager or PluginManager()
         self.free_form = free_form
         self.preprocess_fixed = preprocess_fixed
         self.debug_lines = debug_lines

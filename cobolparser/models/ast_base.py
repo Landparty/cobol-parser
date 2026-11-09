@@ -90,10 +90,6 @@ class ASTNode(ABC):
             return self.parent.section_name
         return None
 
-    def get_division_context(self) -> dict[str, str | None]:
-        """Get both division and section context."""
-        return {"division": self.division_name, "section": self.section_name}
-
     @property
     def metadata(self) -> dict[str, Any]:
         """Get metadata dictionary for this node (lazily initialized)."""
@@ -123,12 +119,6 @@ class ASTNode(ABC):
             self._invalidate_type_cache()
             return True
         return False
-
-    def get_child_at(self, index: int) -> Optional["ASTNode"]:
-        """Get child at specific index, or None if index is invalid."""
-        if 0 <= index < len(self.children):
-            return self.children[index]
-        return None
 
     def get_children_by_type(self, node_type: str) -> list["ASTNode"]:
         """Get all direct children of a specific node type."""

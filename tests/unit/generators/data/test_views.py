@@ -19,8 +19,8 @@ from cobolparser.generators.data.encoding import (
     encode_field,
     record_length,
 )
-from cobolparser.layout.options import DataGeneratorOptions
 from cobolparser.generators.data.views import build_record_views
+from cobolparser.layout.options import DataGeneratorOptions
 
 FLAT = """
        01  CUST-REC.

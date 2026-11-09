@@ -10,7 +10,6 @@ from __future__ import annotations
 import pytest
 
 from cobolparser import DeadCodeAnalyzer, LintAnalyzer
-from cobolparser.analysis._sql_whenever import whenever_goto_target
 from cobolparser.analysis.program_flow import ProgramFlowAnalyzer
 from cobolparser.analysis.program_flow.models import FlowEdgeType
 from cobolparser.models.ast_base import SourceLocation
@@ -116,23 +115,6 @@ class TestProgramFlow:
         assert result.ast is not None
         flow = ProgramFlowAnalyzer().analyze(result.ast)
         assert "SQL-ERR" not in flow.unreachable_nodes
-
-
-class TestWheneverGotoTarget:
-    @pytest.mark.parametrize(
-        ("text", "expected"),
-        [
-            ("WHENEVER SQLERROR GO TO SQL-ERR", "SQL-ERR"),
-            ("WHENEVER NOT FOUND GOTO:NF-PARA", "NF-PARA"),
-            ("WHENEVER SQLWARNING CONTINUE", None),
-            ("WHENEVER SQLERROR GO TO", None),
-        ],
-    )
-    def test_text_forms(self, text: str, expected: str | None) -> None:
-        assert whenever_goto_target(_exec_sql(text)) == expected
-
-    def test_non_whenever_statement(self) -> None:
-        assert whenever_goto_target(_exec_sql("SELECT 1 FROM T1")) is None
 
 
 def _flow_and_dead(source: str) -> tuple[set[tuple[str, str]], list[str], list[str]]:

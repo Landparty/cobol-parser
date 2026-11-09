@@ -536,7 +536,7 @@ from cobolparser.analysis.field_lineage import FieldFlowAnalyzer
 from cobolparser.analysis.program_signature import extract_signatures
 from cobolparser.analysis.sql_cics_lint import SqlCicsAnalyzer
 from cobolparser.analysis.xref import XrefAnalyzer
-from cobolparser.generators.data.layout_offsets import compute_program_data_items
+from cobolparser.layout.offsets import compute_program_data_items
 
 
 def load(path):

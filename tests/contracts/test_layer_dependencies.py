@@ -87,13 +87,6 @@ class Known:
 
 KNOWN_UPWARD: tuple[Known, ...] = (
     Known(
-        "cobolparser.models.program",
-        "cobolparser.analysis",
-        eager_ok=False,
-        reason="CobolProgram convenience methods (find_dead_code(), the "
-        "intrinsic-function list) call analyzers; public API.",
-    ),
-    Known(
         "cobolparser.lexer",
         "cobolparser.preprocess",
         eager_ok=False,

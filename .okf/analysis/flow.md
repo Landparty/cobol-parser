@@ -236,7 +236,7 @@ PERFORMed only from dead code is dead too. A reached procedure references:
   non-DEPENDING GO TO incl. the alterable `GO TO.`, or a top-level EXIT
   SECTION);
 * **section and range walks**: a referenced section's paragraphs are walked
-  in order up to the first terminator (`_propagate_section_references`); a
+  in order up to the first terminator (`_propagate_section_downward`); a
   `p THRU q` range is walked the same way (`_mark_thru_ranges`); a GO TO onto
   a THRU range end or a PERFORMed section's last paragraph (`_section_exits`)
   is a reference, not a fall-through source -- unless the jump can run
@@ -316,7 +316,7 @@ the [history](../history/analysis.md).
   jump from outside it (`_sections_entered_by_jump`: a GO TO written in
   another section, an ALTER, a CICS HANDLE, an ENTRY). Pinned by
   `TestSectionExitGoTo`.
-* **Section propagation runs downward first.** `_propagate_section_references`
+* **Section propagation runs downward first.** `_propagate_section_downward`
   first walks each *directly* referenced section's paragraphs in order up to
   the first one that `_terminates` (a later paragraph is live only as a
   fall-through source of its own), and only then marks the parent section of

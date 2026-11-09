@@ -26,7 +26,6 @@ from cobolparser.cli import main
 from cobolparser.lexer import (
     CobolLexer,
     TokenType,
-    _declared_currency_symbols,
     declares_decimal_point_comma,
     tokenize_cobol,
 )
@@ -139,10 +138,6 @@ class TestSpecialNamesScanSkipsComments:
     )
     def test_decimal_point_scan(self, source: str, fixed: bool, expected: bool) -> None:
         assert declares_decimal_point_comma(source, fixed_format=fixed) is expected
-
-    def test_commented_out_currency_sign_declares_nothing(self) -> None:
-        assert _declared_currency_symbols("*> CURRENCY SIGN IS '#'.") == frozenset()
-        assert _declared_currency_symbols("CURRENCY SIGN IS '#'. *> x") == {"#"}
 
 
 # -- tokenize: free-format lines have no indicator column ------------------------------

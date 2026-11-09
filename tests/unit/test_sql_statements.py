@@ -730,19 +730,6 @@ class TestEdgeCases:
 class TestExecSQLStatementMethods:
     """Test ExecSQLStatement class methods."""
 
-    def test_add_host_variable(self):
-        """Test add_host_variable method."""
-        location = SourceLocation(1, 1)
-        stmt = ExecSQLStatement(location)
-
-        stmt.add_host_variable("WS-VAR1")
-        stmt.add_host_variable("WS-VAR2")
-        stmt.add_host_variable("WS-VAR1")  # Duplicate
-
-        assert "WS-VAR1" in stmt.host_variables
-        assert "WS-VAR2" in stmt.host_variables
-        assert len(stmt.host_variables) == 2  # No duplicates
-
     def test_sql_type_property(self):
         """Test sql_type property."""
         location = SourceLocation(1, 1)
@@ -816,16 +803,6 @@ class TestFetchStatement:
 
 class TestDynamicSQLStatement:
     """Test DynamicSQLStatement class."""
-
-    def test_dynamic_sql_creation(self):
-        """Test DynamicSQLStatement creation."""
-        location = SourceLocation(1, 1)
-        stmt = DynamicSQLStatement(location)
-        stmt.prepared_statement_name = "stmt1"
-        stmt.set_dynamic_sql("SELECT * FROM :table")
-
-        assert stmt.prepared_statement_name == "stmt1"
-        assert stmt.dynamic_sql_text == "SELECT * FROM :table"
 
     def test_add_using_variable(self):
         """Test add_using_variable method."""

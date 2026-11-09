@@ -245,21 +245,6 @@ class TestCatalogDict:
         json.dumps(catalog_to_dict())
 
 
-class TestDialectServiceInfoStaysInSync:
-    """`get_le_service_info` is derived from the catalogue -- prove it."""
-
-    def test_derived_entry_matches_the_signature(self) -> None:
-        dialect = IBMEnterpriseCobol()
-        info = dialect.get_le_service_info("CEEDAYS")
-        sig = le_service_signature("CEEDAYS")
-        assert info is not None and sig is not None
-        assert info["description"] == sig.summary
-        assert info["parameters"] == [p.name for p in sig.parameters]
-
-    def test_uncatalogued_service_still_has_info(self) -> None:
-        assert IBMEnterpriseCobol().get_le_service_info("CEETERM") is not None
-
-
 class TestServiceOperandsMatchIbm:
     """Checked against the z/OS LE Programming Reference (SA38-0683)."""
 
@@ -302,11 +287,6 @@ class TestServiceOperandsMatchIbm:
             "int32",
             "float64",
             "feedback",
-        ]
-        assert IBMEnterpriseCobol().get_le_service_info(name)["parameters"] == [
-            "output_GMT_Lilian",
-            "output_GMT_seconds",
-            "fc",
         ]
 
     def test_ceeloct_still_returns_gregorian(self) -> None:
@@ -376,4 +356,4 @@ class TestEnterpriseSixIntrinsicSignatures:
         assert sig is not None
         assert len(sig.required_arguments) == required
         assert len(sig.arguments) == total
-        assert IBMEnterpriseCobol().is_intrinsic_function(name)
+        assert name.upper() in IBMEnterpriseCobol.IBM_INTRINSIC_FUNCTIONS

@@ -191,43 +191,6 @@ class ParseStatistics:
         }
 
 
-class PluginManager:
-    """Plugin management system for parser extensibility."""
-
-    def __init__(self) -> None:
-        self._plugins: dict[str, object] = {}
-        self._active_plugins: list[str] = []
-
-    def register_plugin(self, plugin: object) -> bool:
-        """Register a new plugin with the parser."""
-        plugin_name = getattr(plugin, "name", plugin.__class__.__name__)
-
-        if plugin_name in self._plugins:
-            return False  # Plugin already registered
-
-        self._plugins[plugin_name] = plugin
-        self._active_plugins.append(plugin_name)
-        return True
-
-    def unregister_plugin(self, plugin_name: str) -> bool:
-        """Unregister a plugin by name."""
-        if plugin_name not in self._plugins:
-            return False
-
-        del self._plugins[plugin_name]
-        if plugin_name in self._active_plugins:
-            self._active_plugins.remove(plugin_name)
-        return True
-
-    def get_active_plugins(self) -> list[str]:
-        """Get list of active plugin names."""
-        return self._active_plugins.copy()
-
-    def get_plugin(self, plugin_name: str) -> object | None:
-        """Get a specific plugin by name."""
-        return self._plugins.get(plugin_name)
-
-
 # Module exports
 __all__ = [
     "ErrorRecoveryMode",
@@ -239,5 +202,4 @@ __all__ = [
     "UnterminatedStringError",
     "MemoryLimitExceededError",
     "ParseStatistics",
-    "PluginManager",
 ]

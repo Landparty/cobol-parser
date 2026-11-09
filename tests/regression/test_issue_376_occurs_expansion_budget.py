@@ -18,14 +18,14 @@ from cobolparser.generators import (
     ProgramFixtureGenerator,
     ProgramLayoutIndex,
 )
-from cobolparser.layout import fields as layout
 from cobolparser.generators.data.copybook import parse_copybook_records
+from cobolparser.generators.data.views import build_record_views
+from cobolparser.layout import fields as layout
 from cobolparser.layout.fields import (
     _MAX_EXPANDED_OCCURRENCES,
     flatten_record,
     occurs_expansion_caveats,
 )
-from cobolparser.generators.data.views import build_record_views
 
 MISTYPED = """\
        01  IN-REC.
