@@ -30,7 +30,8 @@ from typing import Any
 from ..models.program import CobolProgram
 from ..models.statements.call import CallStatement, EntryStatement
 from ._names import callee_names
-from .program_flow import ProgramFlowAnalyzer, ProgramFlowReport
+from .context import ProgramContext
+from .program_flow import ProgramFlowReport
 from .program_flow.edges import INTERNAL_EDGE_TYPES, PERFORM_EDGE_TYPES
 from .program_flow.models import FlowEdgeType
 from .value_tracker import DynamicCallAnalyzer
@@ -253,13 +254,14 @@ class RecursionRiskAnalyzer:
 
     def analyze(
         self,
-        ast: CobolProgram,
+        ast: CobolProgram | ProgramContext,
         flow_report: ProgramFlowReport | None = None,
     ) -> RecursionRiskReport:
         """Analyze *ast* for recursion-driven infinite-loop risks.
 
         Args:
-            ast: The parsed COBOL program AST.
+            ast: The parsed COBOL program AST, or a
+                :class:`~.context.ProgramContext` whose flow graph is reused.
             flow_report: An already-computed :class:`ProgramFlowReport` to
                 reuse instead of running :class:`ProgramFlowAnalyzer` again
                 (it shares cycle detection with this analyzer).
@@ -267,11 +269,9 @@ class RecursionRiskAnalyzer:
         Returns:
             A :class:`RecursionRiskReport` listing every risk found.
         """
-        if flow_report is None:
-            flow_report = ProgramFlowAnalyzer().analyze(ast)
-
-        risks = self._perform_goto_risks(flow_report)
-        risks.extend(self._call_recursion_risks(ast))
+        ctx = ProgramContext.of(ast, flow=flow_report)
+        risks = self._perform_goto_risks(ctx.flow)
+        risks.extend(self._call_recursion_risks(ctx.ast))
         return RecursionRiskReport(risks=risks)
 
     def _perform_goto_risks(

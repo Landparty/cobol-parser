@@ -58,7 +58,8 @@ from ..models.statements.control import (
     SearchStatement,
 )
 from ._procedures import ProcedureIndex
-from .program_flow import ProgramFlowAnalyzer, ProgramFlowReport
+from .context import ProgramContext
+from .program_flow import ProgramFlowReport
 from .program_flow.edges import GOTO_EDGE_TYPES, PERFORM_EDGE_TYPES
 from .program_flow.scanner import LEADING_SENTENCES_NODE, leading_sentences
 
@@ -226,13 +227,14 @@ class ComplexityAnalyzer:
 
     def analyze(
         self,
-        ast: CobolProgram,
+        ast: CobolProgram | ProgramContext,
         flow_report: ProgramFlowReport | None = None,
     ) -> ComplexityReport:
         """Analyze a COBOL program for complexity.
 
         Args:
-            ast: The parsed COBOL program AST.
+            ast: The parsed COBOL program AST, or a
+                :class:`~.context.ProgramContext` whose flow graph is reused.
             flow_report: An optional precomputed ``ProgramFlowReport`` (from
                 ``ProgramFlowAnalyzer``) to avoid a second pass over the same
                 AST when a caller already has one.
@@ -240,12 +242,13 @@ class ComplexityAnalyzer:
         Returns:
             A ComplexityReport with per-procedure and program-level metrics.
         """
+        ctx = ProgramContext.of(ast, flow=flow_report)
+        ast = ctx.ast
         proc_division = ast.procedure_division
         if proc_division is None:
             return ComplexityReport(program_name=ast.program_name)
 
-        if flow_report is None:
-            flow_report = ProgramFlowAnalyzer().analyze(ast)
+        flow_report = ctx.flow
 
         paragraph_map = self._collect_paragraph_map(proc_division)
         fan_in, fan_out = self._collect_fan_counts(flow_report)

@@ -197,6 +197,13 @@ bad severity) raises `ToolError`, which the SDK returns as an error result.
 
 ## Workspace
 
+- **Shared analysis facts.** `ParsedProgram.context(unit)` keeps one
+  [`ProgramContext`](analysis.md#calling-conventions) per unit per parse;
+  `.xref(unit)` / `.flow(unit)` read it under `stdout_to_stderr()`. Tools use
+  these instead of constructing `XrefAnalyzer` / `ProgramFlowAnalyzer`
+  (`common._flow`, `navigation.statement_rows`, `explain_symbol`, the slice's
+  `_XrefIndex`, `program_brief`'s debt and the codebase index's health).
+  `ParsedProgram.report(name, unit, build)` still memoizes the other reports.
 - **Guard.** `Workspace.resolve()` resolves symlinks, then `_within()`
   accepts anything under the root and, under a kept copybook directory
   outside the root (`_outside`), only a *member* (`_member_of`): suffix in

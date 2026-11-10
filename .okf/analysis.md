@@ -1,14 +1,14 @@
 ---
 type: Module
 title: Static Analysis
-description: Routing page for cobolparser/analysis/ (36 public modules + the program_flow/ package + 6 private helpers) and dialects/le_signatures.py -- calling conventions shared by every analyzer, which .okf/analysis/*.md file covers which analyzer, the module map and the public imports.
+description: Routing page for cobolparser/analysis/ (37 public modules + the program_flow/ package + 6 private helpers) and dialects/le_signatures.py -- calling conventions shared by every analyzer, which .okf/analysis/*.md file covers which analyzer, the module map and the public imports.
 tags: [analysis, routing, dead-code, program-flow, lint, xref, field-lineage, business-rules, fixtures, codebase-graph, sql-cics-lint, le-signatures]
 timestamp: 2026-10-15T00:00:00Z
 ---
 
 # Static Analysis
 
-`cobolparser/analysis/` holds every static analyzer: 36 public modules, the
+`cobolparser/analysis/` holds every static analyzer: 37 public modules, the
 `program_flow/` package (the control-flow graph, 8 modules) and 6 private
 helpers (`_procedures.py`, `_names.py`, `_files.py`, `_cics.py`,
 `_sql_whenever.py`, `_sql_flow.py`) the analyzers share so they cannot
@@ -31,6 +31,25 @@ the exceptions are `MoveTypeChecker` / `LinkageChecker` / `DclgenChecker`
 `DynamicCallAnalyzer` (`.analyze(ast) -> None`: it annotates the AST's CALL
 statements in place). CFG consumers (recursion, complexity, debt, lint) accept
 a precomputed `flow_report=`.
+
+**Shared facts: `ProgramContext`.** `analysis/context.py`'s `ProgramContext(ast)`
+builds one unit's cross-reference (`.xref`), flow graph (`.flow`) and
+`ProcedureIndex` (`.procedures`, `None` without a PROCEDURE DIVISION) lazily,
+once each. The analyzers that read those facts take a context wherever they
+take an AST: `XrefAnalyzer` / `ProgramFlowAnalyzer` (which then return the
+memoized report), `LintAnalyzer`, `BugPatternAnalyzer`, `CodePatternAnalyzer`,
+`CompilerCheckAnalyzer`, `ComplexityAnalyzer`, `RecursionRiskAnalyzer`,
+`TechnicalDebtAnalyzer`, `ProgramSignatureExtractor`,
+`ConstraintExtractor.extract` and `ProgramFixtureGenerator.generate*`. A bare
+AST gets a context for that one call (`ProgramContext.of`), so nothing is shared
+across calls unless the caller passes the same context; `ctx.unit(program)`
+keeps one per contained program. The MCP server keeps one per unit per parse
+(`ParsedProgram.context` / `.xref` / `.flow`). Invariants: facts are shared, so
+a reader must not mutate a report it got from a context (the `xref` CLI appends
+caveats to its own report, which it builds bare); and a context assumes its AST
+no longer changes. `BusinessRuleExtractor` and `FieldFlowAnalyzer` keep their
+own `XrefAnalyzer` instance: they call its name-resolution helpers, which read
+and write the instance's state, so a shared report would not do.
 
 **Scope.** Most analyzers are program-unit scoped: they examine the unit they
 are given and skip `ast.contained_programs` (iterate `ast.program_units()` to
@@ -69,6 +88,7 @@ Report origins after copybook expansion: [analysis/lint.md](analysis/lint.md).
 | `complexity.py` | `ComplexityAnalyzer`, `ComplexityThresholds` | [flow](analysis/flow.md) |
 | `redundancy.py` | `RedundancyAnalyzer` (clone groups, paragraph fingerprints) | [flow](analysis/flow.md) |
 | `technical_debt.py` | `TechnicalDebtAnalyzer`, `DebtWeights` | [flow](analysis/flow.md) |
+| `context.py` | `ProgramContext` (memoized xref, flow graph, procedure index) | [analysis](#calling-conventions) |
 | `_procedures.py` | `ProcedureIndex`, `enclosing_section`, `qualify` | [flow](analysis/flow.md) |
 | `_cics.py` | `cics_exit_kind`, `cics_terminator_kind`, `cics_identifier_options` | [flow](analysis/flow.md), [data-use](analysis/data-use.md) |
 | `_sql_whenever.py` | `whenever_coverage` | [flow](analysis/flow.md) |
@@ -120,6 +140,7 @@ from cobolparser import (
     TechnicalDebtAnalyzer, LintAnalyzer, BusinessRuleExtractor, DclgenChecker,
     IOLogger, IOSequenceAnalyzer, MoveTypeChecker, LinkageChecker,
     LanguageEnvironmentAnalyzer, CRUDMatrixGenerator, DynamicCallAnalyzer,
+    ProgramContext,
 )
 # cobolparser.analysis re-exports all of the above plus
 from cobolparser.analysis import IMSSegmentAnalyzer, HostVariableResolver

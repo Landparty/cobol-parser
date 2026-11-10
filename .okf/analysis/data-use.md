@@ -368,7 +368,9 @@ The classic mainframe compiler cross-reference: for every symbol a program
 declares — data items, level-88 condition names, files, paragraphs and
 sections — where it is *defined* and every place it is *referenced*, each
 reference carrying its location, the statement it sits in, the enclosing
-paragraph, and the **role** it plays there.
+paragraph, and the **role** it plays there. `analyze()` handed a
+[`ProgramContext`](../analysis.md#calling-conventions) returns its memoized `.xref` (built once, shared; do not
+mutate it).
 
 **Roles by statement.** Each mapping below gives the operand its real
 read/write role; `program_signature.py` grades LINKAGE directions and

@@ -440,7 +440,7 @@ class TestFlowReportReuse:
         ast = _ast()
         flow_report = ProgramFlowAnalyzer().analyze(ast)
         with patch(
-            "cobolparser.analysis.lint.ProgramFlowAnalyzer"
+            "cobolparser.analysis.program_flow.ProgramFlowAnalyzer"
         ) as flow_analyzer_class:
             LintAnalyzer(["recursion-check", "complexity"]).analyze(
                 ast, flow_report=flow_report
@@ -451,7 +451,8 @@ class TestFlowReportReuse:
         from cobolparser.analysis.program_flow import ProgramFlowAnalyzer
 
         with patch(
-            "cobolparser.analysis.lint.ProgramFlowAnalyzer", wraps=ProgramFlowAnalyzer
+            "cobolparser.analysis.program_flow.ProgramFlowAnalyzer",
+            wraps=ProgramFlowAnalyzer,
         ) as flow_analyzer_class:
             LintAnalyzer(["recursion-check", "complexity"]).analyze(_ast())
         assert flow_analyzer_class.call_count == 1

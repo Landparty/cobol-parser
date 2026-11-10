@@ -43,7 +43,7 @@ from collections import OrderedDict
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field, replace
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from .._lines import split_source_lines
 from ..config.project import (
@@ -55,6 +55,11 @@ from ..config.project import (
 from ..models.program import CobolProgram
 from ..preprocess.models import CopybookSearchPath
 from .envelope import Caveat, Response, ToolError
+
+if TYPE_CHECKING:
+    from ..analysis.context import ProgramContext
+    from ..analysis.program_flow import ProgramFlowReport
+    from ..analysis.xref import XrefReport
 
 #: Programs kept parsed at once. A 20,000-line program's AST is tens of MB,
 #: so the bound is on entries, and small.
@@ -195,6 +200,8 @@ class ParsedProgram:
     _display: Callable[[str], str] = field(repr=False, default=str)
     #: Analyzer reports already computed for this parse, by (analyzer, unit).
     _reports: dict[tuple[str, int], Any] = field(repr=False, default_factory=dict)
+    #: The shared analysis context of each unit, by ``id(unit)``.
+    _contexts: dict[int, ProgramContext] = field(repr=False, default_factory=dict)
 
     def report(self, name: str, unit: CobolProgram, build: Callable[[], Any]) -> Any:
         """*build()*'s result for *unit*, computed once per parse.
@@ -208,6 +215,29 @@ class ParsedProgram:
             with stdout_to_stderr():
                 self._reports[key] = build()
         return self._reports[key]
+
+    def context(self, unit: CobolProgram) -> ProgramContext:
+        """The :class:`~cobolparser.analysis.context.ProgramContext` of
+        *unit*, one per unit per parse, so every tool and analyzer shares its
+        cross-reference, flow graph and procedure index."""
+        from ..analysis.context import ProgramContext
+
+        found = self._contexts.get(id(unit))
+        if found is None or found.ast is not unit:
+            found = self._contexts[id(unit)] = ProgramContext(unit)
+        return found
+
+    def xref(self, unit: CobolProgram) -> XrefReport:
+        """*unit*'s cross-reference, built once per parse."""
+        ctx = self.context(unit)
+        with stdout_to_stderr():
+            return ctx.xref
+
+    def flow(self, unit: CobolProgram) -> ProgramFlowReport:
+        """*unit*'s control flow graph, built once per parse."""
+        ctx = self.context(unit)
+        with stdout_to_stderr():
+            return ctx.flow
 
     @property
     def ast(self) -> CobolProgram:

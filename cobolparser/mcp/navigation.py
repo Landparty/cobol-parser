@@ -24,7 +24,7 @@ from typing import Any
 
 from ..models.program import CobolParagraph, CobolProgram, CobolSection
 from .envelope import Response, ToolError, clamp_limit
-from .workspace import ParsedProgram, Stamp, Workspace, stdout_to_stderr
+from .workspace import ParsedProgram, Stamp, Workspace
 
 #: Most lines one read_procedure answer shows.
 MAX_PROCEDURE_LINES = 300
@@ -146,13 +146,11 @@ def statement_rows(
     parsed: ParsedProgram, lines: _Lines, response: Response
 ) -> Iterator[StatementRow]:
     """Every statement of every unit of *parsed*, with its operands."""
-    from ..analysis.xref import XrefAnalyzer
     from .tools.common import _own_statements
 
     for unit in parsed.ast.program_units():
         name = unit.program_name or "<unnamed>"
-        with stdout_to_stderr():
-            report = XrefAnalyzer().analyze(unit)
+        report = parsed.xref(unit)
         operands: dict[tuple[int, str], dict[str, set[str]]] = {}
         for entry in report.entries:
             if entry.kind not in ("data-item", "condition-name", "file", "index"):

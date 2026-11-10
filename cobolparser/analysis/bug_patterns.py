@@ -116,8 +116,10 @@ from ._procedures import (
     enclosing_section,
     statement_qualifier,
 )
+from .context import ProgramContext
 from .field_widening import Capacity, capacity_of
-from .program_flow import FlowEdgeType, ProgramFlowAnalyzer, ProgramFlowReport
+from .program_flow import FlowEdgeType, ProgramFlowReport
+from .xref import XrefEntry, XrefReport
 
 #: Every rule this module runs, in report order.
 BUG_PATTERN_RULES: tuple[str, ...] = (
@@ -467,9 +469,12 @@ class BugPatternAnalyzer:
         self.rules = tuple(r for r in BUG_PATTERN_RULES if r in set(selected))
 
     def analyze(
-        self, ast: CobolProgram, *, flow_report: ProgramFlowReport | None = None
+        self,
+        ast: CobolProgram | ProgramContext,
+        *,
+        flow_report: ProgramFlowReport | None = None,
     ) -> BugPatternReport:
-        context = _Context(ast, flow_report)
+        context = _Context(ProgramContext.of(ast, flow=flow_report))
         report = BugPatternReport()
         for rule in self.rules:
             report.findings.extend(context.run(rule))
@@ -477,14 +482,14 @@ class BugPatternAnalyzer:
 
 
 class _Context:
-    """Lazily built facts one program unit's rules share."""
+    """Lazily built facts one program unit's rules share: the rule-specific
+    ones here, the cross-analyzer ones (xref, CFG, procedure index) from the
+    unit's :class:`~.context.ProgramContext`."""
 
-    def __init__(self, ast: CobolProgram, flow: ProgramFlowReport | None) -> None:
-        self.ast = ast
-        self._flow = flow
+    def __init__(self, program: ProgramContext) -> None:
+        self.program = program
+        self.ast = program.ast
         self._data: _DataIndex | None = None
-        self._xref: Any = None
-        self._index: ProcedureIndex | None = None
         self._statements: list[Any] | None = None
         self._addresses: set[str] | None = None
 
@@ -497,24 +502,16 @@ class _Context:
         return self._data
 
     @property
-    def xref(self) -> Any:
-        if self._xref is None:
-            from .xref import XrefAnalyzer
-
-            self._xref = XrefAnalyzer().analyze(self.ast)
-        return self._xref
+    def xref(self) -> XrefReport:
+        return self.program.xref
 
     @property
     def flow(self) -> ProgramFlowReport:
-        if self._flow is None:
-            self._flow = ProgramFlowAnalyzer().analyze(self.ast)
-        return self._flow
+        return self.program.flow
 
     @property
     def procedures(self) -> ProcedureIndex | None:
-        if self._index is None and self.ast.procedure_division is not None:
-            self._index = ProcedureIndex.build(self.ast.procedure_division)
-        return self._index
+        return self.program.procedures
 
     def top_statements(self) -> list[Any]:
         """Top-level statements of every procedure, in source order."""
@@ -1234,7 +1231,7 @@ class _Context:
     # -- uninitialized -------------------------------------------------------
 
     def _uninitialized(self) -> list[BugFinding]:
-        entries: dict[tuple[str, tuple[str, ...]], Any] = {}
+        entries: dict[tuple[str, tuple[str, ...]], XrefEntry] = {}
         for entry in self.xref.entries:
             if entry.kind == "data-item":
                 key = (entry.name.upper(), tuple(a.upper() for a in entry.ancestors))
@@ -1255,10 +1252,10 @@ class _Context:
             ):
                 continue
             key = (item.name.upper(), tuple(a.name.upper() for a in ancestors))
-            entry = entries.get(key)
-            if entry is None:
+            found = entries.get(key)
+            if found is None:
                 continue
-            reads = [r for r in entry.references if r.role in _READ_ROLES]
+            reads = [r for r in found.references if r.role in _READ_ROLES]
             if not reads or self._may_be_set(item):
                 continue
             first = min(reads, key=lambda r: (r.location.line, r.location.column))

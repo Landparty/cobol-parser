@@ -28,12 +28,15 @@ import difflib
 import functools
 from collections import deque
 from dataclasses import dataclass, field
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from ..models.program import CobolParagraph, CobolProgram
 from ..models.statements.base import CobolStatement
 from .envelope import Response, ToolError
 from .workspace import Workspace
+
+if TYPE_CHECKING:
+    from ..analysis.xref import XrefReport
 
 #: Most statements one slice lists.
 MAX_SLICE_STATEMENTS = 200
@@ -111,7 +114,7 @@ def slice_field(
         if n[0] == "P" and n[1] == program_id and n[2] == overlay_item_kind()
     ]
     statements = _statements_by_line(unit)
-    xref = _XrefIndex(unit)
+    xref = _XrefIndex(parsed.xref(unit))
     rows: dict[int, _Row] = {}
     fields: set[str] = set()
     ports: set[str] = set()
@@ -361,12 +364,9 @@ class _XrefIndex:
     TRUE`` writes it, ``IF FLAG-ON`` tests it.
     """
 
-    def __init__(self, unit: CobolProgram) -> None:
-        from ..analysis.xref import ROLE_CONDITION, ROLE_WRITE, XrefAnalyzer
-        from .workspace import stdout_to_stderr
+    def __init__(self, report: XrefReport) -> None:
+        from ..analysis.xref import ROLE_CONDITION, ROLE_WRITE
 
-        with stdout_to_stderr():
-            report = XrefAnalyzer().analyze(unit)
         self._writes: dict[str, set[int]] = {}
         self._tests: dict[str, set[int]] = {}
         self._written_on: dict[int, set[str]] = {}

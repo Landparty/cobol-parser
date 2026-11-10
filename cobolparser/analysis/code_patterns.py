@@ -103,6 +103,7 @@ from .bug_patterns import (
     _receiving_capacity,
     walk_statements,
 )
+from .context import ProgramContext
 from .program_flow import ProgramFlowReport
 
 #: Every rule this module runs, in report order.
@@ -355,9 +356,12 @@ class CodePatternAnalyzer:
         self.rules = tuple(r for r in CODE_PATTERN_RULES if r in set(selected))
 
     def analyze(
-        self, ast: CobolProgram, *, flow_report: ProgramFlowReport | None = None
+        self,
+        ast: CobolProgram | ProgramContext,
+        *,
+        flow_report: ProgramFlowReport | None = None,
     ) -> CodePatternReport:
-        context = _Context(ast, flow_report)
+        context = _Context(ProgramContext.of(ast, flow=flow_report))
         report = CodePatternReport()
         for rule in self.rules:
             report.findings.extend(run_code_pattern(context, rule))

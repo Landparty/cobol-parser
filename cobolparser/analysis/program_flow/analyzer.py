@@ -12,6 +12,7 @@ from typing import Any
 from ...models.program import CobolProgram, CobolSection
 from .._procedures import ProcedureIndex
 from .._sql_whenever import whenever_coverage
+from ..context import ProgramContext
 from .cycles import classify_cycles, detect_cycles
 from .edges import (
     GOTO_EDGE_TYPES,
@@ -81,15 +82,19 @@ class ProgramFlowAnalyzer:
         self._branch_nodes: list[BranchNode] = []
         self._terminating_paragraphs: set[str] = set()
 
-    def analyze(self, ast: CobolProgram) -> ProgramFlowReport:
+    def analyze(self, ast: CobolProgram | ProgramContext) -> ProgramFlowReport:
         """Analyze a COBOL program and build its control flow graph.
 
         Args:
-            ast: The parsed COBOL program AST.
+            ast: The parsed COBOL program AST, or a
+                :class:`~..context.ProgramContext`, whose memoized flow graph
+                is returned (built once, shared).
 
         Returns:
             A ProgramFlowReport with the complete flow graph.
         """
+        if isinstance(ast, ProgramContext):
+            return ast.flow
         self._nodes = {}
         self._edges = []
         self._ordered_procedures = []

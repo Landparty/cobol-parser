@@ -3,7 +3,7 @@ type: Log
 title: OKF Update Log
 description: Dated log of OKF bundle updates, newest first.
 tags: [log, changelog, history]
-timestamp: 2026-11-09T00:00:00Z
+timestamp: 2026-11-10T00:00:00Z
 ---
 
 # OKF Update Log
@@ -13,6 +13,14 @@ follows up on even when a day or two out of order -- that adjacency is
 deliberate. Anything else appended to the bottom is a mistake: five
 entries, including both 2026-09-15 sections, were found there on
 2026-09-15 and moved back up.
+
+## 2026-11-10 -- `ProgramContext`: shared per-program facts
+
+- [analysis.md](analysis.md): new `analysis/context.py` (`ProgramContext`,
+  memoized xref, flow graph and procedure index) under "Calling
+  conventions"; the analyzers that read those facts take a context wherever
+  they take an AST; module count 36 -> 37 public. Tests:
+  `tests/unit/analysis/test_program_context.py`.
 
 ## 2026-11-09 -- hunt sweep: #852, #853, #857
 

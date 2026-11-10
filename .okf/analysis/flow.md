@@ -495,7 +495,8 @@ Finds recursion-driven infinite-loop risks. Two mechanisms, both surfaced as
 
 - **PERFORM/GO TO cycles** — reuses `ProgramFlowAnalyzer`'s `cycle_details`
   (an optional precomputed `ProgramFlowReport` can be passed via
-  `analyze(ast, flow_report=...)` to avoid a second pass). A
+  `analyze(ast, flow_report=...)`, or a [`ProgramContext`](../analysis.md#calling-conventions) in place of
+  `ast`, to avoid a second pass). A
   `PERFORM_RECURSION` cycle (out-of-line paragraphs performing each other in
   a loop — invalid re-entrant PERFORM in standard COBOL) is always `HIGH`,
   independent of any UNTIL/TIMES/VARYING clause on the individual PERFORMs.
@@ -571,8 +572,8 @@ walking each paragraph's own statement tree -- not the inter-paragraph CFG
 paragraph (IF/EVALUATE/SEARCH/loop-PERFORM, exception-handling clauses),
 not in how paragraphs call each other. An optional precomputed
 `ProgramFlowReport` can be passed via `flow_report=` (same convention as
-`RecursionRiskAnalyzer`) to avoid a second pass; `TechnicalDebtAnalyzer`
-below always does this.
+`RecursionRiskAnalyzer`) to avoid a second pass, or a [`ProgramContext`](../analysis.md#calling-conventions)
+in place of `ast`; `TechnicalDebtAnalyzer` below hands both its context.
 
 **Two numbers per procedure**: `cyclomatic_complexity` (1 plus one decision
 point per IF, per WHEN arm on EVALUATE/SEARCH excluding WHEN OTHER/default,

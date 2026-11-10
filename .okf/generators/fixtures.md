@@ -649,6 +649,8 @@ index = ProgramLayoutIndex.build(ast)
 boundary_report = BoundaryInventoryAnalyzer().analyze(ast, index)
 constraint_report = ConstraintExtractor().extract(ast, index, boundary_report)
 flow_report = ProgramFlowAnalyzer().analyze(ast)
+# generate_with_scenarios does the same through one ProgramContext, so the
+# xref and flow graph are built once per bundle (not per step and scenario)
 
 plan = ScenarioPlanner().plan(
     constraint_report, flow_report, boundary_report, mode="all"

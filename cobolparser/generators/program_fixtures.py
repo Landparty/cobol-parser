@@ -27,13 +27,13 @@ from ..analysis.boundary_inventory import (
 )
 from ..analysis.const_fold import ConstantFolder
 from ..analysis.constraints import ConstraintExtractor
+from ..analysis.context import ProgramContext
 from ..analysis.invocation_counts import (
     InvocationCounts,
     count_invocations,
     is_plain_eof_loop,
 )
-from ..analysis.program_flow import ProgramFlowAnalyzer
-from ..analysis.xref import ROLE_WRITE, XrefAnalyzer
+from ..analysis.xref import ROLE_WRITE
 from ..layout.errors import ProgramLayoutError
 from ..layout.fields import FieldSpec, assign_columns, flatten_record
 from ..layout.options import DataGeneratorOptions
@@ -114,12 +114,12 @@ class _CallCounter:
 
     @classmethod
     def build(
-        cls, ast: CobolProgram, index: ProgramLayoutIndex, report: BoundaryReport
+        cls, ctx: ProgramContext, index: ProgramLayoutIndex, report: BoundaryReport
     ) -> _CallCounter:
-        counts = count_invocations(ast, report, index)
+        counts = count_invocations(ctx.ast, report, index)
         eof_files: set[tuple[str, str]] = set()
         if any(b.ref.category == "READ" for b in report.boundaries):
-            constraints = ConstraintExtractor().extract(ast, index, report)
+            constraints = ConstraintExtractor().extract(ctx, index, report)
             for seq in constraints.sequence_constraints:
                 _, _, line = seq.origin.partition("@")
                 if not line.isdigit():
@@ -128,7 +128,7 @@ class _CallCounter:
                 if (
                     len(loops) == 1
                     and counts.count_at(int(line), PerformStatement) == 1
-                    and is_plain_eof_loop(ast, loops[0], index)
+                    and is_plain_eof_loop(ctx.ast, loops[0], index)
                 ):
                     eof_files.add((seq.boundary.category, seq.boundary.key))
         return cls(counts=counts, eof_files=eof_files)
@@ -303,12 +303,14 @@ class ProgramFixtureGenerator:
 
     def generate(
         self,
-        ast: CobolProgram,
+        ast: CobolProgram | ProgramContext,
         index: ProgramLayoutIndex,
         report: BoundaryReport,
         *,
         seed: int | None = None,
     ) -> FixtureBundle:
+        ctx = ProgramContext.of(ast)
+        ast = ctx.ast
         bundle_seed = seed if seed is not None else random.randrange(2**31)
         self._add_cics_interface(index, report)
         scenario = Scenario(
@@ -319,7 +321,7 @@ class ProgramFixtureGenerator:
         layouts: dict[str, list[FieldSpec]] = {}
         unresolved: list[str] = list(report.unresolved)
         unresolved.extend(self._alternate_view_notes(report, {}))
-        counter = _CallCounter.build(ast, index, report)
+        counter = _CallCounter.build(ctx, index, report)
         anchors: dict[tuple[str, str], int] = {}
 
         for boundary in report.boundaries:
@@ -338,7 +340,7 @@ class ProgramFixtureGenerator:
             unresolved.extend(
                 n
                 for n in self._attach_entry_parameters(
-                    ast, index, scenario, bundle_seed, layouts
+                    ctx, index, scenario, bundle_seed, layouts
                 )
                 if n not in unresolved
             )
@@ -370,7 +372,7 @@ class ProgramFixtureGenerator:
 
     def generate_with_scenarios(
         self,
-        ast: CobolProgram,
+        ast: CobolProgram | ProgramContext,
         index: ProgramLayoutIndex,
         report: BoundaryReport,
         *,
@@ -396,30 +398,36 @@ class ProgramFixtureGenerator:
         fed by a field no boundary writes, or comparing two fields) got a
         bundle with zero scenarios -- asking for more coverage yielded
         less, and a consumer like mockymock had nothing to scaffold.
+
+        *ast* may be a :class:`~cobolparser.analysis.context.ProgramContext`;
+        either way the cross-reference and flow graph are built once for
+        the whole bundle.
         """
+        ctx = ProgramContext.of(ast)
+        ast = ctx.ast
         if mode not in _SCENARIO_MODES:
             raise ValueError(
                 f"unknown scenario mode: {mode!r} (expected one of {_SCENARIO_MODES})"
             )
         if mode == "happy":
-            return self.generate(ast, index, report, seed=seed)
+            return self.generate(ctx, index, report, seed=seed)
 
         bundle_seed = seed if seed is not None else random.randrange(2**31)
-        happy = self.generate(ast, index, report, seed=bundle_seed)
+        happy = self.generate(ctx, index, report, seed=bundle_seed)
         constraint_report = ConstraintExtractor().extract(
-            ast,
+            ctx,
             index,
             report,
             extra_fed_names=(
                 self._entry_parameter_names(ast, index) if self.entry_parameters else ()
             ),
         )
-        flow_report = ProgramFlowAnalyzer().analyze(ast)
+        flow_report = ctx.flow
         scenario_plan = ScenarioPlanner().plan(
             constraint_report, flow_report, report, mode=mode
         )
         stamp_arm_origins(scenario_plan.coverage, index.source_map)
-        counter = _CallCounter.build(ast, index, report)
+        counter = _CallCounter.build(ctx, index, report)
 
         layouts: dict[str, list[FieldSpec]] = dict(happy.layouts)
         unresolved: list[str] = list(happy.unresolved) + scenario_plan.unresolved
@@ -466,7 +474,7 @@ class ProgramFixtureGenerator:
             if self.entry_parameters:
                 # Its notes are the happy path's, already reported above.
                 self._attach_entry_parameters(
-                    ast, index, scenario, bundle_seed, layouts, override=planned
+                    ctx, index, scenario, bundle_seed, layouts, override=planned
                 )
             # Gaps are reported once, by the happy path above.
             self._pin_read_keys(
@@ -1169,7 +1177,7 @@ class ProgramFixtureGenerator:
 
     def _attach_entry_parameters(
         self,
-        ast: CobolProgram,
+        ctx: ProgramContext,
         index: ProgramLayoutIndex,
         scenario: Scenario,
         bundle_seed: int,
@@ -1180,6 +1188,7 @@ class ProgramFixtureGenerator:
         """Give `scenario` the values its caller passes through the USING
         items, and a ``stub`` expectation per field the program writes back
         through them. Returns notes on what could not be resolved."""
+        ast = ctx.ast
         names = self._entry_parameter_names(ast, index)
         procedure = ast.get_division("PROCEDURE")
         returning = (
@@ -1223,7 +1232,7 @@ class ProgramFixtureGenerator:
                 ],
             )
             layouts.setdefault(f"ENTRY:{program}", fields)
-        written = self._written_linkage_names(ast)
+        written = self._written_linkage_names(ctx)
         outputs = [
             spec
             for spec in fields
@@ -1242,12 +1251,12 @@ class ProgramFixtureGenerator:
         return unresolved
 
     @staticmethod
-    def _written_linkage_names(ast: CobolProgram) -> set[str]:
+    def _written_linkage_names(ctx: ProgramContext) -> set[str]:
         """LINKAGE SECTION data names the program writes (xref role
         ``write``): the USING fields it hands back to its caller."""
         return {
             entry.name.upper()
-            for entry in XrefAnalyzer().analyze(ast).entries
+            for entry in ctx.xref.entries
             if entry.section == "LINKAGE"
             and any(ref.role == ROLE_WRITE for ref in entry.references)
         }

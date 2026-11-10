@@ -49,7 +49,8 @@ from typing import Any
 
 from ..models.ast_base import SourceLocation
 from ..models.program import CobolProgram
-from .program_flow import ProgramFlowAnalyzer, ProgramFlowReport
+from .context import ProgramContext
+from .program_flow import ProgramFlowReport
 
 # Severity vocabulary, most severe first. Ordering is meaningful: it backs
 # --min-severity filtering and --fail-on gating in the CLI.
@@ -1238,14 +1239,12 @@ def stamp_report_origins(
     return report
 
 
-def _procedure_nodes(ast: CobolProgram) -> dict[str, Any]:
-    """Every paragraph and section of *ast*, by its procedure key (the bare
-    name, or ``"<para> OF <section>"`` for a shared name)."""
-    from ._procedures import ProcedureIndex
-
-    if ast.procedure_division is None:
+def _procedure_nodes(ctx: ProgramContext) -> dict[str, Any]:
+    """Every paragraph and section of the unit, by its procedure key (the
+    bare name, or ``"<para> OF <section>"`` for a shared name)."""
+    index = ctx.procedures
+    if index is None:
         return {}
-    index = ProcedureIndex.build(ast.procedure_division)
     return {entry.key: entry.node for entry in index.entries}
 
 
@@ -1290,7 +1289,6 @@ class LintAnalyzer:
         # Deduplicated and put back into RULES order, so `--rule complexity
         # --rule dead-code` and the reverse produce the same report.
         self._rules = tuple(r for r in RULES if r in set(selected))
-        self._flow_cache: tuple[CobolProgram, ProgramFlowReport] | None = None
 
     @property
     def rules(self) -> tuple[str, ...]:
@@ -1298,7 +1296,7 @@ class LintAnalyzer:
 
     def analyze(
         self,
-        ast: CobolProgram,
+        ast: CobolProgram | ProgramContext,
         *,
         flow_report: ProgramFlowReport | None = None,
         copybook_item_names: set[str] | None = None,
@@ -1306,11 +1304,13 @@ class LintAnalyzer:
         """Run the selected rules over *ast* and return one merged report.
 
         Args:
-            ast: The parsed COBOL program AST.
-            flow_report: An already-computed :class:`ProgramFlowReport` to
-                reuse. Two rules (``recursion-check``, ``complexity``) need
-                the control flow graph; without this they would each build
-                their own, walking the same AST twice.
+            ast: The parsed COBOL program AST, or a
+                :class:`~.context.ProgramContext` whose flow graph,
+                cross-reference and procedure index the rules then share
+                with the caller. A bare AST gets a context for this call:
+                the rules still share one of each among themselves.
+            flow_report: An already-computed :class:`ProgramFlowReport` of
+                the outermost unit, to reuse (it seeds the context).
             copybook_item_names: Upper-cased names of data items that
                 reached *ast* through an expanded COPY, when the caller
                 knows them (the ``lint`` CLI works them out by diffing an
@@ -1333,6 +1333,8 @@ class LintAnalyzer:
             a lint pass is to report as much as it can, and one analyzer
             tripping over an exotic program should not blank the other six.
         """
+        root = ProgramContext.of(ast, flow=flow_report)
+        ast = root.ast
         report = LintReport()
         units = ast.program_units()
         entry_interfaces: dict[str, list[str]] | None = None
@@ -1349,14 +1351,13 @@ class LintAnalyzer:
             entry_interfaces, entry_parameter_modes = (
                 LinkageChecker.collect_scope_interfaces(ast)
             )
-        for index, unit in enumerate(units):
-            # A caller-supplied flow report describes the outermost unit only;
-            # the others build their own.
+        for unit in units:
+            # Each unit has its own context; a caller-supplied flow report
+            # describes the outermost unit only.
             self._analyze_unit(
-                unit,
+                root.unit(unit),
                 report,
                 root=ast,
-                flow_report=flow_report if index == 0 else None,
                 copybook_item_names=copybook_item_names,
                 entry_interfaces=entry_interfaces,
                 entry_parameter_modes=entry_parameter_modes,
@@ -1371,11 +1372,10 @@ class LintAnalyzer:
 
     def _analyze_unit(
         self,
-        ast: CobolProgram,
+        ctx: ProgramContext,
         report: LintReport,
         *,
         root: CobolProgram,
-        flow_report: ProgramFlowReport | None,
         copybook_item_names: set[str] | None,
         entry_interfaces: dict[str, list[str]] | None = None,
         entry_parameter_modes: dict[str, dict[str, str]] | None = None,
@@ -1390,8 +1390,9 @@ class LintAnalyzer:
         (root)``/``collect_entry_parameter_modes(root)``, when the caller
         (``analyze()``) already built them for every unit to share.
         """
+        ast = ctx.ast
         collectors: dict[str, Callable[[], list[LintFinding]]] = {
-            "dead-code": lambda: self._dead_code(ast),
+            "dead-code": lambda: self._dead_code(ctx),
             "unused-variables": lambda: self._unused_variables(
                 ast, copybook_item_names
             ),
@@ -1400,10 +1401,8 @@ class LintAnalyzer:
             "linkage-check": lambda: self._linkage_check(
                 ast, root, entry_interfaces, entry_parameter_modes
             ),
-            "recursion-check": lambda: self._recursion_check(
-                ast, self._flow(ast, flow_report)
-            ),
-            "complexity": lambda: self._complexity(ast, self._flow(ast, flow_report)),
+            "recursion-check": lambda: self._recursion_check(ctx),
+            "complexity": lambda: self._complexity(ctx),
             "dclgen-check": lambda: self._dclgen_check(ast, report),
             "sql-cics-check": lambda: self._sql_cics(ast, report),
         }
@@ -1415,7 +1414,7 @@ class LintAnalyzer:
             from .bug_patterns import _Context
 
             if not bug_context:
-                bug_context.append(_Context(ast, self._flow(ast, flow_report)))
+                bug_context.append(_Context(ctx))
             if rule in CODE_PATTERN_RULES:
                 found = run_code_pattern(bug_context[0], rule)
             else:
@@ -1446,7 +1445,7 @@ class LintAnalyzer:
             from .compiler_checks import CompilerChecks
 
             if not bug_context:
-                bug_context.append(_Context(ast, self._flow(ast, flow_report)))
+                bug_context.append(_Context(ctx))
             if not compiler:
                 compiler.append(CompilerChecks(bug_context[0]))
             checks = compiler[0]
@@ -1487,32 +1486,13 @@ class LintAnalyzer:
             if rule not in report.rules_run:
                 report.rules_run.append(rule)
 
-    # -- Shared control flow graph --------------------------------------------
-
-    def _flow(
-        self, ast: CobolProgram, provided: ProgramFlowReport | None
-    ) -> ProgramFlowReport:
-        """The CFG the flow-dependent rules share, built at most once.
-
-        Cached on the instance for the duration of one analyze() call rather
-        than passed around, so adding a third flow-dependent rule does not
-        mean threading another argument through every collector.
-        """
-        if provided is not None:
-            return provided
-        cached = self._flow_cache
-        if cached is None or cached[0] is not ast:
-            cached = (ast, ProgramFlowAnalyzer().analyze(ast))
-            self._flow_cache = cached
-        return cached[1]
-
     # -- Per-rule collectors ---------------------------------------------------
 
-    def _dead_code(self, ast: CobolProgram) -> list[LintFinding]:
+    def _dead_code(self, ctx: ProgramContext) -> list[LintFinding]:
         from .dead_code import DeadCodeAnalyzer
 
-        report = DeadCodeAnalyzer().analyze(ast)
-        procedures = _procedure_nodes(ast)
+        report = DeadCodeAnalyzer().analyze(ctx.ast)
+        procedures = _procedure_nodes(ctx)
         findings: list[LintFinding] = []
         for item in report.dead_items:
             node = procedures.get(item.qualified_name or item.name)
@@ -1670,13 +1650,11 @@ class LintAnalyzer:
             for v in result.violations
         ]
 
-    def _recursion_check(
-        self, ast: CobolProgram, flow_report: ProgramFlowReport
-    ) -> list[LintFinding]:
+    def _recursion_check(self, ctx: ProgramContext) -> list[LintFinding]:
         from .recursion_risk import RecursionRiskAnalyzer
 
-        result = RecursionRiskAnalyzer().analyze(ast, flow_report=flow_report)
-        procedures = _procedure_nodes(ast)
+        result = RecursionRiskAnalyzer().analyze(ctx)
+        procedures = _procedure_nodes(ctx)
         findings: list[LintFinding] = []
         for risk in result.risks:
             # A risk describes a cycle, not a point -- RecursionRisk carries
@@ -1709,12 +1687,10 @@ class LintAnalyzer:
             )
         return findings
 
-    def _complexity(
-        self, ast: CobolProgram, flow_report: ProgramFlowReport
-    ) -> list[LintFinding]:
+    def _complexity(self, ctx: ProgramContext) -> list[LintFinding]:
         from .complexity import ComplexityAnalyzer
 
-        result = ComplexityAnalyzer().analyze(ast, flow_report=flow_report)
+        result = ComplexityAnalyzer().analyze(ctx)
         findings: list[LintFinding] = []
         for proc in result.procedures:
             severity = _SEVERITY_COMPLEXITY.get(proc.rating)
