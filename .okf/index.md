@@ -64,8 +64,8 @@ Dependencies point one way, down this stack (lowest first); a module may
 import its own package and anything on a lower or equal layer, and equal
 layers must not form a cycle:
 
-1. leaves: `_errors`, `_lines`, `_literals`, `_storage`, `_file_limits`,
-   `_source_directive`, `_version` (`__version__`; release-please edits it),
+1. leaves: `_errors`, `_lines`, `_literals`, `_vocabulary` (COBOL word
+   lists), `_storage`, `_file_limits`, `_source_directive`, `_version` (`__version__`; release-please edits it),
    `profiling`, `jcl`; then `definitions`, `plugins`
 2. `models` (the AST)
 3. `lexer`, `dialects`

@@ -130,6 +130,7 @@ from .._storage import (
     PACKED_USAGES,
     SINGLE_FLOAT_USAGES,
 )
+from .._vocabulary import FIGURATIVE_CANONICAL
 from ..models.ast_base import SourceLocation
 from ..models.data_items import CobolDataItem, ConditionNameItem, PictureClause
 from ..models.program import CobolParagraph, CobolProgram, CobolSection
@@ -1998,21 +1999,7 @@ def _picture_positions(picture: str) -> str:
 
 
 #: Singular and plural spellings of each figurative constant (#543).
-_FIGURATIVE_CANONICAL: dict[str, str] = {
-    "ZERO": "ZERO",
-    "ZEROS": "ZERO",
-    "ZEROES": "ZERO",
-    "SPACE": "SPACE",
-    "SPACES": "SPACE",
-    "HIGH-VALUE": "HIGH-VALUE",
-    "HIGH-VALUES": "HIGH-VALUE",
-    "LOW-VALUE": "LOW-VALUE",
-    "LOW-VALUES": "LOW-VALUE",
-    "QUOTE": "QUOTE",
-    "QUOTES": "QUOTE",
-    "NULL": "NULL",
-    "NULLS": "NULL",
-}
+_FIGURATIVE_CANONICAL = FIGURATIVE_CANONICAL
 
 _NUMERIC_LITERAL_RE = re.compile(r"[+-]?(?:\d+\.?\d*|\.\d+)")
 #: A quoted literal with its optional type prefix (``X``, ``N``, ``NX``, ...).

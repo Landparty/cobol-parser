@@ -29,6 +29,7 @@ from typing import Any
 
 from ..models.program import CobolProgram
 from ..models.statements.call import CallStatement, EntryStatement
+from ..models.walk import own_statements
 from ._names import callee_names
 from .context import ProgramContext
 from .program_flow import ProgramFlowReport
@@ -494,7 +495,7 @@ class RecursionRiskAnalyzer:
         container_names = [(unit, _names_answered_to(unit)) for unit in enclosing]
 
         risks: list[RecursionRisk] = []
-        for stmt in _own_statements(ast):
+        for stmt in own_statements(ast):
             if not isinstance(stmt, CallStatement):
                 continue
             if stmt.is_dynamic:
@@ -572,31 +573,12 @@ def _names_answered_to(unit: CobolProgram) -> set[str]:
     program_name = (unit.program_name or "").strip().upper()
     if program_name:
         names.add(program_name)
-    for stmt in _own_statements(unit):
+    for stmt in own_statements(unit):
         if isinstance(stmt, EntryStatement) and stmt.entry_name:
             name = stmt.entry_name.strip().strip("'\"").strip().upper()
             if name:
                 names.add(name)
     return names
-
-
-def _own_statements(ast: CobolProgram) -> list[Any]:
-    """*ast*'s statements, without those of the programs it contains.
-
-    ``get_all_statements()`` walks children and a contained program is a
-    child, so an inner unit's ``CALL 'OUTER'`` would otherwise be reported
-    as the outer unit calling itself (#274). Same idiom as
-    ``UnusedVariableAnalyzer._own_statements``.
-    """
-    statements = ast.get_all_statements()
-    if not ast.contained_programs:
-        return list(statements)
-    inner = {
-        id(node)
-        for contained in ast.contained_programs
-        for node in contained.traverse_depth_first()
-    }
-    return [stmt for stmt in statements if id(stmt) not in inner]
 
 
 def _container_call_risk(

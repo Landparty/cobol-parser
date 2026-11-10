@@ -22,7 +22,8 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
 from .._literals import is_quoted_literal
-from ..models.program import CobolDivision, CobolParagraph, CobolProgram
+from .._vocabulary import FIGURATIVE_CONSTANTS
+from ..models.program import CobolDivision, CobolProgram
 from ..models.sql_statements import (
     ExecSQLStatement,
     FetchStatement,
@@ -63,6 +64,7 @@ from ..models.statements.io import (
     IOWriteStatement,
 )
 from ..models.statements.misc import MergeStatement, SortStatement
+from ..models.walk import all_paragraphs
 from ..parsers.statements.ibm_exec_statements import ExecCicsStatement, ExecImsStatement
 from ._files import report_to_file_map, report_writer_files
 from ._names import RELAXED_IDENTIFIER_TOKEN_RE, callee_names
@@ -371,23 +373,7 @@ class BoundaryRef:
 
 #: Figurative constants a CALL may pass (``BY CONTENT ZERO``): constants, not
 #: data items the layout index could hold (#582).
-_FIGURATIVE_ARGUMENTS = frozenset(
-    {
-        "ZERO",
-        "ZEROS",
-        "ZEROES",
-        "SPACE",
-        "SPACES",
-        "HIGH-VALUE",
-        "HIGH-VALUES",
-        "LOW-VALUE",
-        "LOW-VALUES",
-        "QUOTE",
-        "QUOTES",
-        "NULL",
-        "NULLS",
-    }
-)
+_FIGURATIVE_ARGUMENTS = FIGURATIVE_CONSTANTS
 _NUMERIC_ARGUMENT_RE = re.compile(r"[+-]?(?:\d+(?:[.,]\d*)?|[.,]\d+)")
 _LENGTH_OF_RE = re.compile(r"LENGTH\s+OF\s+\S", re.IGNORECASE)
 _ADDRESS_OF_RE = re.compile(r"ADDRESS\s+OF\s+(.+)", re.IGNORECASE | re.DOTALL)
@@ -525,7 +511,7 @@ class BoundaryInventoryAnalyzer:
         self._exec_texts = self._collect_exec_texts(procedure)
         self._report_to_file = report_to_file_map(ast)
 
-        for paragraph in self._all_paragraphs(procedure):
+        for paragraph in all_paragraphs(procedure):
             statements = paragraph.statements
             for position, statement in enumerate(statements):
                 self._visit(
@@ -541,15 +527,6 @@ class BoundaryInventoryAnalyzer:
         return report
 
     # -- traversal ------------------------------------------------------
-
-    @staticmethod
-    def _all_paragraphs(procedure_division: CobolDivision) -> list[CobolParagraph]:
-        paragraphs = list(procedure_division.paragraphs)
-        for section in procedure_division.sections:
-            if isinstance(section, CobolParagraph):
-                continue
-            paragraphs.extend(section.paragraphs)
-        return paragraphs
 
     def _collect_exec_texts(
         self, procedure_division: CobolDivision
@@ -576,7 +553,7 @@ class BoundaryInventoryAnalyzer:
                 for nested in nested_list:
                     visit(nested)
 
-        for paragraph in self._all_paragraphs(procedure_division):
+        for paragraph in all_paragraphs(procedure_division):
             for statement in paragraph.statements:
                 visit(statement)
         return texts

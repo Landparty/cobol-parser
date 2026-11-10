@@ -545,8 +545,8 @@ Finds recursion-driven infinite-loop risks. Two mechanisms, both surfaced as
   same set). `HIGH`, or `LOW` when the
   `PROGRAM-ID` is declared `IS RECURSIVE` (re-entry legal; base case
   unverifiable). Only the unit's *own* statements are walked
-  (`_own_statements`: `get_all_statements()` minus every node of
-  `contained_programs`), so a contained program's `CALL 'OUTER'` is not
+  (`models.walk.own_statements`: `get_all_statements()` minus every
+  contained program's own `get_all_statements()`), so a contained program's `CALL 'OUTER'` is not
   reported as the outer unit calling itself (see #274).
 - **CALL to an enclosing program** (#274) — a contained program CALLing a
   program it is nested in (any `CobolProgram` up its `.parent` chain). The

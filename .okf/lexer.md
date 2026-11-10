@@ -242,7 +242,22 @@ Producers:
 the `VALUE` of `USAGE POINTER` / `PROCEDURE-POINTER` / `FUNCTION-POINTER`
 items and the operand of `SET ptr TO NULL` / `IF ptr = NULL`; lexed as
 `IDENTIFIER` they would be indistinguishable from a data-name reference. The
-set is one class attribute that `read_word_from_text` consults via `self.`.
+set is one class attribute that `read_word_from_text` consults via `self.`,
+a mutable copy of `cobolparser._vocabulary.FIGURATIVE_CONSTANTS_WITH_ALL`.
+
+**`cobolparser/_vocabulary.py`** (layer-1 leaf) is the package's one home for
+COBOL word lists: `FIGURATIVE_CANONICAL` (every spelling -> its singular),
+`FIGURATIVE_CONSTANTS` (the 13 words, no `ALL`),
+`FIGURATIVE_CONSTANTS_WITH_ALL`, `ZERO_WORDS`, `SPACE_WORDS`,
+`HIGH_VALUE_WORDS`, `LOW_VALUE_WORDS`, `QUOTE_WORDS`, `NULL_WORDS`,
+`SIGN_CONDITION_WORDS`. Parsers, layout, analyzers and generators import
+these instead of spelling the words out; a module that needs a deliberate
+subset builds it from them (`value_tracker`'s literal test is
+`ZERO_WORDS | SPACE_WORDS | LOW_VALUE_WORDS | HIGH_VALUE_WORDS`), so the
+difference is visible. Copies drifted before (some lacked `NULL` / `NULLS`).
+Value tables keyed by these words (`layout/values.py`, `domains.py`,
+`encoding.py`'s fill table, `ims_segment_analyzer.py`) still carry their own
+per-word values.
 `analysis/move_type_checker.py`,
 `analysis/constraints.py` and `layout/values.py` carry their own
 `NULL`/`NULLS` lists that must agree with it. Pinned by

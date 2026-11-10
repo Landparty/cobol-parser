@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+* **One home for COBOL word lists and AST walks.** `cobolparser/_vocabulary.py`
+  holds the figurative constants (with their singular forms) that about two
+  dozen modules spelled out on their own, and `cobolparser.models.walk`
+  offers `all_paragraphs`, `section_paragraphs` and `own_statements`, which
+  replace a dozen private copies. A contained program's statements held in
+  a clause attribute can no longer leak into its container's
+  `recursion-check` and `unused-variables` view.
+
 * **`ProgramContext`: one program's cross-reference, flow graph and
   procedure index, each built once.** `ProgramContext(ast)` (exported from
   `cobolparser` and `cobolparser.analysis`) builds them lazily and hands the

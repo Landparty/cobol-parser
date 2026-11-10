@@ -15,6 +15,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from ..._literals import is_quoted_literal
+from ..._vocabulary import FIGURATIVE_CONSTANTS
 from ...lexer import Token, TokenType
 from ...models.ast_base import SourceLocation
 from ...models.statements.base import (
@@ -105,23 +106,7 @@ _WRITTEN_OPERATOR_ATTR = "_abbreviation_operator"
 # Figurative constants that can stand alone as the object of a relation
 # (``IF A = 1 OR SPACES``); a bare one of these after AND/OR is a literal
 # leg of an abbreviated combined condition, never a condition-name.
-_FIGURATIVE_WORDS = frozenset(
-    {
-        "SPACE",
-        "SPACES",
-        "ZERO",
-        "ZEROS",
-        "ZEROES",
-        "HIGH-VALUE",
-        "HIGH-VALUES",
-        "LOW-VALUE",
-        "LOW-VALUES",
-        "QUOTE",
-        "QUOTES",
-        "NULL",
-        "NULLS",
-    }
-)
+_FIGURATIVE_WORDS = FIGURATIVE_CONSTANTS
 _NUMERIC_LITERAL_RE = re.compile(r"^[+-]?(\d+\.?\d*|\.\d+)$")
 
 

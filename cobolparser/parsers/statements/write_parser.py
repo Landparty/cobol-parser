@@ -16,6 +16,7 @@ from cobolparser.parsers.statements._utils import (
     try_consume_keyword,
 )
 
+from ..._vocabulary import ZERO_WORDS
 from ...core.interfaces import IStatementParser, ITokenStream
 from ...lexer import TokenType
 from ...models.statements import IOWriteStatement
@@ -124,7 +125,7 @@ class WriteStatementParser(IStatementParser):
             elif (
                 token
                 and token.type == TokenType.FIGURATIVE_CONSTANT
-                and (token.value or "").upper() in ("ZERO", "ZEROS", "ZEROES")
+                and (token.value or "").upper() in ZERO_WORDS
             ):
                 # ``WRITE R BEFORE ADVANCING ZERO`` (NIST SQ101M) -- the
                 # figurative constant is a legal integer-0 line count.

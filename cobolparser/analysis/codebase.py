@@ -85,6 +85,7 @@ from ..batch import BatchResult, parse_files, parse_files_with_copybooks
 from ..models.program import CobolProgram
 from ..models.statements.base import CobolStatement
 from ..models.statements.call import CallStatement, EntryStatement
+from ..models.walk import own_statements
 from ..parsers.statements.ibm_exec_statements import ExecCicsStatement
 from ..preprocess import PreprocessingError
 from ..preprocess.copy_statement_parser import extract_copy_statements
@@ -1677,29 +1678,11 @@ def _node_statements(
     """``(owning unit, statement)`` for every statement of graph node *unit*:
     its own, plus, for a class, those of its FACTORY / OBJECT / METHOD
     units (#500)."""
-    out = [(unit, statement) for statement in _unit_statements(unit)]
+    out = [(unit, statement) for statement in own_statements(unit)]
     for member in unit.contained_programs:
         if member.unit_kind in _OO_MEMBER_KINDS:
             out += _node_statements(member)
     return out
-
-
-def _unit_statements(unit: CobolProgram) -> list[CobolStatement]:
-    """Statements belonging to *unit* itself, not to a program contained in it.
-
-    ``CobolProgram.get_all_statements()`` walks children, and a contained
-    program unit *is* a child -- so an inner unit's CALL would otherwise be
-    attributed to the outer program that merely encloses it.
-    """
-    own = unit.get_all_statements()
-    if not unit.contained_programs:
-        return list(own)
-    inner_ids = {
-        id(statement)
-        for contained in unit.contained_programs
-        for statement in contained.get_all_statements()
-    }
-    return [s for s in own if id(s) not in inner_ids]
 
 
 # ---------------------------------------------------------------------------

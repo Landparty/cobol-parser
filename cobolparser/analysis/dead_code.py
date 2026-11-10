@@ -30,6 +30,7 @@ from ..models.statements.misc import (
     SortStatement,
     XmlJsonStatement,
 )
+from ..models.walk import own_statements
 from ._cics import cics_terminator_kind
 from ._procedures import (
     ProcedureIndex,
@@ -276,7 +277,7 @@ class DeadCodeAnalyzer:
 
         self._collect_procedures(proc_division)
         self._collect_declaratives(proc_division)
-        statements = self._own_statements(ast)
+        statements = own_statements(ast)
         self._whenever_coverage = whenever_coverage(statements)
         by_owner: dict[str | None, list[Any]] = {}
         for stmt in statements:
@@ -378,25 +379,6 @@ class DeadCodeAnalyzer:
             self._referenced_names.add(entry)
             self._fallthrough_sources.add(entry)
         self._referenced_names.update(self._declarative_procs)
-
-    @staticmethod
-    def _own_statements(ast: CobolProgram) -> list[Any]:
-        """*ast*'s own statements, without its contained programs'.
-
-        ``get_all_statements()`` also returns every contained program's, and
-        a nested program's ``PERFORM 100-DO`` names *its own* ``100-DO`` --
-        procedure names are local to a program unit -- so crediting it here
-        kept a same-named dead paragraph of the container alive.
-        """
-        all_statements = ast.get_all_statements()
-        if ast.contained_programs:
-            inner = {
-                id(stmt)
-                for contained in ast.contained_programs
-                for stmt in contained.get_all_statements()
-            }
-            all_statements = [s for s in all_statements if id(s) not in inner]
-        return all_statements
 
     def _owner(self, stmt: Any) -> str | None:
         """The key of the procedure *stmt* is written in.

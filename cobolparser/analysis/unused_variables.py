@@ -25,7 +25,6 @@ from ..models.program import CobolProgram, CobolSection
 from ..models.statements.base import (
     ArithmeticExpression,
     CobolExpression,
-    CobolStatement,
     ConditionalExpression,
     FunctionCall,
     LogicalExpression,
@@ -50,6 +49,7 @@ from ..models.statements.misc import (
     SortStatement,
     XmlJsonStatement,
 )
+from ..models.walk import own_statements
 from ._cics import cics_identifier_options
 from ._names import (
     QUALIFIER_SEPARATOR,
@@ -901,23 +901,6 @@ class UnusedVariableAnalyzer:
     # PROCEDURE DIVISION reference collection
     # ------------------------------------------------------------------
 
-    @staticmethod
-    def _own_statements(ast: CobolProgram) -> list[CobolStatement]:
-        """*ast*'s statements, without those of the programs it contains.
-
-        ``get_all_statements()`` walks children, and a contained program is
-        a child, so its statements would otherwise read as *ast*'s own.
-        """
-        statements = ast.get_all_statements()
-        if not ast.contained_programs:
-            return statements
-        inner = {
-            id(node)
-            for contained in ast.contained_programs
-            for node in contained.traverse_depth_first()
-        }
-        return [stmt for stmt in statements if id(stmt) not in inner]
-
     def _nested_referenced_names(self, ast: CobolProgram) -> set[str]:
         """Every name referenced by a program contained in *ast*, at any
         depth -- the references that may reach *ast*'s GLOBAL items."""
@@ -936,7 +919,7 @@ class UnusedVariableAnalyzer:
         BY CONTENT / BY VALUE both read it to make the copy.
         """
         names: set[str] = set()
-        for stmt in UnusedVariableAnalyzer._own_statements(ast):
+        for stmt in own_statements(ast):
             if not isinstance(stmt, CallStatement):
                 continue
             for parameter in stmt.using_parameters:
@@ -974,7 +957,7 @@ class UnusedVariableAnalyzer:
         its fields really are never individually referenced.
         """
         names = UnusedVariableAnalyzer._call_argument_names(ast)
-        for stmt in UnusedVariableAnalyzer._own_statements(ast):
+        for stmt in own_statements(ast):
             if isinstance(stmt, XmlJsonStatement):
                 for operand in (stmt.from_item, stmt.into_item):
                     names |= _extract_identifiers(operand)
@@ -985,7 +968,7 @@ class UnusedVariableAnalyzer:
     def _sql_host_variable_names(ast: CobolProgram) -> set[str]:
         """Every EXEC SQL host variable and null indicator of *ast*'s own
         PROCEDURE and DATA DIVISION statements."""
-        statements: list[Any] = list(UnusedVariableAnalyzer._own_statements(ast))
+        statements: list[Any] = list(own_statements(ast))
         data_div = ast.get_division("DATA")
         if data_div is not None:
             statements += [
@@ -1005,7 +988,7 @@ class UnusedVariableAnalyzer:
         """The ``(source, target)`` group references of every ``MOVE / ADD /
         SUBTRACT CORRESPONDING`` statement, as raw operand text."""
         pairs: list[tuple[str, str]] = []
-        for stmt in UnusedVariableAnalyzer._own_statements(ast):
+        for stmt in own_statements(ast):
             if not getattr(stmt, "is_corresponding", False):
                 continue
             operands = [op for op in stmt.operands if isinstance(op, str) and op]
@@ -1022,7 +1005,7 @@ class UnusedVariableAnalyzer:
         """
         names: set[str] = set()
 
-        for stmt in self._own_statements(ast):
+        for stmt in own_statements(ast):
             procedures = _procedure_operands(stmt)
             for operand in stmt.operands:
                 if isinstance(operand, str) and operand.strip().upper() in procedures:

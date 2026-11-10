@@ -25,6 +25,7 @@ from dataclasses import field as dataclass_field
 from typing import TYPE_CHECKING, Any
 
 from .._literals import is_quoted_literal, typed_literal_content, unquote_literal
+from .._vocabulary import FIGURATIVE_CONSTANTS
 from ..layout.fields import (
     FieldCategory,
     all_literal_operand,
@@ -57,6 +58,7 @@ from ..models.statements.io import (
     IOWriteStatement,
 )
 from ..models.statements.misc import ExitStatement, GobackStatement, ReturnStatement
+from ..models.walk import all_paragraphs
 from ._names import bare_item_name
 from .boundary_inventory import (
     BoundaryRef,
@@ -131,23 +133,7 @@ _SIGN_WORD_RELATIONAL: dict[str, tuple[str, str]] = {
     "ZEROS": ("eq", "0"),
     "ZEROES": ("eq", "0"),
 }
-_FIGURATIVE_NAMES = frozenset(
-    {
-        "SPACE",
-        "SPACES",
-        "ZERO",
-        "ZEROS",
-        "ZEROES",
-        "LOW-VALUE",
-        "LOW-VALUES",
-        "HIGH-VALUE",
-        "HIGH-VALUES",
-        "QUOTE",
-        "QUOTES",
-        "NULL",
-        "NULLS",
-    }
-)
+_FIGURATIVE_NAMES = FIGURATIVE_CONSTANTS
 
 # SEARCH ... WHEN conditions are stored as a single raw joined string (see
 # SearchStatement.add_when_clause), not a structured expression tree; the
@@ -2333,7 +2319,7 @@ class _Carriers:
         counts as a read; one within it (``GO TO X-EXIT``) does not."""
         if not perform.target_paragraph:
             return False  # inline: its statements are walked in place
-        paragraphs = _all_paragraphs(self._procedure)
+        paragraphs = all_paragraphs(self._procedure)
         sections = {
             str(section.section_name or "").upper(): list(section.paragraphs)
             for section in self._procedure.sections
@@ -2850,15 +2836,6 @@ def _mark_ending_arms(
             branch.ending_arms = frozenset(ending)
 
 
-def _all_paragraphs(procedure_division: CobolDivision) -> list[CobolParagraph]:
-    paragraphs = list(procedure_division.paragraphs)
-    for section in procedure_division.sections:
-        if isinstance(section, CobolParagraph):
-            continue
-        paragraphs.extend(section.paragraphs)
-    return paragraphs
-
-
 def _nested_statement_lists(statement: Any) -> list[tuple[str | None, list[Any]]]:
     """Every nested statement list, paired with the ARM-ID it sits under when
     that nesting is a modeled branch arm (`None` otherwise).
@@ -2923,7 +2900,7 @@ _ARM_BEARING_ATTRS: dict[type, dict[str, str]] = {
 
 
 def _walk_statements(procedure_division: CobolDivision, *, guards: bool = False) -> Any:
-    for paragraph in _all_paragraphs(procedure_division):
+    for paragraph in all_paragraphs(procedure_division):
         yield from _walk_list(
             paragraph.paragraph_name, paragraph.statements, (), guards=guards
         )
@@ -3266,7 +3243,7 @@ def _statement_sites(
                 )
                 walk(paragraph, nested, deeper, outer)
 
-    for paragraph in _all_paragraphs(procedure_division):
+    for paragraph in all_paragraphs(procedure_division):
         keys.start_paragraph()
         walk(paragraph.paragraph_name, paragraph.statements, (), ())
     return sites

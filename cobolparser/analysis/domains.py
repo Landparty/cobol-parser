@@ -18,6 +18,7 @@ import re
 from dataclasses import dataclass, field
 from decimal import ROUND_CEILING, ROUND_FLOOR, Decimal, InvalidOperation, localcontext
 
+from .._vocabulary import ZERO_WORDS
 from ..layout.fields import FieldCategory, FieldSpec
 from ..layout.options import DataGeneratorOptions
 from ..layout.values import ValueFactory
@@ -41,7 +42,7 @@ _FIGURATIVE_VALUES: dict[str, str] = {
     "NULL": "",
     "NULLS": "",
 }
-_ZERO_FIGURATIVES = frozenset({"ZERO", "ZEROS", "ZEROES"})
+_ZERO_FIGURATIVES = ZERO_WORDS
 #: Figurative constants whose value is a byte no generated field carries:
 #: LOW-VALUE is X'00' and HIGH-VALUE X'FF' in every position, and NULL is
 #: binary zeros. ``ValueFactory`` generates characters, and its own table
