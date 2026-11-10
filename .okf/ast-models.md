@@ -382,7 +382,7 @@ stays False and a later USAGE clause still wins.
 entry with no data-name (`05 PIC X(3).`, FILLER omitted) keeps the synthetic
 `ANONYMOUS-<level>-<line>` `name` but has `is_filler=True`.
 `CobolDataItem.layout_name` is `"FILLER"` for every filler item and `name`
-otherwise; record layouts (`layout.py`, `layout_offsets.py` / `data-items`,
+otherwise; record layouts (`layout/fields.py`, `layout/offsets.py` / `data-items`,
 `program_layout.py`) name and path items by it, so gen-data drops the column
 and lineage keys it positionally like `05 FILLER`. Unnamed report-group
 entries stay non-filler.
@@ -498,7 +498,7 @@ the record `size` of `gen-data --list-records`.
 
 It defers to `cobolparser._storage.storage_size(usage, *, picture_size,
 total_digits, sign_clause=None, is_signed=False, national_picture=False)` —
-the same single authority `generators/data/{layout,encoding,layout_offsets}.py`
+the same single authority `layout/{fields,offsets}.py` and `generators/data/encoding.py`
 use. `_storage.py` also holds `binary_byte_length()`, `packed_byte_length()`,
 the usage sets (`PACKED_USAGES`, `BINARY_FIXED_USAGES`, `BINARY_NATIVE_USAGES`,
 `BINARY_USAGES`, `SINGLE_FLOAT_USAGES` / `DOUBLE_FLOAT_USAGES` /
@@ -529,7 +529,7 @@ Rules worth knowing:
   `tests/regression/test_bug_hunt_2026_10_08.py`.
 * A DISPLAY item with `SIGN IS SEPARATE` gets the extra byte its PICTURE
   character count does not include.
-* Group layout follows `layout_offsets._layout_siblings`' **slot** rule (a
+* Group layout follows `layout.offsets._layout_siblings`' **slot** rule (a
   contiguous run of `[base, redefiner, …]` costs its largest member); the
   OCCURS multiplier applies to groups as well as elementary items; level-66
   and level-77 children are excluded. Helpers: `_occurrence_size()` /
@@ -543,12 +543,9 @@ Rules worth knowing:
   group whose subordinates are missing) is neither group nor elementary --
   deliberately not guessed elementary.
 
-**One deliberate residual difference from `layout_offsets`:** under `OCCURS
-... DEPENDING ON`, `calculate_size` reserves the **maximum** (matching
-`layout.py`/`encoding.py`, and so the record images `gen-data` writes), while
-`layout_offsets` reserves **one occurrence** (multiplier unknown at compile
-time). Verified across the sample + NIST corpus: 18,121 records, 14
-differences, every one of them an ODO table.
+Under `OCCURS ... DEPENDING ON`, `calculate_size` and `layout.offsets`
+both reserve the **maximum** (what IBM allocates and what `gen-data`'s
+record images hold); every offset after the table is `offset_ambiguous`.
 
 **Why `_storage.py` sits at the package root**, next to `_errors.py` and for
 the same reason: the models (layer 2) need it as well as

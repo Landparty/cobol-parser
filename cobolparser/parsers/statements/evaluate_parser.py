@@ -6,6 +6,7 @@ from typing import Any
 from cobolparser.parsers.statements._utils import (
     LITERAL_TOKEN_TYPES,
     STATEMENT_KEYWORDS,
+    ends_at_paragraph_header,
     get_parse_context,
     is_bare_separator,
     keyword_upper,
@@ -651,6 +652,12 @@ class EvaluateStatementParser(IStatementParser):
             if token.type == TokenType.PERIOD:
                 # Period still visible — EVALUATE closed here.
                 token_stream.consume()
+                period_terminated = True
+                break
+
+            if ends_at_paragraph_header(token_stream):
+                # The next paragraph's header after a missing period: the
+                # EVALUATE ends here, as it would at that period.
                 period_terminated = True
                 break
 

@@ -9,6 +9,7 @@ from ._utils import (
     SEPARATOR_TOKEN_TYPES,
     consume_optional_qualifiers,
     consume_period,
+    ends_at_paragraph_header,
     is_statement_boundary,
     literal_operand_text,
     looks_dedented_relative_to,
@@ -88,6 +89,8 @@ class InitializeStatementParser(IStatementParser):
             # be folded into the target list when INITIALIZE has no trailing
             # period.
             if token.type == TokenType.IDENTIFIER and is_statement_boundary(token):
+                break
+            if ends_at_paragraph_header(token_stream, token_column(start)):
                 break
             if token.type == TokenType.COMMA:
                 # A comma between targets (`INITIALIZE a, b, c`) is a

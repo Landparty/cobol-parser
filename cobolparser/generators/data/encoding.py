@@ -26,7 +26,7 @@ Deliberate limits, all of them loud rather than silent (see
 
 * **SYNCHRONIZED is not modelled.**  Slack bytes before an aligned ``COMP``
   item would shift every following offset, and this package's offset model
-  (``layout_offsets.compute_record_layout``, which backs ``data-items``) is
+  (``layout.offsets.compute_record_layout``, which backs ``data-items``) is
   unaligned throughout.  Guessing here would put two contradictory offset
   models in one repo, so a ``SYNCHRONIZED`` item is reported as a caveat
   instead.

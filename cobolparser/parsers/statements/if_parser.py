@@ -12,6 +12,7 @@ from cobolparser.parsers.statements._conditions import (
 from cobolparser.parsers.statements._utils import (
     LITERAL_TOKEN_TYPES,
     STATEMENT_KEYWORDS,
+    ends_at_paragraph_header,
     get_parse_context,
     is_bare_separator,
     keyword_upper,
@@ -20,6 +21,7 @@ from cobolparser.parsers.statements._utils import (
     report_parse_error,
     skip_statement_separators,
     skip_whitespace,
+    token_column,
     try_parse_nested_statement,
 )
 
@@ -109,6 +111,10 @@ class IfStatementParser(IStatementParser):
 
             # Stop at period
             if token.type == TokenType.PERIOD:
+                break
+
+            # The next paragraph's header after a missing period
+            if ends_at_paragraph_header(token_stream, token_column(start_token)):
                 break
 
             # Add token to condition

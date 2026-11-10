@@ -298,8 +298,14 @@ def _run_analyzer(
     unit: Any,
     options: ScanOptions,
     source_map: dict[int, tuple[str, int]] | None = None,
+    copybook_names: set[str] | None = None,
 ) -> dict[str, Any]:
     """Run one analyzer over one already-parsed program unit.
+
+    *copybook_names* are the data names that came from an expanded COPY
+    (``None`` when nothing was expanded), as the CLI's own
+    ``unused-variables`` and ``lint`` work them out.
+
 
     Imports are local to each branch for the reason the CLI's own
     subcommands do it: a scan asking only for ``health`` should not pay to
@@ -333,7 +339,11 @@ def _run_analyzer(
     if name == "unused-variables":
         from .analysis.unused_variables import UnusedVariableAnalyzer
 
-        return UnusedVariableAnalyzer().analyze(unit).to_dict()
+        return (
+            UnusedVariableAnalyzer()
+            .analyze(unit, copybook_item_names=copybook_names)
+            .to_dict()
+        )
 
     if name == "lineage":
         from .analysis.field_lineage import FieldFlowAnalyzer, apply_source_map
@@ -350,6 +360,7 @@ def _scan_unit(
     depth: int,
     options: ScanOptions,
     source_map: dict[int, tuple[str, int]] | None = None,
+    copybook_names: set[str] | None = None,
 ) -> UnitScan:
     """Every requested analyzer over one unit, each failing on its own."""
     scan = UnitScan(program_name=unit.program_name or "", depth=depth)
@@ -357,7 +368,9 @@ def _scan_unit(
         if name in FILE_ANALYZERS:
             continue
         try:
-            scan.reports[name] = _run_analyzer(name, unit, options, source_map)
+            scan.reports[name] = _run_analyzer(
+                name, unit, options, source_map, copybook_names
+            )
         except Exception as exc:  # noqa: BLE001 -- see the module docstring
             # Deliberately broad. An analyzer that trips over an exotic
             # program must cost its own report and nothing else: the whole
@@ -481,8 +494,9 @@ def _scan_one(
     if sources is not None:
         # A member that only COPYs another adds no line to the map (#763).
         sources.update(getattr(result, "expansion_copybooks", None) or [])
+    copybook_names = _copybook_names(result.ast, source_map, path)
     for unit, depth in _units_with_depth(result.ast):
-        unit_scan = _scan_unit(unit, depth, options, source_map)
+        unit_scan = _scan_unit(unit, depth, options, source_map, copybook_names)
         if source_map:
             # With copybooks expanded, every report location counts lines of
             # the expanded text -- past the first COPY it is not the line the
@@ -494,8 +508,25 @@ def _scan_one(
             _stamp_body_origins(unit_scan.reports.get("redundancy"), source_map)
         scan.units.append(unit_scan)
     if "lint" in options.analyzers:
-        scan.reports["lint"] = _lint_file(path, result, options, source_map)
+        scan.reports["lint"] = _lint_file(
+            path, result, options, source_map, copybook_names
+        )
     return scan
+
+
+def _copybook_names(
+    ast: Any, source_map: dict[int, tuple[str, int]] | None, path: str
+) -> set[str] | None:
+    """The data names an expanded COPY brought in, or ``None`` when nothing
+    was expanded. Without this, scan's ``unused-variables`` said
+    ``from_copybook: false`` for a field its own ``origin`` placed in a
+    copybook, and its ``lint`` graded unused copybook fields as warnings,
+    unlike the CLI's subcommands."""
+    if not source_map:
+        return None
+    from .analysis.unused_variables import copybook_item_names
+
+    return copybook_item_names(ast, source_map, path)
 
 
 def _lint_file(
@@ -503,6 +534,7 @@ def _lint_file(
     result: Any,
     options: ScanOptions,
     source_map: dict[int, tuple[str, int]] | None,
+    copybook_names: set[str] | None = None,
 ) -> dict[str, Any]:
     """The ``lint`` subcommand's report for one parse: every unit, the parse
     errors as findings, and each finding placed on disk (its file, line and
@@ -517,7 +549,7 @@ def _lint_file(
     )
 
     try:
-        report = LintAnalyzer().analyze(result.ast)
+        report = LintAnalyzer().analyze(result.ast, copybook_item_names=copybook_names)
         add_parse_errors(report, list(result.errors))
         if not source_map:
             source_map = {

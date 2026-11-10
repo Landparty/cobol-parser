@@ -15,6 +15,7 @@ analyzer only looks at *ast* itself, not ``ast.contained_programs``. Call
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -243,6 +244,40 @@ class UnusedVariableReport:
                 "skipped_copybook_variables": self.skipped_copybook_count,
             },
         }
+
+
+def copybook_item_names(
+    ast: CobolProgram,
+    source_map: dict[int, tuple[str, int]] | None,
+    main_file: str,
+) -> set[str]:
+    """Upper-cased names of the data items that reached *ast* through an
+    expanded COPY, for ``copybook_item_names=`` of this analyzer and of
+    ``LintAnalyzer``.
+
+    Read off the expansion's source map: an item whose declaration line maps
+    to a file other than *main_file* came from a copybook. A name the program
+    also declares itself is left out, so its own copy keeps its warning.
+    Every program unit counts (``collect_declared_items`` is program-scoped,
+    so the outermost unit alone would leave a contained program's copybook
+    fields out). An empty or missing map gives an empty set.
+    """
+    main = os.path.normcase(os.path.abspath(main_file))
+    source_map = source_map or {}
+    from_copybook: set[str] = set()
+    local: set[str] = set()
+    for unit in ast.program_units():
+        for item in collect_declared_items(unit):
+            line = item.location.line if item.location is not None else None
+            origin = source_map.get(line) if line is not None else None
+            name = item.name.upper()
+            if origin is not None and (
+                os.path.normcase(os.path.abspath(origin[0])) != main
+            ):
+                from_copybook.add(name)
+            else:
+                local.add(name)
+    return from_copybook - local
 
 
 def collect_declared_items(ast: CobolProgram) -> list[CobolDataItem]:

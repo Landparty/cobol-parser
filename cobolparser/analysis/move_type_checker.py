@@ -501,12 +501,30 @@ def _classify_picture(pic: PictureClause) -> DataCategory:
     return DataCategory.UNKNOWN
 
 
+_ALL_PREFIX_RE = re.compile(r"^ALL\s+(\S.*)$", re.IGNORECASE | re.DOTALL)
+
+# ``X'C1'`` (hexadecimal) and ``Z'ABC'`` (null-terminated) are alphanumeric
+# literals. National ones (``N'..'``, ``NX'..'``) stay unclassified, like PIC N.
+_ALPHANUMERIC_PREFIXED_LITERAL_RE = re.compile(r"""^[XZ](['"]).*\1$""", re.DOTALL)
+
+
+def _strip_all(value: str) -> str:
+    """The operand of ``ALL literal`` / ``ALL figurative-constant``, else
+    *value* unchanged: ``ALL '-'`` fills its receiver with ``'-'`` and takes
+    that literal's category (``ALL SPACES`` is SPACES)."""
+    match = _ALL_PREFIX_RE.match(value.strip())
+    return match.group(1).strip() if match else value
+
+
 def _classify_literal(value: str) -> DataCategory:
     """Classify an unresolved source operand (literal or figurative constant)."""
-    upper = value.upper().strip()
+    upper = _strip_all(value).upper().strip()
 
     if upper in _FIGURATIVE_CONSTANTS:
         return DataCategory.FIGURATIVE
+
+    if _ALPHANUMERIC_PREFIXED_LITERAL_RE.match(upper):
+        return DataCategory.ALPHANUMERIC
 
     # Quoted string literal
     if (upper.startswith('"') and upper.endswith('"')) or (
@@ -771,7 +789,7 @@ class MoveTypeChecker:
 
         source_cat = self._resolve_category(source_name)
         figurative = (
-            source_name.upper().strip()
+            _strip_all(source_name).upper().strip()
             if source_cat == DataCategory.FIGURATIVE
             else None
         )
@@ -987,7 +1005,7 @@ class MoveTypeChecker:
             )
         elif pair in _WARN_MOVES and not (
             target_cat in (DataCategory.NUMERIC, DataCategory.NUMERIC_EDITED)
-            and _is_digit_string_literal(source_name)
+            and _is_digit_string_literal(_strip_all(source_name))
         ):
             violations.append(
                 MoveTypeViolation(

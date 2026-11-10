@@ -396,7 +396,7 @@ each group's subordinates**, #545: a field reordered within its group is
 and after -- swapping two fields moves every offset after them, so it must
 not diff clean. Same `SequenceMatcher` rule as procedures: an inserted or
 removed field moves nothing, a swap reports one item; level-88 order is not
-compared. Offsets come from `layout_offsets.compute_record_layout`, omitted
+compared. Offsets come from `layout.offsets.compute_record_layout`, omitted
 when ambiguous. Pinned by
 `tests/regression/test_issue_545_diff_data_item_order.py`); procedures (the
 unnamed paragraph holding statements before the first header, or a whole

@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+### Fixed
+
+* **A missing period before a paragraph header no longer loses the
+  paragraph after a condition, an argument list or a clause body.** After
+  `PERFORM P UNTIL c`, `IF c`, `CALL 'X' USING A`, `INITIALIZE A`,
+  `EVALUATE ... WHEN OTHER s` or `READ ... AT END s`, the next paragraph's
+  name was read into the statement and the paragraph vanished, so lint
+  reported a PERFORM of it as an undefined name. The parser now assumes the
+  period there, with the "missing its terminating period" warning, as it
+  already did after MOVE, ADD, DISPLAY and the other operand lists.
+* **`move-type-check` classifies `ALL` literals and hex / null-terminated
+  literals.** `MOVE ALL '-' TO X`, `MOVE X'00' TO X` and `MOVE Z'..' TO X`
+  were counted as unresolved operands, so lint told a program with no COPY
+  to pass `--copybook-path`, and `MOVE ALL 'A' TO` a numeric item went
+  unchecked. They now take the category of their literal.
+* **`scan` marks copybook fields as the CLI does.** With copybooks
+  expanded, scan's `unused-variables` said `from_copybook: false` for a field
+  its own `origin` placed in a copybook, and its `lint` graded an unused
+  copybook field `warning` where the `lint` subcommand says `info`. The
+  copybook-origin names now come from one function,
+  `cobolparser.analysis.unused_variables.copybook_item_names`.
+
 ### Added
 
 * **A written public API and one analyzer interface.** `docs/public-api.md`

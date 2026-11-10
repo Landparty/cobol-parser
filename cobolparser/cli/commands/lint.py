@@ -476,26 +476,13 @@ def _lint_copybook_item_names(
     unit alone would grade a contained program's copybook fields as the
     program's own.
     """
-    from ...analysis.unused_variables import collect_declared_items
+    from ...analysis.unused_variables import copybook_item_names
 
     if not getattr(args, "copybook_path", []):
         return None
-    source_map = getattr(result, "expansion_source_map", None) or {}
-    main = os.path.normcase(os.path.abspath(args.file))
-    from_copybook: set[str] = set()
-    local: set[str] = set()
-    for unit in ast.program_units():
-        for item in collect_declared_items(unit):
-            line = item.location.line if item.location is not None else None
-            origin = source_map.get(line) if line is not None else None
-            name = item.name.upper()
-            if origin is not None and (
-                os.path.normcase(os.path.abspath(origin[0])) != main
-            ):
-                from_copybook.add(name)
-            else:
-                local.add(name)
-    return from_copybook - local
+    return copybook_item_names(
+        ast, getattr(result, "expansion_source_map", None), args.file
+    )
 
 
 def _lint_column_offset(

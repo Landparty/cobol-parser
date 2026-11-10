@@ -326,7 +326,7 @@ class FieldSpec:
     # `scaling_positions`/`stored_digits` below are computed from these, so
     # there is exactly one place a P run is ever counted --
     # `models.data_items.PictureClause._parse_scaled_pattern` -- matching
-    # what `generators/data/layout_offsets.py` (the `data-items` CLI) already
+    # what `layout/offsets.py` (the `data-items` CLI) already
     # does with the same `picture.total_digits`.
     total_digits: int | None = None
     scaling_leading: bool | None = None

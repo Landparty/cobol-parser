@@ -341,6 +341,12 @@ consumer can prove every file it handed over was accounted for.
   exception to that generic pass — its edges carry a bare `line`, not a
   `location` — so `_run_analyzer` receives the source map and applies
   `field_lineage.apply_source_map` itself.
+* **Copybook fields are marked as the CLI marks them.** With copybooks
+  expanded, `scan_one` works out the copybook-origin data names once per file
+  (`_copybook_names` → `unused_variables.copybook_item_names`, read off the
+  source map) and hands them to `unused-variables` (`from_copybook`) and to
+  `lint` (an unused copybook field is `info`, not `warning`), as the CLI's
+  `unused-variables` and `lint` subcommands do.
 
 **The `scan` CLI exits 2 when any file is in `failures`** (#325, as
 `batch`): the JSON is still written, with a `warning: N of M file(s) could

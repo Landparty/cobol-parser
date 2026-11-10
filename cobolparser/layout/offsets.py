@@ -379,7 +379,14 @@ def _layout_item(
 
 def compute_record_layout(record: CobolDataItem) -> list[LayoutItem]:
     """Flatten *record* (a 01/77 root) into offset-annotated LayoutItems,
-    depth-first in source order, including group items and level-88s."""
+    group items and level-88s included.
+
+    The root comes first, then its level-88s; below it, depth first, each
+    group comes *after* its members (its length is their footprint), with
+    its own level-88s right after it. Callers rely on that order:
+    ``FieldFlowAnalyzer`` finds an entry's enclosing group as the next
+    entry of the parent's name, which tells same-named groups apart.
+    """
     out: list[LayoutItem] = []
     data_children = _direct_data_children(record)
 
