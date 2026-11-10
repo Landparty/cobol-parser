@@ -19,12 +19,6 @@ finds something, add it here** (with the audit's ID), not only in the audit.
 Each has an `xfail(strict=True)` test in the named file under `tests/unit/`;
 fixing one turns its test into an XPASS failure, so remove the mark with the fix.
 
-- **Shared dispatch cache makes results order-dependent** (`core/registry.py`,
-  not pinned: depends on test order). `ProcedureDivisionParser._SHARED_REGISTRY`
-  is shared by every `CobolParser`; its cache key skips layout tokens while
-  `matches()` looks a bounded distance ahead, so an earlier parse of
-  `XML <newline> GENERATE` makes a later comment-padded one succeed, and the
-  reverse order poisons it. **Highest priority of this list.**
 - `XmlJsonStatementParser.matches` looks only 5 tokens past XML/JSON: a block
   of comment lines before GENERATE/PARSE drops the statement, and GENERATE is
   then parsed as Report Writer GENERATE (`test_xml_json_parser_branches.py`).

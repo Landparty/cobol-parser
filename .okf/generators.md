@@ -32,7 +32,7 @@ that one. CLI flags for every subcommand live in [cli.md](cli.md).
 | Copybook → CSV / record image | `CopybookDataGenerator(DataGeneratorOptions(...)).generate_from_file()` → `GeneratedDataset` | `gen-data` |
 | Record image → table | `RecordDecoder.from_copybook_file(...).decode_file()` → `DecodeResult` | `decode` |
 | Expected vs actual file | `compare_files(decoder, expected, actual, key=[...])` → `CompareResult` | `compare` |
-| Byte offsets of every data item | `data.layout_offsets.compute_program_data_items(ast)` | `data-items` |
+| Byte offsets of every data item | `layout.offsets.compute_program_data_items(ast)` | `data-items` |
 | Whole-program fixtures | `ProgramFixtureGenerator().generate_with_scenarios_from_file(path, mode=...)` → `FixtureBundle` | `gen-fixtures` |
 
 ## Module map
