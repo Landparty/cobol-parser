@@ -52,7 +52,7 @@ Writer, communication).
 | `evaluate_parser.py` | EVALUATE | control |
 | `exception_parsers.py` | RAISE, RESUME, VALIDATE (COBOL 2002) | control |
 | `go_parser.py` | GO TO | control |
-| `ibm_exec_statements.py` | EXEC SQL, EXEC CICS, EXEC IMS DLI | io |
+| `ibm_exec_statements.py` | EXEC SQL / SQLIMS, EXEC CICS, EXEC IMS DLI | io |
 | `if_parser.py` | IF | control |
 | `initialize_inspect_parsers.py` | INITIALIZE, INSPECT | data |
 | `invoke_parser.py` | INVOKE (OO method invocation) | control |

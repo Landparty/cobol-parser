@@ -1962,6 +1962,21 @@ def _is_end_exec(token: Token) -> bool:
     )
 
 
+def exec_sql_interface(token: Any) -> str | None:
+    """``"SQL"`` / ``"SQLIMS"`` when *token* names an SQL interface after EXEC.
+
+    ``EXEC SQLIMS`` is the IMS SQL interface: SQL text, read by the same
+    parser as ``EXEC SQL``. It used to match no EXEC parser, so its body was
+    dropped and an inner ``OPEN cursor`` became a file OPEN statement.
+    """
+    if token is None:
+        return None
+    if token.type == TokenType.SQL:
+        return "SQL"
+    value = (token.value or "").upper() if token.type == TokenType.IDENTIFIER else ""
+    return value if value in ("SQL", "SQLIMS") else None
+
+
 def collect_exec_sql_text(
     stream: ITokenStream, sql: bool = False, quoted_text: list[str] | None = None
 ) -> str:
