@@ -707,6 +707,8 @@ class CobolParser:
                 # OBJECT|CLASS`` unit terminators.
                 if self._handle_oo_unit_marker(primary_program, divisions_parsed):
                     continue
+                if self._handle_headerless_unit(primary_program, divisions_parsed):
+                    continue
 
                 # Try to find a parser for the current token
                 parser = self._division_factory.find_parser(self.stream)
@@ -871,6 +873,41 @@ class CobolParser:
             )
             self._open_programs.append(new_program)
         self.current_program = new_program
+
+    def _handle_headerless_unit(
+        self, primary_program: CobolProgram, divisions_parsed: list[Any]
+    ) -> bool:
+        """Open a unit at a ``PROGRAM-ID`` / ``FUNCTION-ID`` written without
+        an IDENTIFICATION DIVISION header (optional in COBOL 2002, GnuCOBOL
+        and Micro Focus). Returns True when one was parsed.
+
+        Nested in another program it used to be read as that program's
+        paragraphs and divisions: the enclosing PROCEDURE DIVISION was
+        replaced, silently.
+        """
+        if not self.stream:
+            return False
+        token = self.stream.peek()
+        value = (token.value or "").upper() if token else ""
+        if value not in ("PROGRAM-ID", "FUNCTION-ID"):
+            return False
+        unit = self.current_program or primary_program
+        if unit.has_division("IDENTIFICATION") or divisions_parsed:
+            self._attach_new_unit(
+                primary_program, CobolProgram("UNKNOWN", self.get_current_location())
+            )
+        parser = self._division_factory.get_parser(DivisionType.IDENTIFICATION)
+        assert isinstance(parser, IdentificationDivisionParser)
+        division_ast = parser.parse_headerless(self.stream)
+        assert isinstance(division_ast, CobolDivision)
+        assert self.current_program is not None
+        divisions_parsed.append(division_ast)
+        self.current_program.add_division(division_ast)
+        metadata = division_ast.metadata
+        self.current_program.program_name = metadata["program_id"]
+        if metadata.get("unit_kind"):
+            self.current_program.unit_kind = str(metadata["unit_kind"])
+        return True
 
     def _handle_oo_unit_marker(
         self, primary_program: CobolProgram, divisions_parsed: list[Any]
