@@ -44,6 +44,7 @@ LAYERS: dict[str, int] = {
     "_source_directive": 0,
     "_version": 0,
     "_vocabulary": 0,
+    "_source_text": 0,
     "profiling": 0,
     "jcl": 0,
     "definitions": 1,
@@ -88,18 +89,13 @@ class Known:
 
 KNOWN_UPWARD: tuple[Known, ...] = (
     Known(
-        "cobolparser.lexer",
         "cobolparser.preprocess",
-        eager_ok=False,
-        reason="tokenize_cobol() normalizes fixed-format source before "
-        "lexing, and fixed-format comment tokens use the indicator sets.",
-    ),
-    Known(
-        "cobolparser.preprocess.copybook_expander",
         "cobolparser.parser",
         eager_ok=False,
-        reason="parse_cobol_with_expansion() is an expand-then-parse "
-        "orchestrator, and the debug-lines warning is shared with the parser.",
+        reason="deprecated alias: parse_cobol_with_expansion and "
+        "warn_dropped_debug_lines moved to cobolparser.parser; the old "
+        "preprocess names resolve lazily, with a DeprecationWarning, until "
+        "the next major release, when this entry goes too.",
     ),
 )
 

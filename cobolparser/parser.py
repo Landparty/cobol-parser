@@ -13,6 +13,13 @@ from typing import TYPE_CHECKING, Any, Literal, overload
 
 # Core parsing infrastructure
 from ._lines import split_source_lines
+from ._source_text.normalize import ID_DIVISION_HEADER_RE
+from ._source_text.source_format import (
+    _sequence_area_is_fixed_like,  # noqa: F401
+    debug_line_numbers,
+    detect_fixed_format,
+    normalize_with_recovery,
+)
 from .core.token_stream import TokenStream
 from .lexer import CobolLexer, Token, TokenType
 from .models.ast_base import SourceLocation
@@ -31,20 +38,14 @@ from .plugins.core import (
     SerializationConfig,
 )
 from .preprocess import (
+    copybook_expander,
     preprocess_conditional_compilation,
     strip_compiler_directives,
 )
-from .preprocess._normalize import ID_DIVISION_HEADER_RE
 from .preprocess.replace_statement import (
     apply_replace_statements,
     find_replace_statement_spans,
     strip_unexpanded_copy_statements,
-)
-from .preprocess.source_format import (
-    _sequence_area_is_fixed_like,  # noqa: F401
-    debug_line_numbers,
-    detect_fixed_format,
-    normalize_with_recovery,
 )
 from .profiling import ProfilerContext, ProfilingResult
 
@@ -1253,3 +1254,147 @@ def parse_cobol(
         top_n=top_n,
         prof_output=prof_output,
     )
+
+
+# -- expand, then parse ------------------------------------------------------
+
+
+def warn_dropped_debug_lines(result: Any, expansion: Any, filename: str) -> None:
+    """Warn on *result* about debugging lines *expansion* blanked.
+
+    Expansion blanks ``D`` lines with the comments before the parser sees
+    the text, so the parser's own ``WITH DEBUGGING MODE`` warning cannot
+    count them; this raises the same warning from the expansion's list
+    instead, in the coordinates of the file they were written in. Nothing
+    happens when the expansion kept them (``debug_lines=True``), when no
+    unit declares the clause, or when the parser already warned (nothing
+    was expanded, so the source reached it untouched).
+    """
+    # getattr: stand-in expansions in tests carry only the fields they need.
+    dropped = list(getattr(expansion, "dropped_debug_lines", None) or [])
+    if (
+        not dropped
+        or result.ast is None
+        or not debugging_mode_on(result.ast)
+        or any(DROPPED_DEBUG_LINES_MARKER in w for w in result.warnings)
+    ):
+        return
+    first_file, first_line = dropped[0]
+    location = f"Line {first_line}"
+    if first_file != filename:
+        location = f"{first_file}: {location}"
+    result.warnings.append(dropped_debug_lines_warning(location, len(dropped)))
+
+
+def parse_cobol_with_expansion(
+    source_code: str,
+    filename: str,
+    copybook_paths: list[str],
+    max_nesting_depth: int = 100,
+    process_conditionals: bool = True,
+    defined_symbols: dict[str, str] | None = None,
+    skip_missing_copybooks: bool = False,
+    **parser_kwargs: Any,
+) -> Any:
+    """
+    Convenience function that expands copybooks and parses in one step.
+
+    This function combines copybook expansion with COBOL parsing, providing
+    a seamless workflow for parsing COBOL programs with copybook dependencies.
+
+    Args:
+        source_code: COBOL source code containing COPY statements
+        filename: Source filename for error reporting
+        copybook_paths: List of directory paths to search for copybooks
+        max_nesting_depth: Maximum allowed nesting depth (default: 100)
+        process_conditionals: Whether to process >>DEFINE/>>IF/>>EVALUATE
+            conditional compilation directives during expansion (default:
+            True). The parser runs the same directive pass over whatever
+            text it is given anyway, so this changes *when* it happens,
+            not whether: during expansion, a COPY inside an excluded
+            ``>>IF`` block is never resolved (it used to be expanded first,
+            and a member that only exists for the other branch -- a CICS
+            ``COPY DFHAID`` under ``>>IF CICS DEFINED`` -- failed the whole
+            parse), and a ``>>DEFINE`` reaches the copybooks below it.
+            False keeps the old order.
+        defined_symbols: Pre-defined symbols for conditional compilation
+        skip_missing_copybooks: Leave a COPY whose member cannot be found as
+            written instead of failing (default False); see
+            ``expand_copybooks``. The other members are still expanded.
+        **parser_kwargs: Additional arguments passed to parse_cobol()
+
+    Returns:
+        ParseResult from the COBOL parser with expanded source
+
+    Raises:
+        CircularReferenceError: If circular copybook dependency detected
+        CopybookNotFoundError: If referenced copybook file not found
+        ParseError: If parsing fails after expansion
+
+    Example:
+        >>> from cobolparser import parse_cobol_with_expansion
+        >>> result = parse_cobol_with_expansion(
+        ...     source_code="COPY EMPLOYEE.",
+        ...     filename="payroll.cbl",
+        ...     copybook_paths=["/copybooks"]
+        ... )
+        >>> print(result.ast.program_name)
+    """
+    debug_lines = bool(parser_kwargs.get("debug_lines", False))
+
+    # Expand copybooks first
+    # Looked up on the module at call time, so a test that patches
+    # ``copybook_expander.expand_copybooks`` reaches this call.
+    expansion = copybook_expander.expand_copybooks(
+        source_code=source_code,
+        copybook_paths=copybook_paths,
+        max_nesting_depth=max_nesting_depth,
+        # The parser tracks its own locations, but they count lines in the
+        # EXPANDED text -- so the map is what any consumer needs to put a
+        # finding back on the line a human edits. Carried on the ParseResult.
+        preserve_source_locations=True,
+        process_conditionals=process_conditionals,
+        defined_symbols=defined_symbols,
+        source_file=filename,
+        # Expansion blanks comment lines before the parser sees the text;
+        # debugging lines compiled as code have to survive it.
+        debug_lines=debug_lines,
+        skip_missing_copybooks=skip_missing_copybooks,
+    )
+
+    # Parse the expanded source
+    parse_result = parse_cobol(
+        source=expansion.expanded_source, filename=filename, **parser_kwargs
+    )
+
+    # With enable_profiling=True, parse_cobol returns
+    # (ParseResult, ProfilingResult) — the warnings live on the first element.
+    result_obj = parse_result[0] if isinstance(parse_result, tuple) else parse_result
+
+    # Propagate expansion warnings (lossy encoding decodes, copybook content
+    # validation, level-number mismatches). They lived only on the discarded
+    # CopybookExpansion object before, so callers of this convenience entry
+    # point never saw them.
+    source_map = getattr(expansion, "source_location_map", None)
+    located: list[str] = []
+    for warning in result_obj.warnings:
+        moved = copybook_expander._locate_strip_pass_warning(warning, source_map)
+        if moved is warning or moved not in located:
+            located.append(moved)
+    result_obj.warnings[:] = located
+    expansion_warnings = list(getattr(expansion.statistics, "warnings", []) or [])
+    for warning in expansion_warnings:
+        if warning not in result_obj.warnings:
+            result_obj.warnings.append(warning)
+
+    warn_dropped_debug_lines(result_obj, expansion, filename)
+
+    # getattr, not attribute access: callers monkeypatch `expand_copybooks`
+    # with stand-ins that carry only the fields they care about, and a map
+    # that is merely absent must not take the whole parse down.
+    result_obj.expansion_source_map = source_map
+    result_obj.expansion_copybooks = list(
+        getattr(expansion, "included_copybooks", None) or []
+    )
+
+    return parse_result

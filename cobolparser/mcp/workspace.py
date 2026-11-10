@@ -818,10 +818,9 @@ class Workspace:
             WRAPPER_HEAD_LINES,
             wrap_copybook_fragment,
         )
-        from ..parser import parse_cobol
+        from ..parser import parse_cobol, parse_cobol_with_expansion
         from ..plugins.core import DialectType, ErrorRecoveryMode
         from ..preprocess import PreprocessingError, preprocess_conditional_compilation
-        from ..preprocess.copybook_expander import parse_cobol_with_expansion
 
         decode_warnings: list[str] = []
         source = self.read_text(path, decode_warnings)

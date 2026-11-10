@@ -391,9 +391,7 @@ class TestSystemCopybooks:
         assert with_system_copybooks([]) == []
 
     def test_a_program_copying_dfhaid_parses(self, tmp_path) -> None:
-        from cobolparser.preprocess.copybook_expander import (
-            parse_cobol_with_expansion,
-        )
+        from cobolparser.parser import parse_cobol_with_expansion
 
         source = """\
        IDENTIFICATION DIVISION.

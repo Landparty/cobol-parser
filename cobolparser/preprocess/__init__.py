@@ -20,7 +20,7 @@ Key Features:
 
 Main Functions:
     expand_copybooks: Expand all COPY statements in COBOL source code
-    parse_cobol_with_expansion: Convenience function combining expansion + parsing
+    parse_cobol_with_expansion: moved to cobolparser.parser (old name kept, deprecated)
     normalize_fixed_format: Normalize fixed-format COBOL lines into pseudo free-form
     preprocess_conditional_compilation: Process >>DEFINE/>>IF/>>EVALUATE directives
     validate_copybook_content: Validate copybook content before expansion
@@ -47,7 +47,7 @@ Usage Example:
 
 # NOTE: keep this file a thin re-export stub. Implementation belongs in
 # _normalize.py (or another private sibling), not here.
-from ._normalize import (
+from .._source_text.normalize import (
     ALL_COMMENT_INDICATORS,
     COMMENT_INDICATORS,
     DEBUG_INDICATORS,
@@ -94,7 +94,6 @@ __all__ = [
     "validate_copybook_content",
     "validate_level_numbers",
     "expand_copybooks",
-    "parse_cobol_with_expansion",
     "clear_file_cache",
     "set_file_cache_size",
     "get_file_cache_stats",
@@ -106,6 +105,23 @@ from .copybook_expander import (  # noqa: E402
     clear_file_cache,
     expand_copybooks,
     get_file_cache_stats,
-    parse_cobol_with_expansion,
     set_file_cache_size,
 )
+
+
+def __getattr__(name: str) -> object:
+    # parse_cobol_with_expansion moved to cobolparser.parser; the old name
+    # still resolves (with a DeprecationWarning) until the next major.
+    if name == "parse_cobol_with_expansion":
+        import warnings
+
+        warnings.warn(
+            f"cobolparser.preprocess.{name} moved to cobolparser.parser.{name}; "
+            "this path goes away in the next major release",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        from .. import parser
+
+        return getattr(parser, name)
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

@@ -94,10 +94,8 @@ class TestCopybookNotFound:
 
     def test_skip_missing_still_reported_by_the_parse(self, tmp_path):
         """The parse names the member it could not expand, and keeps the rest."""
+        from cobolparser.parser import parse_cobol_with_expansion
         from cobolparser.plugins.core import ErrorRecoveryMode
-        from cobolparser.preprocess.copybook_expander import (
-            parse_cobol_with_expansion,
-        )
 
         (tmp_path / "HAVE.cpy").write_text("       01  HAVE-REC PIC X.\n")
         source = (

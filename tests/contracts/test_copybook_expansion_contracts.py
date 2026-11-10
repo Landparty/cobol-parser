@@ -10,8 +10,10 @@ from pathlib import Path
 
 import pytest
 
+from cobolparser.parser import parse_cobol_with_expansion
+
 # Import modules under test
-from cobolparser.preprocess import expand_copybooks, parse_cobol_with_expansion
+from cobolparser.preprocess import expand_copybooks
 from cobolparser.preprocess.models import CopybookExpansion
 
 

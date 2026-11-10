@@ -65,7 +65,8 @@ import its own package and anything on a lower or equal layer, and equal
 layers must not form a cycle:
 
 1. leaves: `_errors`, `_lines`, `_literals`, `_vocabulary` (COBOL word
-   lists), `_storage`, `_file_limits`, `_source_directive`, `_version` (`__version__`; release-please edits it),
+   lists), `_source_text` (fixed-format normalization, source-format
+   detection), `_storage`, `_file_limits`, `_source_directive`, `_version` (`__version__`; release-please edits it),
    `profiling`, `jcl`; then `definitions`, `plugins`
 2. `models` (the AST)
 3. `lexer`, `dialects`
@@ -78,9 +79,11 @@ layers must not form a cycle:
 
 `tests/contracts/test_layer_dependencies.py` enforces it from the source
 (module-level, function-local and `TYPE_CHECKING` imports alike), fails on a
-module-level import loop anywhere, and keeps the two deliberate upward
-imports in `KNOWN_UPWARD` with their reasons: `tokenize_cobol` normalizing
-fixed-form source, and `parse_cobol_with_expansion` living in `preprocess`. Nothing below the facade
+module-level import loop anywhere, and keeps the one remaining upward import
+in `KNOWN_UPWARD` with its reason: the deprecated `preprocess` aliases of
+`parse_cobol_with_expansion` / `warn_dropped_debug_lines` (now in
+`parser.py`), lazy and gone at the next major. The lexer reads the normalizer
+from the `_source_text` leaf, so it no longer imports `preprocess`. Nothing below the facade
 imports from `cobolparser` itself: read the version from `_version`.
 
 ## History (not loaded by default)
@@ -107,7 +110,7 @@ it with `git config core.hooksPath .githooks`) and by the test suite:
   must run; backticked `cobolparser.*` names, class/function names and repo
   paths must exist; links and anchors must resolve; the CLI table in
   `cli.md` must match argparse; and counts the code can answer (there are
-  <!-- okf:gen analysis-module-count -->40<!-- /okf:gen --> analysis
+  <!-- okf:gen analysis-module-count -->41<!-- /okf:gen --> analysis
   modules, <!-- okf:gen tokentype-count -->245<!-- /okf:gen --> `TokenType`
   members, <!-- okf:gen cli-subcommand-count -->41<!-- /okf:gen -->
   subcommands) are written as `<!-- okf:gen NAME -->` spans that must equal

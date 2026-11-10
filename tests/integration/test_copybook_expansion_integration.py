@@ -9,12 +9,10 @@ from pathlib import Path
 
 import pytest
 
+from cobolparser.parser import parse_cobol_with_expansion
+
 # Import modules under test
-from cobolparser.preprocess import (
-    CircularReferenceError,
-    expand_copybooks,
-    parse_cobol_with_expansion,
-)
+from cobolparser.preprocess import CircularReferenceError, expand_copybooks
 
 pytestmark = pytest.mark.integration
 

@@ -100,7 +100,8 @@ from cobolparser.preprocess.replace_statement import (
     apply_replace_statements, strip_unexpanded_copy_statements, find_replace_statement_spans,
 )
 from cobolparser.preprocess.copy_statement_parser import CopyStatementLexer, extract_copy_statements
-from cobolparser.preprocess.copybook_expander import warn_dropped_debug_lines, detect_encoding
+from cobolparser.parser import warn_dropped_debug_lines  # moved from copybook_expander (old path deprecated)
+from cobolparser.preprocess.copybook_expander import detect_encoding
 from cobolparser.preprocess.path_resolver import PathResolver, validate_path_within_directory
 from cobolparser._lines import split_source_lines
 from cobolparser._source_directive import source_format_directive
@@ -133,15 +134,16 @@ filled only with `preserve_source_locations=True`), `statistics`
 
 | File | Responsibility |
 |------|---------------|
-| `preprocess/__init__.py` | **Re-export stub only, no implementation.** Re-exports `_normalize.py` (incl. the column constants `DEFAULT_SEQ_COL_END` / `INDICATOR_COL` / `TEXT_START_COL` / `TEXT_END_COL` / `IDENTIFICATION_END_COL`) and `copybook_expander.py`'s public functions. Sibling modules import from `._normalize`, never `from . import`: the stub imports `copybook_expander`, so a name read back from the package is a module-level import loop |
-| `preprocess/_normalize.py` | `normalize_fixed_format`, `strip_compiler_directives`, `preprocess_conditional_compilation` (with the `_ConditionParser` / `_evaluate_condition` constant-condition evaluator), `validate_copybook_content`, `validate_level_numbers`, the column / indicator constants, `ID_DIVISION_HEADER_RE`, plus the `PreprocessingError` hierarchy. Every name is importable from `cobolparser.preprocess` |
-| `preprocess/source_format.py` | `detect_fixed_format` (see [Fixed-format detection](#fixed-format-detection); alias `cobolparser.parser._detect_fixed_format`), `normalize_with_recovery` (normalize + unterminated-literal retry, shared by `CobolParser` and the lexer's `_tokenize_source`), `debug_line_numbers`; re-exports `free_format_flags` |
-| `preprocess/copybook_expander.py` | `expand_copybooks`, `parse_cobol_with_expansion`, `warn_dropped_debug_lines`; recursive inlining (`_expand_source_recursive`) with cycle detection, encoding detection (`detect_encoding` / `convert_to_utf8`), validation, LRU file cache (`clear_file_cache` / `set_file_cache_size` / `get_file_cache_stats`), the re-pad / width fitter (`_fit_fixed_format_width`) and the source map |
+| `preprocess/__init__.py` | **Re-export stub only, no implementation.** Re-exports `_source_text/normalize.py` (incl. the column constants `DEFAULT_SEQ_COL_END` / `INDICATOR_COL` / `TEXT_START_COL` / `TEXT_END_COL` / `IDENTIFICATION_END_COL`) and `copybook_expander.py`'s public functions. Sibling modules import from `._normalize`, never `from . import`: the stub imports `copybook_expander`, so a name read back from the package is a module-level import loop |
+| `_source_text/normalize.py` (alias `preprocess/_normalize.py`, the same module object) | `normalize_fixed_format`, `strip_compiler_directives`, `preprocess_conditional_compilation` (with the `_ConditionParser` / `_evaluate_condition` constant-condition evaluator), `validate_copybook_content`, `validate_level_numbers`, the column / indicator constants, `ID_DIVISION_HEADER_RE`, plus the `PreprocessingError` hierarchy. Every name is importable from `cobolparser.preprocess` |
+| `_source_text/source_format.py` (alias `preprocess/source_format.py`) | `detect_fixed_format` (see [Fixed-format detection](#fixed-format-detection); alias `cobolparser.parser._detect_fixed_format`), `normalize_with_recovery` (normalize + unterminated-literal retry, shared by `CobolParser` and the lexer's `_tokenize_source`), `debug_line_numbers`; re-exports `free_format_flags` |
+| `preprocess/copybook_expander.py` | `expand_copybooks` (`parse_cobol_with_expansion` and `warn_dropped_debug_lines` moved to `parser.py`; the old names resolve with a `DeprecationWarning`, see [`docs/public-api.md`](../docs/public-api.md#moved-names)); recursive inlining (`_expand_source_recursive`) with cycle detection, encoding detection (`detect_encoding` / `convert_to_utf8`), validation, LRU file cache (`clear_file_cache` / `set_file_cache_size` / `get_file_cache_stats`), the re-pad / width fitter (`_fit_fixed_format_width`) and the source map |
 | `preprocess/copy_statement_parser.py` | `CopyStatementLexer` (COPY / `EXEC SQL INCLUDE` scanner), `extract_copy_statements`, `apply_replacing_clauses`, and the line-preserving member passes `strip_sequence_area` / `remove_comment_lines` / `normalize_continuation_lines`; `is_comment_line` |
 | `preprocess/replace_statement.py` | `apply_replace_statements`, `strip_unexpanded_copy_statements`, `find_replace_statement_spans` (the REPLACE text-word scanner `_ReplaceScanner`) |
 | `preprocess/path_resolver.py` | `PathResolver` (three-tier lookup), `find_copybook_file`, `get_available_copybooks`, `suggest_similar_copybooks`, `validate_path_within_directory` -- see [Copybook path resolution](#copybook-path-resolution) |
 | `preprocess/models.py` | `CopybookExpansion`, `CopyStatement`, `CopybookSearchPath`, `ExpansionStatistics`, `ExpansionContext` (per-expansion stack, byte budget, content/origin cache, `debug_lines`), `ReplacingClause`, `SuppressClause`, `SourceLocationMap` |
 | `_lines.py` (package root) | `split_source_lines(text, keepends=False)` -- the one line splitter for source text (`\n` / `\r\n` / `\r` only) |
+| `_source_text/` (package root) | Layer-1 leaf holding the two modules above (moved out of `preprocess` so the lexer, one layer below `preprocess`, can normalize fixed-format source and read the indicator sets without an upward import). It imports only `_lines` and `_source_directive`. Package code imports `cobolparser._source_text.*`; the `preprocess` aliases keep old imports and patches working |
 | `_source_directive.py` (package root) | `source_format_directive(text)` (`"FIXED"` / `"FREE"` / `None` for a `>>SOURCE [FORMAT] [IS] ...` record) and `free_format_flags(lines, indicator_position=6)`. Dependency-free so the lexer and `preprocess` can both import it without a cycle |
 
 ## Line-count invariant and record boundaries
@@ -211,7 +213,7 @@ column-72 overflow diagnostics.
 
 ### Comment, debug and version-tag lines
 
-The column-7 indicator characters live in one place, `_normalize.py`:
+The column-7 indicator characters live in one place, `_source_text/normalize.py`:
 `COMMENT_INDICATORS` (`*` `/`), `DEBUG_INDICATORS` (`D` `d`),
 `VERSION_TAG_INDICATORS` (`V` `v`) and their union `ALL_COMMENT_INDICATORS`
 (re-exported from `cobolparser.preprocess`). Consumers:

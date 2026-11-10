@@ -415,6 +415,7 @@ class TestExpansionWarningsPropagate:
     """H6 — expansion warnings must reach the ParseResult."""
 
     def test_warnings_copied_onto_parse_result(self, monkeypatch):
+        from cobolparser.parser import parse_cobol_with_expansion
         from cobolparser.preprocess import copybook_expander as ce
 
         class FakeStats:
@@ -425,7 +426,7 @@ class TestExpansionWarningsPropagate:
             statistics = FakeStats()
 
         monkeypatch.setattr(ce, "expand_copybooks", lambda **kwargs: FakeExpansion())
-        result = ce.parse_cobol_with_expansion(
+        result = parse_cobol_with_expansion(
             source_code="ignored", filename="probe.cbl", copybook_paths=["/none"]
         )
         assert any("replacement characters" in w for w in result.warnings)
@@ -434,6 +435,7 @@ class TestExpansionWarningsPropagate:
         # With enable_profiling=True parse_cobol returns
         # (ParseResult, ProfilingResult); warning propagation must not
         # AttributeError on the tuple and must land on the ParseResult.
+        from cobolparser.parser import parse_cobol_with_expansion
         from cobolparser.preprocess import copybook_expander as ce
 
         class FakeStats:
@@ -444,7 +446,7 @@ class TestExpansionWarningsPropagate:
             statistics = FakeStats()
 
         monkeypatch.setattr(ce, "expand_copybooks", lambda **kwargs: FakeExpansion())
-        result = ce.parse_cobol_with_expansion(
+        result = parse_cobol_with_expansion(
             source_code="ignored",
             filename="probe.cbl",
             copybook_paths=["/none"],

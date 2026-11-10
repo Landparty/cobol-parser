@@ -13,6 +13,10 @@ def __getattr__(name: str) -> object:
         from .context import ProgramContext
 
         return ProgramContext
+    if name in ("ProgramAnalyzer", "Report"):
+        from .protocol import ProgramAnalyzer, Report
+
+        return {"ProgramAnalyzer": ProgramAnalyzer, "Report": Report}[name]
     if name == "DynamicCallAnalyzer":
         from .value_tracker import DynamicCallAnalyzer
 
@@ -345,7 +349,9 @@ def __getattr__(name: str) -> object:
 
 
 __all__ = [
+    "ProgramAnalyzer",
     "ProgramContext",
+    "Report",
     "CRUDFlags",
     "DclgenChecker",
     "DclgenReport",

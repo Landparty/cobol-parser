@@ -241,6 +241,11 @@ class DclgenChecker:
     host variables are matched to columns changes both at once.
     """
 
+    def analyze(self, ast: CobolProgram) -> DclgenReport:
+        """The same as :meth:`check`, under the name every program analyzer
+        shares (:class:`~.protocol.ProgramAnalyzer`)."""
+        return self.check(ast)
+
     def check(self, ast: CobolProgram) -> DclgenReport:
         """Cross-check *ast*'s host variables against its DECLARE TABLEs."""
         resolution = HostVariableResolver().resolve(ast)

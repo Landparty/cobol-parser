@@ -201,7 +201,7 @@ class TestCopybookCommentDriftIssue123:
     @staticmethod
     def _paragraph_lines(source: str, copybook_dir) -> dict:
         from cobolparser.analysis.program_flow import ProgramFlowAnalyzer
-        from cobolparser.preprocess import parse_cobol_with_expansion
+        from cobolparser.parser import parse_cobol_with_expansion
 
         result = parse_cobol_with_expansion(
             source, filename="probe.cbl", copybook_paths=[str(copybook_dir)]

@@ -179,6 +179,11 @@ class HostVariableResolver:
     # Public API
     # ------------------------------------------------------------------
 
+    def analyze(self, ast: CobolProgram) -> HostVarResolutionReport:
+        """The same as :meth:`resolve`, under the name every program analyzer
+        shares (:class:`~.protocol.ProgramAnalyzer`)."""
+        return self.resolve(ast)
+
     def resolve(self, ast: CobolProgram) -> HostVarResolutionReport:
         """Run the full resolution pipeline and return a report.
 

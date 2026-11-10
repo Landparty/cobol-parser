@@ -16,6 +16,7 @@ import tempfile
 
 import pytest
 
+from cobolparser.parser import parse_cobol_with_expansion
 from cobolparser.preprocess import (
     CircularReferenceError,
     EncodingError,
@@ -26,7 +27,6 @@ from cobolparser.preprocess.copybook_expander import (
     convert_to_utf8,
     detect_encoding,
     expand_copybooks,
-    parse_cobol_with_expansion,
     read_file_with_encoding,
 )
 

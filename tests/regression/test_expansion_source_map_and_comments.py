@@ -36,8 +36,8 @@ from cobolparser.analysis.lint import (
     apply_source_map,
 )
 from cobolparser.models.ast_base import SourceLocation
+from cobolparser.parser import parse_cobol_with_expansion
 from cobolparser.preprocess import expand_copybooks
-from cobolparser.preprocess.copybook_expander import parse_cobol_with_expansion
 
 
 def _pad(text: str) -> str:

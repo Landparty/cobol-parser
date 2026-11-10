@@ -100,7 +100,7 @@ COBOL source (.cbl/.cob)
 | `cobolparser/models/` | `CobolProgram` and every AST node | `.okf/ast-models.md` |
 | `cobolparser/dialects/` | IBM Enterprise dialect, EXEC SQL/CICS/IMS, LE and intrinsic signatures | `.okf/dialects.md` |
 | `cobolparser/layout/` | record layout: field specs, byte offsets, `ProgramLayoutIndex`, copybook record parsing (read by analysis and generators) | `.okf/generators/record-data.md` |
-| `cobolparser/analysis/` | <!-- okf:gen analysis-module-count -->40<!-- /okf:gen --> analyzer modules plus `program_flow/` | `.okf/analysis.md` |
+| `cobolparser/analysis/` | <!-- okf:gen analysis-module-count -->41<!-- /okf:gen --> analyzer modules plus `program_flow/` | `.okf/analysis.md` |
 | `cobolparser/generators/` | flowcharts, copybook data and record images, decode/compare, `gen-fixtures` bundles and scenarios | `.okf/generators.md` |
 | `cobolparser/batch.py`, `scan.py`, `_facts_cache.py` | parallel parsing, multi-file analysis with per-file fault isolation, the on-disk cache | `.okf/batch.md` |
 | `cobolparser/jcl/` | JCL jobs, steps, DD bindings (through the `[jcl]` extra) | `.okf/jcl.md` |

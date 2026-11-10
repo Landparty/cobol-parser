@@ -18,9 +18,8 @@ from ..models.ast_base import SourceLocation
 from ..models.data_items import CobolDataItem, ConditionNameItem
 from ..models.program import CobolProgram, CobolSection
 from ..models.statements.misc import SelectStatement
-from ..parser import parse_cobol
+from ..parser import parse_cobol, parse_cobol_with_expansion
 from ..preprocess import CircularReferenceError, CopybookNotFoundError
-from ..preprocess.copybook_expander import parse_cobol_with_expansion
 from .errors import ProgramLayoutError
 from .fields import (
     FieldCategory,

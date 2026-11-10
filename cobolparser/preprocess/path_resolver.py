@@ -14,7 +14,7 @@ from dataclasses import replace
 from difflib import get_close_matches
 from pathlib import Path
 
-from ._normalize import (
+from .._source_text.normalize import (
     CopybookNotFoundError,
     CopybookSizeExceededError,
     PathTraversalError,

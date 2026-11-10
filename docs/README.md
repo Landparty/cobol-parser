@@ -6,6 +6,7 @@ Where each kind of documentation lives, so a fact is written down once.
 
 | Guide | What it covers |
 |---|---|
+| [public-api.md](public-api.md) | What is public and semver-stable (the facade list, stable subpackages, internals), the `ProgramAnalyzer` interface, and moved names |
 | [mcp-server.md](mcp-server.md) | `cobol-parser mcp`: install, connect a client, every tool and prompt, how to read an answer |
 | [project-config.md](project-config.md) | `cobol.yml`: where it is looked for, every key and which subcommands it fills |
 | [ci-lint.md](ci-lint.md) | Linting in CI: many files, `--changed-since`, GitHub annotations, the `line-length` rule, a workflow and pre-commit hooks |
