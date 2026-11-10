@@ -29,6 +29,7 @@ from cobolparser.lexer import TokenType
 from cobolparser.models.ast_base import ASTNode, SourceLocation
 from cobolparser.models.program import CobolDivision, CobolParagraph, CobolSection
 from cobolparser.parsers.statements._utils import (
+    mark_top_level_statement,
     peek_past_noise,
     skip_statement_separators,
     skip_whitespace,
@@ -362,6 +363,7 @@ class ProcedureDivisionParser(BaseDivisionParser):
                         type(parser).__name__,
                     )
                     self._attach_context(token_stream)
+                    mark_top_level_statement(token_stream)
                     try:
                         statement = parser.parse(token_stream)
                         active[-1]["statements"].append(
@@ -500,6 +502,7 @@ class ProcedureDivisionParser(BaseDivisionParser):
             if parser:
                 logger.debug("Dispatch %r -> %s", token.value, type(parser).__name__)
                 self._attach_context(token_stream)
+                mark_top_level_statement(token_stream)
                 try:
                     statement = parser.parse(token_stream)
                     statements.append(
