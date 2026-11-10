@@ -262,7 +262,8 @@ first. Node fields are in [ast-models.md](../ast-models.md).
 
 - Operand: qualified / subscripted (`ACCEPT X OF Y`, `ACCEPT T (2)`), guarded by
   `is_statement_boundary` so a missing operand does not eat the next verb;
-  `ACCEPT cd MESSAGE COUNT` is accepted. A separator after the operand is a
+  `ACCEPT cd [MESSAGE] COUNT` is accepted (MESSAGE optional, NIST CM101M). A
+  separator after the operand is a
   space (`ACCEPT X, FROM DATE`, #569).
 - `FROM DATE` / `TIME` / ... with a trailing format (`YYYYMMDD`, `YYYYDDD`) is
   folded into `from_source` (left in the stream it became a phantom paragraph).
