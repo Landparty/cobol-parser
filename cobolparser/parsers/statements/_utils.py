@@ -1035,6 +1035,27 @@ def previous_meaningful_token(stream: ITokenStream) -> Token | None:
         offset -= 1
 
 
+_TOP_LEVEL_ATTR = "_top_level_statement_at"
+
+
+def mark_top_level_statement(stream: ITokenStream) -> None:
+    """Record that the statement starting at the stream's current position is
+    dispatched by the PROCEDURE DIVISION loop itself, not nested in another
+    statement's body. See :func:`is_top_level_statement`."""
+    setattr(stream, _TOP_LEVEL_ATTR, getattr(stream, "position", None))
+
+
+def is_top_level_statement(stream: ITokenStream, start: int) -> bool:
+    """True if the statement that began at token index *start* is a
+    paragraph-level statement (:func:`mark_top_level_statement`).
+
+    A statement nested in another statement's handler may only be
+    imperative there, so a lone ``NOT ...`` handler phrase after it belongs
+    to the enclosing statement; at paragraph level it can only be its own.
+    """
+    return getattr(stream, _TOP_LEVEL_ATTR, None) == start
+
+
 def collect_clause_stmts(stream: ITokenStream, stop_at: set) -> list:
     """Parse the imperative statements of a conditional IO clause body.
 

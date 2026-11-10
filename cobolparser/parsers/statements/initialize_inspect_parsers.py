@@ -58,7 +58,7 @@ class InitializeStatementParser(IStatementParser):
 
         INITIALIZE identifier-1 [identifier-2 ...]
             [WITH FILLER]
-            [{ALL | category} TO VALUE]
+            [{ALL | category} [TO] VALUE]
             [THEN REPLACING {category [DATA] BY {value}} ...]
             [THEN TO DEFAULT]
     """
@@ -130,14 +130,21 @@ class InitializeStatementParser(IStatementParser):
         # this parser looks past layout: a line break inside a multi-word
         # phrase (``ALL`` / ``TO VALUE``, ``THEN`` / ``TO DEFAULT``) is
         # legal, and a raw ``peek(1)`` saw the NEWLINE and dropped the
-        # phrase (#575).
+        # phrase (#575). TO is optional (``INITIALIZE X ALL VALUE``); the
+        # TO-less form used to drop the phrase with a warning.
         token = token_stream.peek()
         if token and _val(token) in _REPLACING_CATEGORIES | {"ALL"}:
             nxt, nxt_idx = peek_past_noise(token_stream, 1)
-            after, _ = peek_past_noise(token_stream, nxt_idx + 1)
-            if nxt and _val(nxt) == "TO" and after and _val(after) == "VALUE":
+            words = 0
+            if nxt and _val(nxt) == "VALUE":
+                words = 2
+            elif nxt and _val(nxt) == "TO":
+                after, _ = peek_past_noise(token_stream, nxt_idx + 1)
+                if after and _val(after) == "VALUE":
+                    words = 3
+            if words:
                 stmt.to_value_category = _val(token)
-                for _ in range(3):
+                for _ in range(words):
                     skip_whitespace(token_stream)
                     token_stream.consume()
                 skip_whitespace(token_stream)

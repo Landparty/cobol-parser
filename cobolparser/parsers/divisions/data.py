@@ -65,6 +65,23 @@ _REPEAT_COUNT_RE = re.compile(r"\(\d+\)")
 _NUMERIC_PIC_CHARS = frozenset("S9VP")
 
 
+def _at_unit_boundary(token_stream: ITokenStream, value_upper: str) -> bool:
+    """True at ``END PROGRAM`` / ``END FUNCTION`` or a header-less
+    ``PROGRAM-ID`` / ``FUNCTION-ID``: the end of this program's DATA
+    DIVISION when it has no PROCEDURE DIVISION. Reading past them swallowed
+    the next unit."""
+    if value_upper in ("PROGRAM-ID", "FUNCTION-ID"):
+        return True
+    if value_upper != "END":
+        return False
+    nxt = token_stream.peek(1)
+    offset = 1
+    while nxt is not None and nxt.type.name == "NEWLINE":
+        offset += 1
+        nxt = token_stream.peek(offset)
+    return nxt is not None and (nxt.value or "").upper() in ("PROGRAM", "FUNCTION")
+
+
 def _is_numeric_picture(item: CobolDataItem) -> bool:
     """True when *item* has a plain (unedited) numeric PICTURE."""
     picture = item.picture_clause
@@ -281,6 +298,8 @@ class DataDivisionParser(BaseDivisionParser):
                 break
             if any(token_value == f"{kw} DIVISION" for kw in _stop_div):
                 break
+            if _at_unit_boundary(token_stream, token_value):
+                break
 
             # Parse specific sections
             if token_value == "FILE":
@@ -417,6 +436,8 @@ class DataDivisionParser(BaseDivisionParser):
             if value_upper in ("IDENTIFICATION", "ENVIRONMENT", "PROCEDURE"):
                 if at_division_boundary(token_stream):
                     break
+            if _at_unit_boundary(token_stream, value_upper):
+                break
 
             # In FILE SECTION, detect FD/SD declarations to build record-to-file mapping
             if (
@@ -641,6 +662,8 @@ class DataDivisionParser(BaseDivisionParser):
             if value_upper in ("IDENTIFICATION", "ENVIRONMENT", "PROCEDURE"):
                 if at_division_boundary(token_stream):
                     break
+            if _at_unit_boundary(token_stream, value_upper):
+                break
 
             if screen and tok_type not in _NOISE_TOKEN_TYPES:
                 if reference is not None and (

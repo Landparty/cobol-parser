@@ -19,6 +19,7 @@ from cobolparser.parsers.statements._utils import (
     consume_optional_qualifiers,
     get_parse_context,
     is_statement_boundary,
+    is_top_level_statement,
     peek_past_noise,
     peek_token,
     peek_value_upper,
@@ -149,6 +150,7 @@ class XmlJsonStatementParser(IStatementParser):
         self, token_stream: ITokenStream, context: Any | None = None
     ) -> XmlJsonStatement:
         """Parse an XML/JSON GENERATE or PARSE statement."""
+        start_pos = getattr(token_stream, "position", -1)
         start_token = token_stream.consume()  # XML | JSON
         context = get_parse_context(token_stream)
         verb = (start_token.value or "").upper()
@@ -252,7 +254,12 @@ class XmlJsonStatementParser(IStatementParser):
             stmt.set_clause_text(" ".join(clause_parts))
         self._record_clause_items(clause_tokens, stmt)
 
-        self._parse_exception_clauses(token_stream, stmt, terminator)
+        self._parse_exception_clauses(
+            token_stream,
+            stmt,
+            terminator,
+            top_level=is_top_level_statement(token_stream, start_pos),
+        )
         consume_end_keyword_and_period(token_stream, terminator)
         return stmt
 
@@ -396,11 +403,19 @@ class XmlJsonStatementParser(IStatementParser):
 
     @staticmethod
     def _parse_exception_clauses(
-        token_stream: ITokenStream, stmt: XmlJsonStatement, terminator: str
+        token_stream: ITokenStream,
+        stmt: XmlJsonStatement,
+        terminator: str,
+        top_level: bool = False,
     ) -> None:
-        """Parse ``[ON] EXCEPTION stmts [NOT [ON] EXCEPTION stmts]`` -- the
+        """Parse ``[[ON] EXCEPTION stmts] [NOT [ON] EXCEPTION stmts]`` -- the
         same shape ``AcceptStatementParser._parse_exception_clauses``
-        handles, stopping at this construct's own END-XML/END-JSON."""
+        handles, stopping at this construct's own END-XML/END-JSON.
+
+        Either handler may be written without the other: a ``NOT ON
+        EXCEPTION`` with no ``ON EXCEPTION`` before it (IBM's JSON PARSE
+        sample) used to be left unparsed, and its body became unconditional
+        top-level statements."""
         for negated in (False, True):
             skip_whitespace(token_stream)
             if negated:
@@ -421,13 +436,36 @@ class XmlJsonStatementParser(IStatementParser):
                 token_stream.consume()  # ON
                 skip_whitespace(token_stream)
             if peek_value_upper(token_stream) != "EXCEPTION":
-                return
+                if negated:
+                    return
+                if not top_level and not _closed_before_period(
+                    token_stream, terminator
+                ):
+                    # Nested in another statement's body without its own
+                    # END-XML/END-JSON: a lone NOT ON EXCEPTION may be the
+                    # enclosing statement's (CALL ... ON EXCEPTION JSON
+                    # GENERATE ... NOT ON EXCEPTION ... END-CALL), where this
+                    # one may only be imperative.
+                    return
+                continue  # no ON EXCEPTION: a NOT ON EXCEPTION may follow alone
             token_stream.consume()  # EXCEPTION
             clause = collect_clause_stmts(token_stream, {terminator})
             if negated:
                 stmt.set_not_on_exception_clause(clause)
             else:
                 stmt.set_on_exception_clause(clause)
+
+
+def _closed_before_period(token_stream: ITokenStream, terminator: str) -> bool:
+    """True if *terminator* (END-XML / END-JSON) comes before the next period."""
+    offset = 0
+    while True:
+        token = token_stream.peek(offset)
+        if token is None or token.type == TokenType.PERIOD:
+            return False
+        if (token.value or "").upper() == terminator:
+            return True
+        offset += 1
 
 
 __all__ = ["XmlJsonStatementParser"]

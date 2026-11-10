@@ -549,6 +549,22 @@ class IdentificationDivisionParser(BaseDivisionParser):
         # Return collected value or empty string
         return " ".join(value_tokens) if value_tokens else ""
 
+    def parse_headerless(self, token_stream: ITokenStream) -> ASTNode:
+        """Parse an IDENTIFICATION DIVISION whose header is left out.
+
+        The stream is at ``PROGRAM-ID`` / ``FUNCTION-ID``. The header is
+        optional in COBOL 2002, GnuCOBOL and Micro Focus; a unit written
+        this way used to be rejected at the top of a file and, nested in
+        another program, silently replaced that program's divisions.
+        """
+        first = token_stream.peek(0)
+        location = getattr(first, "location", None) or SourceLocation(1, 1)
+        self._division_header_column = getattr(location, "column", None)
+        content = self.parse_division(token_stream)
+        node = self._create_ast_node(first, content, location)
+        node.set_metadata("header_omitted", True)
+        return node
+
     def _create_ast_node(
         self,
         division_token: Any,
