@@ -552,6 +552,11 @@ historical name and signature; new clause logic goes in
   which lex as `NUMERIC_LITERAL` / `LEVEL_NUMBER`, via its own
   `_is_procedure_name_token` (works on `token.type.name` strings, unlike the
   statement-level `_utils.is_procedure_name_token`).
+- The name's separator period may be on a later line (`2000-SEND-MAP` /
+  `.`, AWS CardDemo): `is_paragraph_or_section_start` looks past NEWLINE
+  tokens for the period or `SECTION`. It used to check only the next token,
+  dropping the name and merging its statements into the previous paragraph.
+  Pinned by `tests/regression/test_header_period_on_next_line.py`.
 - `is_section_marker` treats a token followed by `SECTION` as a section header
   -- except `EXIT` (reserved), so `EXIT SECTION.` right after a section header is
   a statement, not an empty section that swallows the paragraphs after it (#382).
