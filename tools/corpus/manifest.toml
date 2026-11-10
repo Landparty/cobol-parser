@@ -1,0 +1,159 @@
+# Open-source COBOL corpus for the AST completeness harness.
+#
+# Nothing listed here is vendored into this repository: `fetch.py` clones each
+# source at the pinned commit into a local cache (default `.corpus/`, which is
+# git-ignored), and `run.py` reads it from there. Only sources whose licence
+# allows redistribution and modification are listed; the licence is recorded
+# per source so a report can say where each program came from. Repositories
+# with no licence file are left out on purpose (no licence = all rights
+# reserved), as are the GnuCOBOL `syn_*.at` tests (most are programs that are
+# *meant* to fail compilation).
+#
+# Fields:
+#   id         short name used in reports
+#   repo       git URL (cloned shallow at `commit`), or `local` for an in-repo path
+#   commit     full commit SHA the expectations were taken at
+#   licence    SPDX identifier of the source's licence
+#   dialect    "ibm" (IBM Enterprise / COBOL-85), "gnucobol", "microfocus" --
+#              the parser targets IBM; other dialects are reported separately
+#   kind       "files" (program files matched by `programs`) or
+#              "gnucobol-at" (programs embedded in autotest .at files)
+#   programs   globs (relative to the source root) of compilation units
+#   copybooks  globs of directories searched for COPY members
+#   exclude    globs of program files to skip
+#   skip_if_first_line  regex; a program whose first line matches is skipped
+
+[[source]]
+id = "nist-cobol85"
+local = "examples/cobol"
+licence = "public-domain"
+dialect = "ibm"
+kind = "files"
+programs = ["*.CBL"]
+copybooks = ["."]
+
+[[source]]
+id = "carddemo"
+repo = "https://github.com/aws-samples/aws-mainframe-modernization-carddemo"
+commit = "59cc6c2fd7ebd7ef7925cad552a01a4b8b6e4d5e"
+licence = "Apache-2.0"
+dialect = "ibm"
+kind = "files"
+programs = ["app/**/*.cbl", "app/**/*.CBL"]
+copybooks = ["app/cpy", "app/cpy-bms", "app/*/cpy", "app/*/cpy-bms"]
+
+[[source]]
+id = "cics-genapp"
+repo = "https://github.com/cicsdev/cics-genapp"
+commit = "f6f3f4b2580d31b7d8dcc31ce3e3676f4cceaaaa"
+licence = "EPL-2.0"
+dialect = "ibm"
+kind = "files"
+programs = ["base/src/*.cbl"]
+copybooks = ["base/src"]
+
+[[source]]
+id = "dbb-zappbuild"
+repo = "https://github.com/IBM/dbb-zappbuild"
+commit = "796f48dd82ee9361661daf72966e0d3a13326237"
+licence = "Apache-2.0"
+dialect = "ibm"
+kind = "files"
+programs = ["samples/**/*.cbl"]
+copybooks = ["samples/**/copybook", "samples/**/copy"]
+
+[[source]]
+id = "dbb"
+repo = "https://github.com/IBM/dbb"
+commit = "251b47505d19601feba13a5a99f8f537bbea4f25"
+licence = "Apache-2.0"
+dialect = "ibm"
+kind = "files"
+programs = ["**/*.cbl", "**/*.cob"]
+copybooks = ["**/copybook", "**/copy", "**/cpy"]
+
+[[source]]
+id = "zopeneditor-sample"
+repo = "https://github.com/IBM/zopeneditor-sample"
+commit = "8f9835308de6159eb54f226041d5f81a780cb8eb"
+licence = "Apache-2.0"
+dialect = "ibm"
+kind = "files"
+programs = ["**/*.cbl", "**/*.cob"]
+copybooks = ["**/COPYBOOK", "**/COPYLIB*", "**/copybook*"]
+
+[[source]]
+id = "cobol-is-fun"
+repo = "https://github.com/IBM/cobol-is-fun"
+commit = "d9244e6292db65fb5f87399246c0c70255f15255"
+licence = "Apache-2.0"
+dialect = "ibm"
+kind = "files"
+programs = ["**/*.cbl", "**/*.cob"]
+copybooks = []
+
+[[source]]
+id = "cobol-programming-course"
+repo = "https://github.com/openmainframeproject/cobol-programming-course"
+commit = "780b1c9624e066b9d784a738896e493282c5fbf4"
+licence = "CC-BY-4.0"
+dialect = "ibm"
+kind = "files"
+programs = ["**/*.cbl", "**/*.cob", "**/*.CBL"]
+copybooks = ["**/copybooks", "**/cbl"]
+
+[[source]]
+id = "cobol-check"
+repo = "https://github.com/openmainframeproject/cobol-check"
+commit = "c79624bd286d5f08f156ccce755bc5d4fffd1909"
+licence = "Apache-2.0"
+dialect = "ibm"
+kind = "files"
+programs = ["src/main/cobol/*.cbl", "src/main/cobol/*.CBL", "testfiles/*.cbl", "testfiles/*.CBL"]
+copybooks = ["src/main/cobol/copy", "copybooks", "testfiles"]
+
+[[source]]
+id = "proleap-tests"
+repo = "https://github.com/uwol/proleap-cobol-parser"
+commit = "d1bfe75bdd6d480f70c74c6345bcc02610ac30d3"
+licence = "MIT"
+dialect = "ibm"
+kind = "files"
+# The gov/nist copy duplicates nist-cobol85; the tandem and preprocessor
+# tests exercise non-IBM reference formats and COPY edge cases on purpose.
+programs = ["src/test/resources/io/proleap/cobol/asg/**/*.cbl", "src/test/resources/io/proleap/cobol/ast/fixed/*.cbl", "src/test/resources/io/proleap/cobol/ast/variable/*.cbl"]
+# Most asg/ tests are written in Tandem reference format (indicator in
+# column 1, code from column 2), which this parser does not read; a file whose
+# first line starts with one space then code is one of those.
+skip_if_first_line = "^ \\S"
+copybooks = ["src/test/resources/io/proleap/cobol/asg/**", "src/test/resources/io/proleap/cobol/ast/**"]
+
+[[source]]
+id = "beginning-cobol"
+repo = "https://github.com/Apress/beg-cobol-for-programmers"
+commit = "3d2656fadd3cd3534beab8e00f85fe96ac41f5c2"
+licence = "LicenseRef-Apress-Freeware"
+dialect = "microfocus"
+kind = "files"
+programs = ["**/*.cbl", "**/*.CBL", "**/*.cob"]
+copybooks = ["*"]
+
+[[source]]
+id = "cobol-unit-test"
+repo = "https://github.com/neopragma/cobol-unit-test"
+commit = "8e2c04fc8cda62fb54df8042c141b9ee43abdc16"
+licence = "GPL-3.0-or-later"
+dialect = "ibm"
+kind = "files"
+programs = ["src/main/cobol/*.cbl", "src/test/cobol/**/*.cbl"]
+copybooks = ["src/main/cobol/copy", "src/test/cobol/**"]
+
+[[source]]
+id = "gnucobol-testsuite"
+repo = "https://github.com/OCamlPro/gnucobol"
+commit = "52db7d130e66c5f1551bc3435735528ecf0c01ec"
+licence = "GPL-3.0-or-later"
+dialect = "gnucobol"
+kind = "gnucobol-at"
+programs = ["tests/testsuite.src/run_*.at", "tests/testsuite.src/data_*.at"]
+copybooks = []
