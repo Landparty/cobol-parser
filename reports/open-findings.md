@@ -25,9 +25,6 @@ fixing one turns its test into an XPASS failure, so remove the mark with the fix
 - XML/JSON takes the sentence period as a missing operand, FROM item or
   PROCESSING PROCEDURE name, reports nothing, and swallows the next paragraph
   header as clause text (3 cases, same file).
-- A paragraph name whose period is on the next line (`P2` / `.`) is not a
-  header: P2 is dropped and its statements join the previous paragraph
-  (`test_procedure_boundary_branches.py`).
 - `SetStatementParser._starts_another_group` looks at most 24 tokens ahead: a
   later group with more targets is dropped as "Unparsed tokens"
   (`test_set_parser_branches.py`).
