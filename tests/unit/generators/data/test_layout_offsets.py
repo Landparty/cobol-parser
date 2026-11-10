@@ -26,6 +26,34 @@ def _parse_record(data_division_body: str) -> CobolDataItem:
     return section.data_items[0]
 
 
+class TestItemOrder:
+    """The root first; each nested group after its members, its level-88s
+    right after it. ``FieldFlowAnalyzer._index_items`` depends on it (the
+    docstring used to promise source order, which the code never gave)."""
+
+    def test_groups_follow_their_members(self):
+        record = _parse_record(
+            "       01  REC.\n"
+            "           88  REC-EMPTY VALUE SPACES.\n"
+            "           05  HDR.\n"
+            "               10  H1 PIC X.\n"
+            "               10  H2 PIC X.\n"
+            "           05  BODY.\n"
+            "               88  BODY-EMPTY VALUE SPACES.\n"
+            "               10  B1 PIC X.\n"
+        )
+        assert [item.qualified_name for item in compute_record_layout(record)] == [
+            "REC",
+            "REC.REC-EMPTY",
+            "REC.HDR.H1",
+            "REC.HDR.H2",
+            "REC.HDR",
+            "REC.BODY.B1",
+            "REC.BODY",
+            "REC.BODY.BODY-EMPTY",
+        ]
+
+
 class TestFlatRecord:
     def test_sequential_elementary_items_get_increasing_offsets(self):
         record = _parse_record(

@@ -1,7 +1,7 @@
 ---
 type: Module
 title: Copybook Record Data
-description: generators/data/ generation side — copybook parsing and flattening into FieldSpecs, value generation (PICTURE/USAGE/level-88/VALUE/semantic hints), byte widths and offsets (storage.py, layout_offsets.py, data-items), record-image encoding (zoned, COMP-3, binary, float, edited, hex literals) and fixed vs. variable-length records (ODO trimming, FD RECORD VARYING, RDW).
+description: generators/data/ generation side — copybook parsing and flattening into FieldSpecs, value generation (PICTURE/USAGE/level-88/VALUE/semantic hints), byte widths and offsets (_storage.py, layout/offsets.py, data-items), record-image encoding (zoned, COMP-3, binary, float, edited, hex literals) and fixed vs. variable-length records (ODO trimming, FD RECORD VARYING, RDW).
 tags: [generators, copybook, test-data, csv, record-image, encoding, layout-offsets, odo, recfm, values]
 timestamp: 2026-10-15T00:00:00Z
 ---
@@ -47,7 +47,7 @@ dataset.write_csv("customers.csv")
 - **`options.py`** — `DataGeneratorOptions`: `rows`, `seed`, `include_filler`, `include_condition_filler`, `include_redefines`, `expand_occurs`, `max_occurs`, `respect_values`, `use_condition_values`, `semantic_hints`, `header_style`, `unique_fields`, `blank_rate`, `record_varying`; `for_record_image()` returns the byte-complete variant. A dataset generated with lossy options carries `record_image_gap = (covered, full)` (set by `CopybookDataGenerator.generate_from_record`), and its record-image methods (`to_records`, `write_records`, `to_hex_dump`, `record_length`) then emit `IncompleteRecordImageWarning` (a `UserWarning`, exported from `cobolparser.generators.data`); CSV output never warns.
 - **`errors.py`** — `CopybookLayoutError` and `ProgramLayoutError` (both `ValueError` subclasses; `encoding.RecordEncodingError` subclasses `CopybookLayoutError`).
 - **`layout.py`** — `FieldCategory`, `FieldSpec`, `flatten_record()`: the rules that turn a nested `CobolDataItem` tree into a flat list of columns. Also `expand_condition_values()`, `condition_ranges()`, `condition_values_exhaustive()`, `OdoControl`, `present_indexes()`, `VaryingLength`.
-- **`layout_offsets.py`** — `LayoutItem`, `compute_record_layout()`, `compute_program_data_items()`: record-relative byte offsets/lengths for every data item. See [Byte widths and offsets](#byte-widths-and-offsets).
+- **`cobolparser/layout/offsets.py`** — `LayoutItem`, `compute_record_layout()`, `compute_program_data_items()`: record-relative byte offsets/lengths for every data item, each group listed *after* its members (see below). See [Byte widths and offsets](#byte-widths-and-offsets).
 - **`values.py`** — `ValueFactory`: synthetic values respecting PICTURE/USAGE/level-88 domain/VALUE/semantic hints. See [Value generation](#value-generation).
 - **`storage.py`** — re-export shim for `cobolparser/_storage.py`, the single authority on how many bytes a data item occupies. See [Byte widths and offsets](#byte-widths-and-offsets).
 - **`editing.py`** — numeric-edited pictures: `edit_numeric()` (the display form a `MOVE` leaves, `$1,234.56`), `deedit_numeric()` (its inverse), `deedit_float()`, `is_float_picture()`. Used by `encoding.py` and `decoding.py`.
@@ -484,6 +484,14 @@ isolation and returns `LayoutItem`s:
   becomes that `05`'s AST child. `_direct_data_children()` excludes level-77
   items at every call site; counting one would misclassify the `05` as a group
   and discard its own PIC/byte_length.
+
+**Item order.** `compute_record_layout()` lists the record root first (then
+its own level-88s), and below it each group *after* its members, with the
+group's level-88s right after the group: `REC, REC.HDR.H1, REC.HDR.H2,
+REC.HDR, ...`. It is load-bearing: `FieldFlowAnalyzer._index_items` finds an
+entry's enclosing group as the next entry of the parent's name, which keeps
+same-named groups (FILLER) apart. A consumer that wants source order sorts
+by declaration (the MCP server's `_declarations` does).
 
 **`compute_program_data_items(ast) -> {"items": [...], "unresolved": [...]}`**
 is the program-wide entry point behind `data-items` (JSON-ready; `unresolved`
