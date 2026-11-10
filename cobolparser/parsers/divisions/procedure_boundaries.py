@@ -119,6 +119,36 @@ def is_paragraph_or_section_start(token_stream: ITokenStream) -> bool:
     return False
 
 
+def is_leftover_word(token_stream: ITokenStream) -> bool:
+    """True when the name at the cursor is a word a statement parser left
+    behind, not a paragraph header.
+
+    A header starts a sentence: the token before it is a period, or it is
+    the first word on its line. ``STOP RUN 33.``, ``START F FIRST.`` or
+    ``ACCEPT X UPDATE.`` leave a word that is followed by a period and so
+    looks like a header by shape alone; it used to open a phantom paragraph
+    (``33``) that took the rest of the code, with no diagnostic.
+    """
+    token = token_stream.peek(0)
+    if token is None or token.value == ".":
+        return False
+    previous = token_stream.peek(-1)
+    if (
+        previous is None
+        or previous.value in (".", "")
+        or previous.type.name
+        in (
+            "NEWLINE",
+            "WHITESPACE",
+            "COMMENT",
+        )
+    ):
+        return False
+    line = getattr(getattr(token, "location", None), "line", None)
+    previous_line = getattr(getattr(previous, "location", None), "line", None)
+    return line is not None and line == previous_line
+
+
 def is_section_marker(token_stream: ITokenStream) -> bool:
     """Check if current token starts a section definition.
 

@@ -561,6 +561,15 @@ historical name and signature; new clause logic goes in
   then reports the missing operand, so the parse is flagged rather than silent.
   Verbs with a dedicated `TokenType` (`EJECT`, `SKIP1-3`) can never be read as
   paragraph names.
+- **Leftover words.** `is_leftover_word` is True for a name that follows
+  statement content on the same line with no period between (`STOP RUN 33.`,
+  `START F FIRST.`, `ACCEPT X UPDATE.`): a header starts a sentence. Both the
+  paragraph statement loop and the top loop's "unknown token -> paragraph
+  name" fallback call `ProcedureDivisionParser._drop_leftover_word`, which
+  warns ("Unparsed tokens") and consumes the word, so the statements after it
+  stay in their paragraph. It used to open a phantom paragraph that took the
+  rest of the code, silently. A name followed by `SECTION` is never a
+  leftover. Pinned by `tests/regression/test_leftover_word_not_a_paragraph.py`.
 
 ### Unsupported verbs and recovery (`procedure_recovery.py`)
 

@@ -36,6 +36,7 @@ from cobolparser.parsers.statements._utils import (
 
 from .base import BaseDivisionParser
 from .procedure_boundaries import (
+    is_leftover_word,
     is_paragraph_or_section_start,
     is_section_marker,
     is_statement_keyword,
@@ -397,6 +398,8 @@ class ProcedureDivisionParser(BaseDivisionParser):
                 "PROGRAM",
                 "DIVISION",
             ):
+                if self._drop_leftover_word(token_stream):
+                    continue
                 # Treat as paragraph name (only if not a keyword)
                 para_name = token_value
                 para_location = (
@@ -476,9 +479,14 @@ class ProcedureDivisionParser(BaseDivisionParser):
             if not token:
                 break
 
-            # Check for next paragraph or section
+            # Check for next paragraph or section. A word a statement parser
+            # left behind (``STOP RUN 33.``) is dropped with a warning
+            # instead: it is not a header, and the statements after it stay
+            # in this paragraph.
             if self._is_paragraph_or_section_start(token_stream):
-                break
+                if not self._drop_leftover_word(token_stream):
+                    break
+                continue
 
             # Check for division end marker
             if token.value and token.value.upper() in (
@@ -571,6 +579,21 @@ class ProcedureDivisionParser(BaseDivisionParser):
     def _is_paragraph_or_section_start(self, token_stream: ITokenStream) -> bool:
         """Check for a paragraph/section start (delegates to procedure_boundaries)."""
         return is_paragraph_or_section_start(token_stream)
+
+    def _drop_leftover_word(self, token_stream: ITokenStream) -> bool:
+        """Consume and warn about a word a statement parser left behind.
+
+        Returns False (consuming nothing) when the word at the cursor can
+        be a paragraph header; see ``procedure_boundaries.is_leftover_word``.
+        """
+        nxt = token_stream.peek(1)
+        if nxt is not None and (nxt.value or "").upper() == "SECTION":
+            return False
+        if not is_leftover_word(token_stream):
+            return False
+        self._warn_unsupported_statement(token_stream.peek(0))
+        token_stream.consume()
+        return True
 
     def _is_section_marker(self, token_stream: ITokenStream) -> bool:
         """Check for a section marker (delegates to procedure_boundaries)."""

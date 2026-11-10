@@ -63,10 +63,12 @@ class AcceptStatementParser(IStatementParser):
         # ``ACCEPT X, FROM DATE``: a separator is a space (#569).
         skip_statement_separators(token_stream)
 
-        # Communication Module form: ``ACCEPT cd-name MESSAGE COUNT``.
-        if peek_value_upper(token_stream) == "MESSAGE":
-            token_stream.consume()
-            skip_whitespace(token_stream)
+        # Communication Module form: ``ACCEPT cd-name [MESSAGE] COUNT``
+        # (MESSAGE is optional: NIST CM101M has ``ACCEPT CM-INQUE-1 COUNT``).
+        if peek_value_upper(token_stream) in ("MESSAGE", "COUNT"):
+            if peek_value_upper(token_stream) == "MESSAGE":
+                token_stream.consume()
+                skip_whitespace(token_stream)
             if peek_value_upper(token_stream) == "COUNT":
                 token_stream.consume()
                 skip_whitespace(token_stream)
