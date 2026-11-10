@@ -54,6 +54,7 @@ EXTRA_FILES = [
     REPO_ROOT / "docs" / "project-config.md",
     REPO_ROOT / "docs" / "fixture-bundle-schema.md",
     REPO_ROOT / "docs" / "enterprise-program-types.md",
+    REPO_ROOT / "docs" / "public-api.md",
 ]
 
 if str(REPO_ROOT) not in sys.path:

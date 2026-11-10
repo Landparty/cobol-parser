@@ -16,8 +16,8 @@ After the fix the preprocessor supports:
   warns and makes the condition FALSE
 """
 
+from cobolparser.parser import parse_cobol_with_expansion
 from cobolparser.preprocess import preprocess_conditional_compilation
-from cobolparser.preprocess.copybook_expander import parse_cobol_with_expansion
 
 
 def _run(source, defines=None):

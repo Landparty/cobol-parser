@@ -824,9 +824,9 @@ def source_column_offsets(
 
     from .._lines import split_source_lines
     from .._source_directive import free_format_flags
+    from .._source_text.source_format import detect_fixed_format
     from ..preprocess import strip_compiler_directives
     from ..preprocess.copybook_expander import _looks_fixed_format
-    from ..preprocess.source_format import detect_fixed_format
 
     def read(path: str) -> str | None:
         # Decoded as the parse decoded it (#522): read as UTF-8, an EBCDIC
@@ -921,7 +921,7 @@ def _identification_shapes(lines: list[str]) -> set[str]:
     """
     from collections import Counter
 
-    from ..preprocess._normalize import (
+    from .._source_text.normalize import (
         IDENTIFICATION_END_COL,
         MIN_ID_STAMP_EVIDENCE_LINES,
         TEXT_END_COL,
@@ -974,7 +974,7 @@ def line_length_findings(
     column in both ``location`` and ``origin``, so no source map is needed.
     """
     from .._lines import split_source_lines
-    from ..preprocess._normalize import (
+    from .._source_text.normalize import (
         ALL_COMMENT_INDICATORS,
         IDENTIFICATION_END_COL,
         TEXT_END_COL,
@@ -1087,12 +1087,12 @@ def add_line_length_findings(
 
     from .._lines import split_source_lines
     from .._source_directive import free_format_flags
+    from .._source_text.source_format import detect_fixed_format
     from ..preprocess import PreprocessingError, strip_compiler_directives
     from ..preprocess.copybook_expander import (
         _looks_fixed_format,
         read_program_source,
     )
-    from ..preprocess.source_format import detect_fixed_format
 
     def key(path: str) -> str:
         try:

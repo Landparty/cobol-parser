@@ -2690,12 +2690,9 @@ def _fixed_format_comment_tokens(
     consistently. With *debug_lines_as_comments* False -- the
     normalization compiled the ``D`` lines as code -- they are not comments.
     """
-    # Deferred import: keeping preprocess out of module scope avoids import
-    # cycles (same rationale as the tokenize helper below). The constant is
-    # the shared home for the comment-indicator set — see _normalize.py.
+    # The indicator sets' one home is _source_text.normalize (a leaf).
     from ._source_directive import free_format_flags
-    from .preprocess import ALL_COMMENT_INDICATORS
-    from .preprocess._normalize import DEBUG_INDICATORS
+    from ._source_text.normalize import ALL_COMMENT_INDICATORS, DEBUG_INDICATORS
 
     comment_indicators = (
         ALL_COMMENT_INDICATORS
@@ -2837,9 +2834,8 @@ def _tokenize_source(
         Tuple of (tokens, lexer errors, lexer warnings).
     """
     if not free_form or preprocess_fixed:
-        # Deferred imports: parser.py imports this module at load time, and
-        # keeping preprocess out of module scope avoids import cycles.
-        from .preprocess.source_format import (
+        # Deferred: only fixed-format input needs the normalizer.
+        from ._source_text.source_format import (
             detect_fixed_format,
             normalize_with_recovery,
         )

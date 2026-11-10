@@ -601,7 +601,7 @@ def _parse(
     defines = dict(options.defined_symbols)
 
     if options.copybook_paths:
-        from cobolparser.preprocess.copybook_expander import parse_cobol_with_expansion
+        from cobolparser.parser import parse_cobol_with_expansion
 
         try:
             return parse_cobol_with_expansion(

@@ -459,7 +459,7 @@ def _attach_expansion_debug_lines(
     """The dropped-debugging-lines warning the expansion hid from the parser."""
     if expansion is None:
         return
-    from cobolparser.preprocess.copybook_expander import warn_dropped_debug_lines
+    from cobolparser.parser import warn_dropped_debug_lines
 
     warn_dropped_debug_lines(result, expansion, filename)
 

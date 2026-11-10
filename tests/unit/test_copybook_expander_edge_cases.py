@@ -432,7 +432,7 @@ class TestContinuedLiteralSurvivesExpansion:
         return "\n".join(lines) + "\n"
 
     def test_literal_is_continued_not_truncated(self):
-        from cobolparser.preprocess import parse_cobol_with_expansion
+        from cobolparser.parser import parse_cobol_with_expansion
 
         with tempfile.TemporaryDirectory() as tmpdir:
             _write(tmpdir, "CB.cpy", "       01 CB-REC PIC X.\n")

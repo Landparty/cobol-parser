@@ -429,13 +429,13 @@ def _build_preprocess_parser(
 
 
 def _cmd_preprocess(args: argparse.Namespace) -> None:
+    from ..._source_text.source_format import (
+        detect_fixed_format,
+        normalize_with_recovery,
+    )
     from ...preprocess import (
         preprocess_conditional_compilation,
         strip_compiler_directives,
-    )
-    from ...preprocess.source_format import (
-        detect_fixed_format,
-        normalize_with_recovery,
     )
 
     source = _read_source(args.file, getattr(args, "encoding", None))

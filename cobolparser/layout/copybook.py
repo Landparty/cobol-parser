@@ -13,10 +13,9 @@ import re
 from .._lines import split_source_lines
 from ..models.data_items import CobolDataItem
 from ..models.program import CobolProgram
-from ..parser import parse_cobol
+from ..parser import parse_cobol, parse_cobol_with_expansion
 from ..plugins.core import ErrorRecoveryMode
 from ..preprocess import PreprocessingError
-from ..preprocess.copybook_expander import parse_cobol_with_expansion
 from .errors import CopybookLayoutError
 
 # ---------------------------------------------------------------------------

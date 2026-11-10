@@ -17,8 +17,8 @@ import re
 
 from .._lines import split_source_lines
 from .._source_directive import free_format_flags
+from .._source_text.normalize import ALL_COMMENT_INDICATORS, DEBUG_INDICATORS
 from ..lexer import mask_comment_entries
-from ._normalize import ALL_COMMENT_INDICATORS, DEBUG_INDICATORS
 from .models import CopyStatement, ReplacingClause, SuppressClause
 
 

@@ -10,10 +10,10 @@ import pytest
 from cobolparser import expand_copybooks
 from cobolparser.batch import parse_files_with_copybooks
 from cobolparser.cli.parse import main
+from cobolparser.parser import parse_cobol_with_expansion
 from cobolparser.preprocess import CopybookNotFoundError
 from cobolparser.preprocess.copybook_expander import (
     detect_encoding,
-    parse_cobol_with_expansion,
     read_file_with_encoding,
 )
 from cobolparser.preprocess.models import CopybookSearchPath

@@ -509,8 +509,8 @@ def _do_parse(args: argparse.Namespace) -> tuple[Any, Any]:
 
     def _parse_once() -> Any:
         if copybook_paths:
+            from ..parser import parse_cobol_with_expansion
             from ..preprocess import PreprocessingError
-            from ..preprocess.copybook_expander import parse_cobol_with_expansion
 
             try:
                 return parse_cobol_with_expansion(

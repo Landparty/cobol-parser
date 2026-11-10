@@ -1,14 +1,14 @@
 ---
 type: Module
 title: Static Analysis
-description: Routing page for cobolparser/analysis/ (37 public modules + the program_flow/ package + 6 private helpers) and dialects/le_signatures.py -- calling conventions shared by every analyzer, which .okf/analysis/*.md file covers which analyzer, the module map and the public imports.
+description: Routing page for cobolparser/analysis/ (38 public modules + the program_flow/ package + 6 private helpers) and dialects/le_signatures.py -- calling conventions shared by every analyzer, which .okf/analysis/*.md file covers which analyzer, the module map and the public imports.
 tags: [analysis, routing, dead-code, program-flow, lint, xref, field-lineage, business-rules, fixtures, codebase-graph, sql-cics-lint, le-signatures]
 timestamp: 2026-10-15T00:00:00Z
 ---
 
 # Static Analysis
 
-`cobolparser/analysis/` holds every static analyzer: 37 public modules, the
+`cobolparser/analysis/` holds every static analyzer: 38 public modules, the
 `program_flow/` package (the control-flow graph, 8 modules) and 6 private
 helpers (`_procedures.py`, `_names.py`, `_files.py`, `_cics.py`,
 `_sql_whenever.py`, `_sql_flow.py`) the analyzers share so they cannot
@@ -51,6 +51,16 @@ no longer changes. `BusinessRuleExtractor` and `FieldFlowAnalyzer` keep their
 own `XrefAnalyzer` instance: they call its name-resolution helpers, which read
 and write the instance's state, so a shared report would not do.
 
+**One interface.** `analysis/protocol.py`'s `ProgramAnalyzer` (a
+`typing.Protocol`, exported from `cobolparser`) is `analyze(ast) -> report`
+and `Report` is `to_dict()`. The checkers and `HostVariableResolver` also
+answer `analyze()` (delegating to `check()` / `resolve()`).
+`tests/contracts/test_analyzer_protocol.py` lists every class with an
+`analyze` as conforming or as a named exception (`BoundaryInventoryAnalyzer`,
+`CopybookImpactAnalyzer`, `FieldWideningAnalyzer`, `IMSSegmentAnalyzer`,
+`DynamicCallAnalyzer`), and fails on an unlisted new one. The public tiers:
+[`docs/public-api.md`](../docs/public-api.md).
+
 **Scope.** Most analyzers are program-unit scoped: they examine the unit they
 are given and skip `ast.contained_programs` (iterate `ast.program_units()` to
 cover a file; `LintAnalyzer` and the `program-signature` CLI do).
@@ -88,6 +98,7 @@ Report origins after copybook expansion: [analysis/lint.md](analysis/lint.md).
 | `complexity.py` | `ComplexityAnalyzer`, `ComplexityThresholds` | [flow](analysis/flow.md) |
 | `redundancy.py` | `RedundancyAnalyzer` (clone groups, paragraph fingerprints) | [flow](analysis/flow.md) |
 | `technical_debt.py` | `TechnicalDebtAnalyzer`, `DebtWeights` | [flow](analysis/flow.md) |
+| `protocol.py` | `ProgramAnalyzer`, `Report` (the shared analyzer interface) | [analysis](#calling-conventions) |
 | `context.py` | `ProgramContext` (memoized xref, flow graph, procedure index) | [analysis](#calling-conventions) |
 | `_procedures.py` | `ProcedureIndex`, `enclosing_section`, `qualify` | [flow](analysis/flow.md) |
 | `_cics.py` | `cics_exit_kind`, `cics_terminator_kind`, `cics_identifier_options` | [flow](analysis/flow.md), [data-use](analysis/data-use.md) |

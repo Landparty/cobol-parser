@@ -115,9 +115,7 @@ class TestNistProgramsParseErrorFree:
     @pytest.mark.parametrize("cbl_path", _cbl_params())
     def test_parses_error_free(self, cbl_path: Path) -> None:
         if cbl_path.name in REQUIRES_COPYBOOK_EXPANSION:
-            from cobolparser.preprocess.copybook_expander import (
-                parse_cobol_with_expansion,
-            )
+            from cobolparser.parser import parse_cobol_with_expansion
 
             result = parse_cobol_with_expansion(
                 _read(cbl_path),
@@ -139,9 +137,7 @@ class TestNistCopyStatementSupport:
     parses clean against the suite's own copybooks."""
 
     def test_sm101a_parses_clean_with_copybook_expansion(self) -> None:
-        from cobolparser.preprocess.copybook_expander import (
-            parse_cobol_with_expansion,
-        )
+        from cobolparser.parser import parse_cobol_with_expansion
 
         source = _read(NIST_DIR / "SM101A.CBL")
         result = parse_cobol_with_expansion(
@@ -159,9 +155,7 @@ class TestNistCopyStatementSupport:
         """COPY member OF library falls back to the plain search path when
         the library has no subdirectory equivalent (SM207A uses
         ``COPY ALTLB OF X1-LIB`` with ALTLB.CPY in the suite directory)."""
-        from cobolparser.preprocess.copybook_expander import (
-            parse_cobol_with_expansion,
-        )
+        from cobolparser.parser import parse_cobol_with_expansion
 
         source = _read(NIST_DIR / "SM207A.CBL")
         result = parse_cobol_with_expansion(

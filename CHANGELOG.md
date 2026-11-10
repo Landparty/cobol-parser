@@ -9,6 +9,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+* **A written public API and one analyzer interface.** `docs/public-api.md`
+  says what is semver-stable (the facade, whose list a test keeps equal to
+  `cobolparser.__all__`; the stable subpackages) and what is internal.
+  `cobolparser.ProgramAnalyzer` is the `analyze(ast) -> report` protocol
+  every single-program analyzer meets; `MoveTypeChecker`, `LinkageChecker`,
+  `DclgenChecker` and `HostVariableResolver` gain `analyze()` beside
+  `check()` / `resolve()`. `cobolparser.__all__` now also lists names it
+  already imported (`IOSequenceAnalyzer`, `LinkageChecker`,
+  `MoveTypeChecker` and their reports, `CommitStatement`,
+  `RollbackStatement`, `parse_files_with_copybooks`).
+
+### Deprecated
+
+* `cobolparser.preprocess.parse_cobol_with_expansion` and
+  `cobolparser.preprocess.copybook_expander.parse_cobol_with_expansion` /
+  `warn_dropped_debug_lines`: they live in `cobolparser.parser` now (and
+  `parse_cobol_with_expansion` in `cobolparser` as before). The old paths
+  still work, with a `DeprecationWarning`, until the next major release.
+
 * **One home for COBOL word lists and AST walks.** `cobolparser/_vocabulary.py`
   holds the figurative constants (with their singular forms) that about two
   dozen modules spelled out on their own, and `cobolparser.models.walk`

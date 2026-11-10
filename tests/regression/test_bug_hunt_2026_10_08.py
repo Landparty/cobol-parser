@@ -237,9 +237,7 @@ class TestCopybookExpansionLineEndings:
     the validator joined the directive line onto the entry."""
 
     def test_bare_cr_source_expands_its_copybook(self, tmp_path):
-        from cobolparser.preprocess.copybook_expander import (
-            parse_cobol_with_expansion,
-        )
+        from cobolparser.parser import parse_cobol_with_expansion
 
         (tmp_path / "REC.cpy").write_text("       01 REC.\n           05 R1 PIC X.\n")
         src = "\r".join(
@@ -265,9 +263,7 @@ class TestCopybookExpansionLineEndings:
         assert not any("not expanded" in str(w) for w in result.warnings)
 
     def test_conditional_directives_in_a_copybook_are_not_entries(self, tmp_path):
-        from cobolparser.preprocess.copybook_expander import (
-            parse_cobol_with_expansion,
-        )
+        from cobolparser.parser import parse_cobol_with_expansion
 
         (tmp_path / "COND.cpy").write_text(
             "       01 COND.\n"

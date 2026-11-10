@@ -26,7 +26,7 @@ from cobolparser.cli.parse import main
 from cobolparser.config import ConfigError
 from cobolparser.config.project import build_config
 from cobolparser.lexer import TokenType, _tokenize_source
-from cobolparser.preprocess.copybook_expander import parse_cobol_with_expansion
+from cobolparser.parser import parse_cobol_with_expansion
 from cobolparser.preprocess.source_format import debug_line_numbers
 from cobolparser.scan import ScanOptions, scan_files
 

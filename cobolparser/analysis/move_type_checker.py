@@ -639,6 +639,11 @@ class MoveTypeChecker:
         self._unresolved_count = 0
         self._unresolved_function_count = 0
 
+    def analyze(self, ast: CobolProgram) -> MoveTypeReport:
+        """The same as :meth:`check`, under the name every program analyzer
+        shares (:class:`~.protocol.ProgramAnalyzer`)."""
+        return self.check(ast)
+
     def check(self, ast: CobolProgram) -> MoveTypeReport:
         """Analyze *ast* and return a MoveTypeReport.
 

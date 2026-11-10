@@ -110,6 +110,7 @@ from .analysis import (
     MoveViolationKind,
     OffenderProcedure,
     ProcedureComplexity,
+    ProgramAnalyzer,
     ProgramContext,
     ProgramFlowAnalyzer,
     ProgramFlowReport,
@@ -169,6 +170,7 @@ from .parser import (
     CobolParser,
     ParseResult,
     parse_cobol,
+    parse_cobol_with_expansion,
 )
 from .plugins.core import (
     DialectType,
@@ -195,7 +197,6 @@ from .preprocess.copybook_expander import (
     clear_file_cache,
     expand_copybooks,
     get_file_cache_stats,
-    parse_cobol_with_expansion,
     set_file_cache_size,
 )
 from .preprocess.models import (
@@ -252,6 +253,8 @@ __all__ = [
     "MoveStatement",
     "DisplayStatement",
     "PerformStatement",
+    "CommitStatement",
+    "RollbackStatement",
     "PictureClause",
     "OccursClause",
     # Lexer components
@@ -266,6 +269,7 @@ __all__ = [
     "parse_cobol",
     # Batch parsing
     "parse_files",
+    "parse_files_with_copybooks",
     "BatchResult",
     # Multi-file analyzer scan
     "scan_files",
@@ -305,6 +309,7 @@ __all__ = [
     "EncodingError",
     "NestingDepthError",
     # Analysis utilities
+    "ProgramAnalyzer",
     "CRUDFlags",
     "CRUDMatrix",
     "CRUDMatrixGenerator",
@@ -335,6 +340,19 @@ __all__ = [
     "DclgenChecker",
     "DclgenReport",
     "DclgenViolation",
+    "IOSequenceAnalyzer",
+    "IOSequenceReport",
+    "IOSequenceViolation",
+    "IOViolationKind",
+    "LinkageChecker",
+    "LinkageReport",
+    "LinkageViolation",
+    "LinkageViolationKind",
+    "MoveTypeChecker",
+    "MoveTypeReport",
+    "MoveTypeViolation",
+    "MoveViolationKind",
+    "DataCategory",
     "LintAnalyzer",
     "LintReport",
     "LintFinding",

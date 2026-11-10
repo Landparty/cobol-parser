@@ -199,6 +199,11 @@ class LinkageChecker:
         self._all_linkage_items: set[str] = set()
         self._violations: list[LinkageViolation] = []
 
+    def analyze(self, ast: CobolProgram) -> LinkageReport:
+        """The same as :meth:`check`, under the name every program analyzer
+        shares (:class:`~.protocol.ProgramAnalyzer`)."""
+        return self.check(ast)
+
     def check(
         self,
         ast: CobolProgram,

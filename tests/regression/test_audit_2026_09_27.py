@@ -22,12 +22,10 @@ import pytest
 from cobolparser import parse_cobol
 from cobolparser._literals import typed_literal_content
 from cobolparser.generators import CopybookDataGenerator, DataGeneratorOptions
+from cobolparser.parser import parse_cobol_with_expansion
 from cobolparser.preprocess import TotalExpansionSizeExceededError
 from cobolparser.preprocess.copy_statement_parser import CopyStatementLexer
-from cobolparser.preprocess.copybook_expander import (
-    expand_copybooks,
-    parse_cobol_with_expansion,
-)
+from cobolparser.preprocess.copybook_expander import expand_copybooks
 
 _PROGRAM = """       IDENTIFICATION DIVISION.
        PROGRAM-ID. HEXV.

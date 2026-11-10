@@ -14,6 +14,23 @@ deliberate. Anything else appended to the bottom is a mistake: five
 entries, including both 2026-09-15 sections, were found there on
 2026-09-15 and moved back up.
 
+## 2026-11-10 -- public API list, analyzer protocol, upward imports
+
+- New user guide `docs/public-api.md` (tiers; the facade list is checked
+  against `cobolparser.__all__` by `tests/contracts/test_public_api_list.py`;
+  added to `okf_check.py`'s `EXTRA_FILES` and [../docs/README.md]). The
+  facade gains `ProgramAnalyzer` and the already-imported IO-sequence,
+  linkage and move-type names, `CommitStatement`, `RollbackStatement`,
+  `parse_files_with_copybooks`.
+- [analysis.md](analysis.md): `analysis/protocol.py` (`ProgramAnalyzer`,
+  `Report`); checkers answer `analyze()`; module count 37 -> 38. Test:
+  `tests/contracts/test_analyzer_protocol.py`.
+- [preprocessing.md](preprocessing.md), [index.md](index.md):
+  `_normalize.py` / `source_format.py` moved to the `_source_text` leaf
+  (preprocess keeps aliases); `parse_cobol_with_expansion` /
+  `warn_dropped_debug_lines` moved to `parser.py` (deprecated aliases).
+  `KNOWN_UPWARD` 2 -> 1. Test: `tests/unit/test_moved_module_aliases.py`.
+
 ## 2026-11-10 -- shared word lists and AST walks
 
 - [lexer.md](lexer.md): new `cobolparser/_vocabulary.py` (figurative
