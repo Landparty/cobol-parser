@@ -10,6 +10,7 @@ from cobolparser.parsers.statements._utils import (
     STATEMENT_TOKEN_TYPES,
     _looks_like_statement_boundary,
     consume_optional_qualifiers,
+    ends_at_paragraph_header,
     get_parse_context,
     is_statement_boundary,
     join_source_parts,
@@ -529,6 +530,10 @@ class CallStatementParser(IStatementParser):
                 continue
 
             if _ends_using_clause(token):
+                break
+            if ends_at_paragraph_header(
+                token_stream, getattr(stmt.location, "column", None)
+            ):
                 break
 
             current, passing_mode = self._consume_passing_mode(

@@ -171,7 +171,14 @@ must stop at a boundary *without consuming it*. The rules:
    the division loop then starts the paragraph normally. Applied in MOVE,
    DISPLAY, COMPUTE, STRING, UNSTRING, INSPECT, OPEN, CLOSE, SET, CANCEL,
    SORT/MERGE, INITIALIZE and the ADD/SUBTRACT/MULTIPLY/DIVIDE target and GIVING
-   lists (helpers take an optional `reference_column`). INSPECT's TALLYING loop
+   lists (helpers take an optional `reference_column`). Loops that collect a
+   condition, an argument list or a clause body call
+   `ends_at_paragraph_header(stream, reference_column=None)` (the same test,
+   plus the warning, which is recorded once per header): the IF condition,
+   PERFORM UNTIL (inline, out-of-line, VARYING/AFTER), CALL USING, INITIALIZE
+   (with the verb column), and the EVALUATE WHEN body and `collect_clause_stmts`
+   / size-error bodies (no column; the enclosing statement ends there as at
+   a period). INSPECT's TALLYING loop
    and UNSTRING's `_parse_into_targets` only break; the outer loop records the
    warning. `is_statement_boundary()` itself does not include this check. Known
    residual: an undeclared identifier (unexpanded COPY) alone on its own line at
@@ -217,6 +224,7 @@ must stop at a boundary *without consuming it*. The rules:
 |--------|----------|
 | `is_statement_boundary(token)` | the four-way boundary check above; literal tokens are never boundaries |
 | `looks_like_paragraph_boundary` / `warn_paragraph_boundary_swallowed` / `looks_dedented_relative_to` / `token_column` | the H9 check; `token_column` is the one accessor for a token's column |
+| `ends_at_paragraph_header(stream, reference_column=None)` | H9 for condition, argument-list and clause-body loops: the check plus its warning, in one call |
 | `keyword_upper(token)` | upper-cased value for keyword comparison, `""` for a literal |
 | `skip_whitespace` / `peek_past_noise(stream, offset)` / `_NOISE_TOKEN_TYPES` | skip / look past WHITESPACE, COMMENT, NEWLINE, CONTINUATION |
 | `skip_statement_separators`, `is_bare_separator`, `paren_depth_after` | separator handling (rule 6) |

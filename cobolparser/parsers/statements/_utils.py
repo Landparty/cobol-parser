@@ -636,8 +636,37 @@ def warn_paragraph_boundary_swallowed(token_stream: ITokenStream) -> None:
     context = get_parse_context(token_stream)
     host = getattr(context, "host", None) if context else None
     add_warning = getattr(host, "add_warning", None)
-    if callable(add_warning):
+    # Once per header: an operand loop and the clause body enclosing it can
+    # both stop at the same header (``WHEN OTHER MOVE 1 TO B`` / ``P1.``).
+    if callable(add_warning) and message not in getattr(host, "warnings", ()):
         add_warning(message)
+
+
+def ends_at_paragraph_header(
+    token_stream: ITokenStream, reference_column: int | None = None
+) -> bool:
+    """True when the current token is the next paragraph or section header,
+    written without the period that should have ended the statement before
+    it; records the missing-period warning when so.
+
+    For loops that collect a condition, an argument list or a clause body
+    and would otherwise take the header as one more item: ``PERFORM P
+    UNTIL X = 1`` / ``P2.`` read ``P2`` into the condition, and the
+    paragraph vanished from the AST with no diagnostic. Same test as the
+    operand loops (:func:`looks_like_paragraph_boundary`, and
+    :func:`looks_dedented_relative_to` when *reference_column* is given).
+    """
+    token = token_stream.peek(0)
+    if token is None or token.type != TokenType.IDENTIFIER:
+        return False
+    if not looks_like_paragraph_boundary(token_stream):
+        return False
+    if reference_column is not None and not looks_dedented_relative_to(
+        token_stream, reference_column
+    ):
+        return False
+    warn_paragraph_boundary_swallowed(token_stream)
+    return True
 
 
 _StmtT = TypeVar("_StmtT", bound=ASTNode)
@@ -1031,6 +1060,8 @@ def collect_clause_stmts(stream: ITokenStream, stop_at: set) -> list:
             or value in SCOPE_TERMINATORS
             or value in CONTROL_FLOW_BOUNDARIES
         ):
+            break
+        if ends_at_paragraph_header(stream):
             break
         nested = try_parse_nested_statement(stream)
         if nested is None:
@@ -2108,6 +2139,8 @@ def _parse_size_error_stmts(stream: ITokenStream) -> list:
             or token_upper in SCOPE_TERMINATORS
             or token_upper in CONTROL_FLOW_BOUNDARIES
         ):
+            break
+        if ends_at_paragraph_header(stream):
             break
 
         parsed = try_parse_nested_statement(stream)

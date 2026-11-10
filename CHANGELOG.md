@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+### Fixed
+
+* **A missing period before a paragraph header no longer loses the
+  paragraph after a condition, an argument list or a clause body.** After
+  `PERFORM P UNTIL c`, `IF c`, `CALL 'X' USING A`, `INITIALIZE A`,
+  `EVALUATE ... WHEN OTHER s` or `READ ... AT END s`, the next paragraph's
+  name was read into the statement and the paragraph vanished, so lint
+  reported a PERFORM of it as an undefined name. The parser now assumes the
+  period there, with the "missing its terminating period" warning, as it
+  already did after MOVE, ADD, DISPLAY and the other operand lists.
+
 ### Added
 
 * **A written public API and one analyzer interface.** `docs/public-api.md`

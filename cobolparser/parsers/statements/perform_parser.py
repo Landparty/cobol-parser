@@ -16,6 +16,7 @@ from cobolparser.parsers.statements._utils import (
     consume_optional_qualifiers,
     consume_procedure_qualifier,
     consume_value_operand,
+    ends_at_paragraph_header,
     get_parse_context,
     is_bare_separator,
     is_statement_boundary,
@@ -205,6 +206,11 @@ def _is_count_literal_token(token: Token) -> bool:
             token.type == TokenType.IDENTIFIER and token.value and token.value.isdigit()
         )
     )
+
+
+def _verb_column(stmt: PerformStatement) -> int | None:
+    """The PERFORM verb's source column (where its statement node sits)."""
+    return getattr(getattr(stmt, "location", None), "column", None)
 
 
 class PerformStatementParser(IStatementParser):
@@ -696,7 +702,7 @@ class PerformStatementParser(IStatementParser):
         # Parse UNTIL condition
         token = stream.peek()
         if token and token.type == TokenType.UNTIL:
-            until_condition = self._collect_until_expression(stream)
+            until_condition = self._collect_until_expression(stream, _verb_column(stmt))
             if until_condition:
                 stmt.set_varying_clause(
                     variable_name, from_value, by_value, until_condition
@@ -763,16 +769,23 @@ class PerformStatementParser(IStatementParser):
             until_condition = None
             token = stream.peek()
             if token and token.type == TokenType.UNTIL:
-                until_condition = self._collect_until_expression(stream)
+                until_condition = self._collect_until_expression(
+                    stream, _verb_column(stmt)
+                )
             stmt.add_after_clause(variable_name, from_value, by_value, until_condition)
 
     def _collect_until_condition_tokens(
-        self, stream: ITokenStream, for_varying: bool = False
+        self,
+        stream: ITokenStream,
+        for_varying: bool = False,
+        verb_column: int | None = None,
     ) -> list:
         """Consume tokens forming a UNTIL condition and return them as strings.
 
         When *for_varying* is True, also stops on IDENTIFIER tokens whose value
         matches known statement keywords (extra guard needed for VARYING context).
+        *verb_column* is the PERFORM's own column, for the missing-period
+        check (:func:`ends_at_paragraph_header`).
         """
         tokens: list = []
         paren_depth = 0
@@ -808,6 +821,8 @@ class PerformStatementParser(IStatementParser):
                 break
             if token.type in STATEMENT_TOKEN_TYPES:
                 break
+            if ends_at_paragraph_header(stream, verb_column):
+                break
             if starts_negative_handler_phrase(stream):
                 # An enclosing READ's ``NOT AT END`` (CALL's ``NOT ON
                 # EXCEPTION``, ...) ends this PERFORM, not the condition.
@@ -828,7 +843,9 @@ class PerformStatementParser(IStatementParser):
         try:
             stream.consume()  # Skip UNTIL
             skip_whitespace(stream)
-            condition_tokens = self._collect_until_condition_tokens(stream)
+            condition_tokens = self._collect_until_condition_tokens(
+                stream, verb_column=_verb_column(stmt)
+            )
             if condition_tokens:
                 stmt.set_until_clause(
                     _make_until_condition_expression(
@@ -842,7 +859,9 @@ class PerformStatementParser(IStatementParser):
                 "PERFORM UNTIL inline clause parse suppressed %r", exc, exc_info=True
             )
 
-    def _collect_until_expression(self, stream: ITokenStream) -> CobolExpression | None:
+    def _collect_until_expression(
+        self, stream: ITokenStream, verb_column: int | None = None
+    ) -> CobolExpression | None:
         """Consume an UNTIL keyword + condition and return it as an expression.
 
         Unlike :meth:`_parse_until_clause`, this does NOT parse the inline
@@ -853,7 +872,7 @@ class PerformStatementParser(IStatementParser):
             stream.consume()  # Skip UNTIL
             skip_whitespace(stream)
             condition_tokens = self._collect_until_condition_tokens(
-                stream, for_varying=True
+                stream, for_varying=True, verb_column=verb_column
             )
             if condition_tokens:
                 return _make_until_condition_expression(
@@ -928,6 +947,8 @@ class PerformStatementParser(IStatementParser):
                     and token.value
                     and token.value.upper() in STATEMENT_KEYWORDS
                 ):
+                    break
+                if ends_at_paragraph_header(stream, _verb_column(stmt)):
                     break
                 if starts_negative_handler_phrase(stream):
                     # ``READ ... AT END PERFORM p UNTIL c NOT AT END ...``:
