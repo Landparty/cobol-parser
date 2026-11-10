@@ -18,7 +18,10 @@ from cobolparser.models.ast_base import SourceLocation
 from cobolparser.models.data_items import ConditionNameItem, RenamesItem
 from cobolparser.models.sql_statements import ExecSQLStatement, parse_exec_sql
 from cobolparser.parsers.divisions.data_clauses import data_entry_ending_header
-from cobolparser.parsers.statements._utils import collect_exec_sql_text
+from cobolparser.parsers.statements._utils import (
+    collect_exec_sql_text,
+    exec_sql_interface,
+)
 
 
 def _condition_literal(token: Any) -> str:
@@ -461,12 +464,16 @@ class SpecialEntryParser:
         start_token = token_stream.consume()  # EXEC
         start_location = start_token.location if start_token else SourceLocation(0, 0)
 
-        # Consume SQL keyword (possibly on the next line)
+        # Consume SQL / SQLIMS keyword (possibly on the next line)
         _skip_newlines(token_stream)
+        interface = None
         if not token_stream.is_empty():
-            token_stream.consume()
+            interface = exec_sql_interface(token_stream.consume())
 
         sql_text = collect_exec_sql_text(token_stream, sql=True)
         if not sql_text.strip():
             return None
-        return parse_exec_sql(sql_text, start_location)
+        stmt = parse_exec_sql(sql_text, start_location)
+        if interface == "SQLIMS":
+            stmt.set_metadata("interface", "SQLIMS")
+        return stmt

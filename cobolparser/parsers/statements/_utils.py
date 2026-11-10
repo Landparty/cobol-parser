@@ -1035,6 +1035,27 @@ def previous_meaningful_token(stream: ITokenStream) -> Token | None:
         offset -= 1
 
 
+_TOP_LEVEL_ATTR = "_top_level_statement_at"
+
+
+def mark_top_level_statement(stream: ITokenStream) -> None:
+    """Record that the statement starting at the stream's current position is
+    dispatched by the PROCEDURE DIVISION loop itself, not nested in another
+    statement's body. See :func:`is_top_level_statement`."""
+    setattr(stream, _TOP_LEVEL_ATTR, getattr(stream, "position", None))
+
+
+def is_top_level_statement(stream: ITokenStream, start: int) -> bool:
+    """True if the statement that began at token index *start* is a
+    paragraph-level statement (:func:`mark_top_level_statement`).
+
+    A statement nested in another statement's handler may only be
+    imperative there, so a lone ``NOT ...`` handler phrase after it belongs
+    to the enclosing statement; at paragraph level it can only be its own.
+    """
+    return getattr(stream, _TOP_LEVEL_ATTR, None) == start
+
+
 def collect_clause_stmts(stream: ITokenStream, stop_at: set) -> list:
     """Parse the imperative statements of a conditional IO clause body.
 
@@ -1960,6 +1981,21 @@ def _is_end_exec(token: Token) -> bool:
         and token.value
         and token.value.upper() == "END-EXEC"
     )
+
+
+def exec_sql_interface(token: Any) -> str | None:
+    """``"SQL"`` / ``"SQLIMS"`` when *token* names an SQL interface after EXEC.
+
+    ``EXEC SQLIMS`` is the IMS SQL interface: SQL text, read by the same
+    parser as ``EXEC SQL``. It used to match no EXEC parser, so its body was
+    dropped and an inner ``OPEN cursor`` became a file OPEN statement.
+    """
+    if token is None:
+        return None
+    if token.type == TokenType.SQL:
+        return "SQL"
+    value = (token.value or "").upper() if token.type == TokenType.IDENTIFIER else ""
+    return value if value in ("SQL", "SQLIMS") else None
 
 
 def collect_exec_sql_text(

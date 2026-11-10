@@ -8,7 +8,7 @@ at a new paragraph, a section header, or a statement keyword.
 
 from cobolparser.core.interfaces import ITokenStream
 from cobolparser.lexer import Token
-from cobolparser.parsers.statements._utils import STATEMENT_KEYWORDS
+from cobolparser.parsers.statements._utils import SCOPE_TERMINATORS, STATEMENT_KEYWORDS
 
 # Token types that can carry a procedure (paragraph/section) name. COBOL
 # allows all-digit procedure names (``1000 THRU 1999`` style numbering is
@@ -36,6 +36,10 @@ def _is_procedure_name_token(token: Token | None) -> bool:
     if token is None or not token.value:
         return False
     if token.value.upper() in STATEMENT_KEYWORDS:
+        return False
+    # A reserved scope terminator is never a name either: ``END-DISPLAY`` /
+    # ``.`` on the next line ends a statement, it does not open a paragraph.
+    if token.value.upper() in SCOPE_TERMINATORS:
         return False
     if token.type.name == "IDENTIFIER":
         return True
@@ -105,8 +109,14 @@ def is_paragraph_or_section_start(token_stream: ITokenStream) -> bool:
     if not _is_procedure_name_token(token):
         return False
 
-    # Look ahead for SECTION or period
-    next_token = token_stream.peek(1)
+    # Look ahead for SECTION or period, past line breaks: the separator
+    # period of a header may sit on the next line (``P2`` / ``.``, as in
+    # AWS CardDemo's COTRTLIC), and it is still a header.
+    offset = 1
+    next_token = token_stream.peek(offset)
+    while next_token is not None and next_token.type.name == "NEWLINE":
+        offset += 1
+        next_token = token_stream.peek(offset)
     if not next_token:
         return False
 
@@ -117,6 +127,36 @@ def is_paragraph_or_section_start(token_stream: ITokenStream) -> bool:
         return True
 
     return False
+
+
+def is_leftover_word(token_stream: ITokenStream) -> bool:
+    """True when the name at the cursor is a word a statement parser left
+    behind, not a paragraph header.
+
+    A header starts a sentence: the token before it is a period, or it is
+    the first word on its line. ``STOP RUN 33.``, ``START F FIRST.`` or
+    ``ACCEPT X UPDATE.`` leave a word that is followed by a period and so
+    looks like a header by shape alone; it used to open a phantom paragraph
+    (``33``) that took the rest of the code, with no diagnostic.
+    """
+    token = token_stream.peek(0)
+    if token is None or token.value == ".":
+        return False
+    previous = token_stream.peek(-1)
+    if (
+        previous is None
+        or previous.value in (".", "")
+        or previous.type.name
+        in (
+            "NEWLINE",
+            "WHITESPACE",
+            "COMMENT",
+        )
+    ):
+        return False
+    line = getattr(getattr(token, "location", None), "line", None)
+    previous_line = getattr(getattr(previous, "location", None), "line", None)
+    return line is not None and line == previous_line
 
 
 def is_section_marker(token_stream: ITokenStream) -> bool:

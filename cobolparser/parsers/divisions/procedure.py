@@ -29,6 +29,7 @@ from cobolparser.lexer import TokenType
 from cobolparser.models.ast_base import ASTNode, SourceLocation
 from cobolparser.models.program import CobolDivision, CobolParagraph, CobolSection
 from cobolparser.parsers.statements._utils import (
+    mark_top_level_statement,
     peek_past_noise,
     skip_statement_separators,
     skip_whitespace,
@@ -36,6 +37,7 @@ from cobolparser.parsers.statements._utils import (
 
 from .base import BaseDivisionParser
 from .procedure_boundaries import (
+    is_leftover_word,
     is_paragraph_or_section_start,
     is_section_marker,
     is_statement_keyword,
@@ -276,6 +278,11 @@ class ProcedureDivisionParser(BaseDivisionParser):
             # starts the next unit the same way.
             if token_value == "FUNCTION-ID":
                 break
+            # So does a header-less PROGRAM-ID (a nested or stacked program
+            # with no IDENTIFICATION DIVISION header): reading it as a
+            # paragraph swallowed that program's divisions into this one.
+            if token_value == "PROGRAM-ID":
+                break
 
             # Skip stray control markers so following statements can be recovered.
             if token_value in ("ELSE", "WHEN", "END-IF", "END-PERFORM", "END-EVALUATE"):
@@ -322,6 +329,18 @@ class ProcedureDivisionParser(BaseDivisionParser):
                 if not token_stream.is_empty() and _pp and _pp.value == ".":
                     token_stream.consume()  # consume period
 
+                if section_name in sections:
+                    # Invalid COBOL, but the second header used to replace
+                    # the first section silently, losing its statements.
+                    # Keep both bodies under the one name and say so.
+                    current_section = sections[section_name]
+                    self._warn_duplicate_section(
+                        section_name, current_section["location"], section_location
+                    )
+                    current_section.setdefault("duplicate_lines", []).append(
+                        getattr(section_location, "line", None)
+                    )
+                    continue
                 section_dict = {
                     "type": "section",
                     "name": section_name,
@@ -329,8 +348,7 @@ class ProcedureDivisionParser(BaseDivisionParser):
                     "paragraphs": [],
                     "declarative": in_declaratives,
                 }
-                if section_name not in section_order:
-                    section_order.append(section_name)
+                section_order.append(section_name)
                 sections[section_name] = section_dict
                 current_section = section_dict
 
@@ -362,6 +380,7 @@ class ProcedureDivisionParser(BaseDivisionParser):
                         type(parser).__name__,
                     )
                     self._attach_context(token_stream)
+                    mark_top_level_statement(token_stream)
                     try:
                         statement = parser.parse(token_stream)
                         active[-1]["statements"].append(
@@ -397,6 +416,8 @@ class ProcedureDivisionParser(BaseDivisionParser):
                 "PROGRAM",
                 "DIVISION",
             ):
+                if self._drop_leftover_word(token_stream):
+                    continue
                 # Treat as paragraph name (only if not a keyword)
                 para_name = token_value
                 para_location = (
@@ -476,9 +497,14 @@ class ProcedureDivisionParser(BaseDivisionParser):
             if not token:
                 break
 
-            # Check for next paragraph or section
+            # Check for next paragraph or section. A word a statement parser
+            # left behind (``STOP RUN 33.``) is dropped with a warning
+            # instead: it is not a header, and the statements after it stay
+            # in this paragraph.
             if self._is_paragraph_or_section_start(token_stream):
-                break
+                if not self._drop_leftover_word(token_stream):
+                    break
+                continue
 
             # Check for division end marker
             if token.value and token.value.upper() in (
@@ -500,6 +526,7 @@ class ProcedureDivisionParser(BaseDivisionParser):
             if parser:
                 logger.debug("Dispatch %r -> %s", token.value, type(parser).__name__)
                 self._attach_context(token_stream)
+                mark_top_level_statement(token_stream)
                 try:
                     statement = parser.parse(token_stream)
                     statements.append(
@@ -571,6 +598,35 @@ class ProcedureDivisionParser(BaseDivisionParser):
     def _is_paragraph_or_section_start(self, token_stream: ITokenStream) -> bool:
         """Check for a paragraph/section start (delegates to procedure_boundaries)."""
         return is_paragraph_or_section_start(token_stream)
+
+    def _drop_leftover_word(self, token_stream: ITokenStream) -> bool:
+        """Consume and warn about a word a statement parser left behind.
+
+        Returns False (consuming nothing) when the word at the cursor can
+        be a paragraph header; see ``procedure_boundaries.is_leftover_word``.
+        """
+        nxt = token_stream.peek(1)
+        if nxt is not None and (nxt.value or "").upper() == "SECTION":
+            return False
+        if not is_leftover_word(token_stream):
+            return False
+        self._warn_unsupported_statement(token_stream.peek(0))
+        token_stream.consume()
+        return True
+
+    def _warn_duplicate_section(
+        self, name: str, first: SourceLocation, again: SourceLocation
+    ) -> None:
+        """Warn that a section name is defined twice."""
+        message = (
+            f"Section '{name}' is defined again at line "
+            f"{getattr(again, 'line', '?')} (first at line "
+            f"{getattr(first, 'line', '?')}): section names must be unique; "
+            "the paragraphs of both are kept in one section"
+        )
+        add_warning = getattr(self.host, "add_warning", None)
+        if callable(add_warning):
+            add_warning(message)
 
     def _is_section_marker(self, token_stream: ITokenStream) -> bool:
         """Check for a section marker (delegates to procedure_boundaries)."""
@@ -644,6 +700,10 @@ class ProcedureDivisionParser(BaseDivisionParser):
             section = CobolSection(section_name, section_location)
             if section_info.get("declarative"):
                 section.set_metadata("declarative", True)
+            if section_info.get("duplicate_lines"):
+                section.set_metadata(
+                    "duplicate_header_lines", list(section_info["duplicate_lines"])
+                )
 
             # Add paragraphs belonging to this section
             for para_info in section_info.get("paragraphs", []):

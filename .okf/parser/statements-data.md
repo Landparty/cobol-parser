@@ -170,8 +170,9 @@ first. Node fields are in [ast-models.md](../ast-models.md).
   value fold subscripts / qualifiers (`"TBL ( 1 )"`, `"B OF C"`). The target
   loop also stops at `ALL` / `THEN` / `TO` / a category word / `FILLER`
   (`_INITIALIZE_PHRASE_STARTS`). Enterprise COBOL 6 phrases: `[[WITH] FILLER]`
-  (`with_filler`; WITH optional, #402), `[{ALL | category} TO VALUE]`
-  (`to_value_category`), `[THEN] REPLACING ...`, `[THEN] TO DEFAULT`
+  (`with_filler`; WITH optional, #402), `[{ALL | category} [TO] VALUE]`
+  (`to_value_category`; the TO-less form used to drop the phrase with a
+  warning, `test_initialize_value_without_to.py`), `[THEN] REPLACING ...`, `[THEN] TO DEFAULT`
   (`to_default`); `THEN` is optional (`_match_then`). Every phrase lookahead
   uses `peek_past_noise`, so a line break inside `ALL TO VALUE` / `THEN
   REPLACING` / `THEN TO DEFAULT` keeps the phrase (a raw `peek(1)` saw the
@@ -261,7 +262,8 @@ first. Node fields are in [ast-models.md](../ast-models.md).
 
 - Operand: qualified / subscripted (`ACCEPT X OF Y`, `ACCEPT T (2)`), guarded by
   `is_statement_boundary` so a missing operand does not eat the next verb;
-  `ACCEPT cd MESSAGE COUNT` is accepted. A separator after the operand is a
+  `ACCEPT cd [MESSAGE] COUNT` is accepted (MESSAGE optional, NIST CM101M). A
+  separator after the operand is a
   space (`ACCEPT X, FROM DATE`, #569).
 - `FROM DATE` / `TIME` / ... with a trailing format (`YYYYMMDD`, `YYYYDDD`) is
   folded into `from_source` (left in the stream it became a phantom paragraph).
@@ -291,6 +293,16 @@ first. Node fields are in [ast-models.md](../ast-models.md).
   [THRU|THROUGH q]` starting at either word (`XML PARSE x PROCEDURE IS p` sets
   `processing_procedure`), looking past line breaks (`peek_past_noise`) for `IS`
   and `THRU` (#394, #405).
+- `_parse_exception_clauses` accepts either handler alone: a `NOT [ON]
+  EXCEPTION` with no `ON EXCEPTION` before it (IBM's JSON PARSE sample) used
+  to be left unparsed, its body hoisted into the paragraph as unconditional
+  statements. Nested in another statement's body and not closed by its own
+  END-XML/END-JSON before the period, a lone `NOT ON EXCEPTION` is left to
+  the enclosing statement (`CALL ... ON EXCEPTION JSON GENERATE ... NOT ON
+  EXCEPTION ... END-CALL`): the PROCEDURE loop marks the statements it
+  dispatches itself (`_utils.mark_top_level_statement` /
+  `is_top_level_statement`). Pinned by
+  `tests/regression/test_xml_json_not_on_exception_alone.py`.
 
 ## ALLOCATE and FREE
 

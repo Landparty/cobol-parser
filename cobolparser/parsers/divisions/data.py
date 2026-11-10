@@ -31,7 +31,11 @@ from cobolparser.models.data_items import (
 )
 from cobolparser.models.program import CobolDivision, CobolSection
 from cobolparser.models.sql_statements import ExecSQLStatement
-from cobolparser.parsers.statements._utils import peek_past_noise, skip_whitespace
+from cobolparser.parsers.statements._utils import (
+    exec_sql_interface,
+    peek_past_noise,
+    skip_whitespace,
+)
 
 from .base import BaseDivisionParser, at_division_boundary
 from .data_clauses import _DIVISION_TOKEN_TYPES, DataItemClauseParser
@@ -59,6 +63,23 @@ _NUMERIC_ONLY_USAGES: frozenset[str] = frozenset(
 )
 _REPEAT_COUNT_RE = re.compile(r"\(\d+\)")
 _NUMERIC_PIC_CHARS = frozenset("S9VP")
+
+
+def _at_unit_boundary(token_stream: ITokenStream, value_upper: str) -> bool:
+    """True at ``END PROGRAM`` / ``END FUNCTION`` or a header-less
+    ``PROGRAM-ID`` / ``FUNCTION-ID``: the end of this program's DATA
+    DIVISION when it has no PROCEDURE DIVISION. Reading past them swallowed
+    the next unit."""
+    if value_upper in ("PROGRAM-ID", "FUNCTION-ID"):
+        return True
+    if value_upper != "END":
+        return False
+    nxt = token_stream.peek(1)
+    offset = 1
+    while nxt is not None and nxt.type.name == "NEWLINE":
+        offset += 1
+        nxt = token_stream.peek(offset)
+    return nxt is not None and (nxt.value or "").upper() in ("PROGRAM", "FUNCTION")
 
 
 def _is_numeric_picture(item: CobolDataItem) -> bool:
@@ -277,6 +298,8 @@ class DataDivisionParser(BaseDivisionParser):
                 break
             if any(token_value == f"{kw} DIVISION" for kw in _stop_div):
                 break
+            if _at_unit_boundary(token_stream, token_value):
+                break
 
             # Parse specific sections
             if token_value == "FILE":
@@ -413,6 +436,8 @@ class DataDivisionParser(BaseDivisionParser):
             if value_upper in ("IDENTIFICATION", "ENVIRONMENT", "PROCEDURE"):
                 if at_division_boundary(token_stream):
                     break
+            if _at_unit_boundary(token_stream, value_upper):
+                break
 
             # In FILE SECTION, detect FD/SD declarations to build record-to-file mapping
             if (
@@ -467,15 +492,7 @@ class DataDivisionParser(BaseDivisionParser):
             )
             if is_exec and paren_depth == 0:
                 next_tok, _ = peek_past_noise(token_stream, 1)
-                is_sql = next_tok and (
-                    next_tok.type == TokenType.SQL
-                    or (
-                        next_tok.type == TokenType.IDENTIFIER
-                        and next_tok.value
-                        and next_tok.value.upper() == "SQL"
-                    )
-                )
-                if is_sql:
+                if exec_sql_interface(next_tok) is not None:
                     sql_stmt = self._parse_exec_sql_in_data(token_stream)
                     if sql_stmt is not None:
                         exec_sql_items.append(sql_stmt)
@@ -645,6 +662,8 @@ class DataDivisionParser(BaseDivisionParser):
             if value_upper in ("IDENTIFICATION", "ENVIRONMENT", "PROCEDURE"):
                 if at_division_boundary(token_stream):
                     break
+            if _at_unit_boundary(token_stream, value_upper):
+                break
 
             if screen and tok_type not in _NOISE_TOKEN_TYPES:
                 if reference is not None and (

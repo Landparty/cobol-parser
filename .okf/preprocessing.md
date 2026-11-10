@@ -435,6 +435,15 @@ change-tagged header `CHG001 IDENTIFICATION DIVISION.` ends it and a later
 `PROCESS SECTION.` is not blanked. Pinned by
 `tests/regression/test_sequence_area_tag_header.py`.
 
+**Batch compiles.** An `END PROGRAM` line reopens the directive section, since
+IBM lets the next program of a batch carry its own cards there. A reopened
+section closes at the first line that is neither a card nor a comment, and a
+`PROCESS` / `CBL` line ending in a period (`PROCESS SECTION.`) is code, not a
+card. Before this the card reached the parser, which stopped at "No
+recognizable COBOL division" and lost every later program (IBM DBB
+`epscsmrd.cbl`). Pinned by
+`tests/regression/test_process_card_between_programs.py`.
+
 In copybook expansion, `strip_sequence_area` passes a full-width line through
 untouched when its columns 1-6 do not look like a real sequence area AND it
 matches `^(?:PROCESS|CBL)(?:[ \t].*)?$` case-insensitively
