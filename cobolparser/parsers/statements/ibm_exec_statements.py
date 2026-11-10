@@ -14,6 +14,7 @@ from ...models.statements.base import CobolStatement
 from ._utils import (
     _NOISE_TOKEN_TYPES,
     collect_exec_sql_text,
+    exec_sql_interface,
     peek_token,
     skip_whitespace,
 )
@@ -274,27 +275,24 @@ class ExecSqlStatementParser(IStatementParser):
         if not next_token:
             return False
 
-        return bool(
-            next_token.type == TokenType.SQL
-            or (
-                next_token.type == TokenType.IDENTIFIER
-                and next_token.value
-                and next_token.value.upper() == "SQL"
-            )
-        )
+        return exec_sql_interface(next_token) is not None
 
     def parse(self, token_stream: ITokenStream, context: Any | None = None) -> ASTNode:
-        """Parse an EXEC SQL statement."""
+        """Parse an EXEC SQL / EXEC SQLIMS statement."""
         start_token = token_stream.consume()  # EXEC
         start_location = start_token.location if start_token else SourceLocation(0, 0)
 
-        # Skip SQL keyword (possibly on the next line)
+        # Skip SQL / SQLIMS keyword (possibly on the next line)
         skip_whitespace(token_stream)
+        interface = None
         if not token_stream.is_empty():
-            token_stream.consume()
+            interface = exec_sql_interface(token_stream.consume())
 
         sql_text = collect_exec_sql_text(token_stream, sql=True)
-        return parse_exec_sql(sql_text, start_location)
+        stmt = parse_exec_sql(sql_text, start_location)
+        if interface == "SQLIMS":
+            stmt.set_metadata("interface", "SQLIMS")
+        return stmt
 
 
 class ExecCicsStatementParser(IStatementParser):

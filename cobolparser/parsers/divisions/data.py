@@ -31,7 +31,11 @@ from cobolparser.models.data_items import (
 )
 from cobolparser.models.program import CobolDivision, CobolSection
 from cobolparser.models.sql_statements import ExecSQLStatement
-from cobolparser.parsers.statements._utils import peek_past_noise, skip_whitespace
+from cobolparser.parsers.statements._utils import (
+    exec_sql_interface,
+    peek_past_noise,
+    skip_whitespace,
+)
 
 from .base import BaseDivisionParser, at_division_boundary
 from .data_clauses import _DIVISION_TOKEN_TYPES, DataItemClauseParser
@@ -488,15 +492,7 @@ class DataDivisionParser(BaseDivisionParser):
             )
             if is_exec and paren_depth == 0:
                 next_tok, _ = peek_past_noise(token_stream, 1)
-                is_sql = next_tok and (
-                    next_tok.type == TokenType.SQL
-                    or (
-                        next_tok.type == TokenType.IDENTIFIER
-                        and next_tok.value
-                        and next_tok.value.upper() == "SQL"
-                    )
-                )
-                if is_sql:
+                if exec_sql_interface(next_tok) is not None:
                     sql_stmt = self._parse_exec_sql_in_data(token_stream)
                     if sql_stmt is not None:
                         exec_sql_items.append(sql_stmt)

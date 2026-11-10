@@ -135,6 +135,12 @@ skips statement separators in its body.
   `:VAR:IND`, and for SELECTs `select_columns` + `where_present`.
   `DeclareTableStatement` accepts a qualified `DECLARE SCHEMA.TABLE TABLE`
   (spaces around the period tolerated, name normalized).
+- **EXEC SQLIMS** (the IMS SQL interface) is read by `ExecSqlStatementParser`
+  too: `_utils.exec_sql_interface` names the interface (`"SQL"` /
+  `"SQLIMS"`), and an SQLIMS node carries metadata `interface` = `"SQLIMS"`
+  (absent on EXEC SQL). Analyzers count it as SQL. It used to match no EXEC
+  parser, so an inner `OPEN cursor` became a file OPEN. Pinned by
+  `tests/regression/test_exec_sqlims.py`.
 - `ExecCicsStatement` / `ExecImsStatement` are `CobolStatement` subclasses
   (`statement_type` `"EXEC CICS"` / `"EXEC IMS"`; `node_type` `"EXEC_CICS"` /
   `"EXEC_IMS"`; `cics_command` / `ims_command` are read-write properties), so

@@ -513,6 +513,8 @@ handler method plus one table row.
 `data.py::_parse_exec_sql_in_data` reads the block with `collect_exec_sql_text`
 but attaches no parse context, so a missing `END-EXEC` there is not reported (the
 PROCEDURE DIVISION caller reports it -- see [statements-io.md](statements-io.md)).
+`EXEC SQLIMS` blocks are taken the same way (`exec_sql_interface`), tagged
+with metadata `interface` = `"SQLIMS"`.
 
 ## Delegating wrappers
 
