@@ -420,6 +420,9 @@ def _has_identification_stamp_convention(lines: list[str]) -> bool:
     return False
 
 
+_END_PROGRAM_LINE_RE = re.compile(r"END\s+PROGRAM\b", re.IGNORECASE)
+
+
 def strip_compiler_directives(
     source: str, *, preserve_line_numbers: bool = True
 ) -> str:
@@ -458,6 +461,9 @@ def strip_compiler_directives(
     result_lines = []
     in_directive_section = True  # We start in the directive section
     in_continuation = False
+    # True while the directive section was reopened by END PROGRAM: there it
+    # closes at the first line that is neither a card nor a comment.
+    after_end_program = False
 
     for line in lines:
         # Preserve the original line ending
@@ -509,6 +515,14 @@ def strip_compiler_directives(
         # If we're past the directive section, keep all lines
         if not in_directive_section:
             result_lines.append(line)
+            # In a batch compile the next program may carry its own option
+            # cards right after ``END PROGRAM`` (IBM: a CBL/PROCESS card
+            # must precede the unit it applies to). They used to reach the
+            # parser and end the parse at "No recognizable COBOL division".
+            if _END_PROGRAM_LINE_RE.match(text_area):
+                in_directive_section = True
+                after_end_program = True
+                in_continuation = False
             continue
 
         # We're in the directive section - check for PROCESS/CBL
@@ -546,6 +560,11 @@ def strip_compiler_directives(
             elif text_upper.startswith("CBL ") or text_upper.startswith("CBL\t"):
                 is_directive = True
 
+            if is_directive and after_end_program and text_upper.endswith("."):
+                # ``END PROGRAM`` then ``PROCESS SECTION.`` / ``CBL-X.`` is
+                # code, not a card (option cards carry no period).
+                is_directive = False
+
             if is_directive:
                 # This is a PROCESS/CBL directive
                 in_continuation = True
@@ -557,6 +576,9 @@ def strip_compiler_directives(
         # Not a directive - keep the line
         in_continuation = False
         result_lines.append(line)
+        if after_end_program and text_area and indicator not in "*/":
+            in_directive_section = False
+            after_end_program = False
 
     return "".join(result_lines)
 
