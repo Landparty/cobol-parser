@@ -218,7 +218,8 @@ mismatch (silent loss: no diagnostic but the counts disagree), unchecked
 `tests/integration/test_open_source_corpus.py`, `slow`) fails when a file
 gets worse, and runs the NIST part always, the fetched part only when
 `.corpus/` (or `$COBOLPARSER_CORPUS`) exists. The census is pinned by
-`tests/unit/test_corpus_census.py`. Known census blind spots, kept in the
+`tests/unit/test_corpus_census.py`; it opens a unit at a header-less
+`PROGRAM-ID` / `FUNCTION-ID` as the parser does. Known census blind spots, kept in the
 baseline: NIST comment-entry paragraphs holding fake code (OBNC1M) and NIST
 `C`-column copybook lines (SM101A/SM201A).
 

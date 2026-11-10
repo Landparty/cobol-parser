@@ -116,3 +116,19 @@ def test_multiline_pseudo_text_is_not_counted() -> None:
     assert want.data_entries == 6
     assert dict(want.verbs) == {"STOP": 1}
     assert any("REPLACE" in c for c in want.caveats)
+
+
+def test_headerless_program_id_opens_a_unit():
+    src = (
+        "       IDENTIFICATION DIVISION.\n"
+        "       PROGRAM-ID. T.\n"
+        "       PROCEDURE DIVISION.\n"
+        "           DISPLAY 'T'.\n"
+        "       PROGRAM-ID. P2.\n"
+        "       PROCEDURE DIVISION.\n"
+        "       P2-MAIN.\n"
+        "           DISPLAY 'P2'.\n"
+    )
+    result = census(src)
+    assert result.units == 2
+    assert result.paragraphs == [("P2-MAIN", 7)]

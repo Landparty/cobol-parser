@@ -310,6 +310,14 @@ def census(source: str) -> Census:
             i += 1
             sentence_start = True
             continue
+        if word in ("PROGRAM-ID", "FUNCTION-ID") and division != "IDENTIFICATION":
+            # A unit whose IDENTIFICATION DIVISION header is left out.
+            result.units += 1
+            division = "IDENTIFICATION"
+            data_section = None
+            sentence_start = False
+            i += 1
+            continue
         if word == "END" and nxt() in {
             "PROGRAM",
             "CLASS",
