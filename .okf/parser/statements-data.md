@@ -170,8 +170,9 @@ first. Node fields are in [ast-models.md](../ast-models.md).
   value fold subscripts / qualifiers (`"TBL ( 1 )"`, `"B OF C"`). The target
   loop also stops at `ALL` / `THEN` / `TO` / a category word / `FILLER`
   (`_INITIALIZE_PHRASE_STARTS`). Enterprise COBOL 6 phrases: `[[WITH] FILLER]`
-  (`with_filler`; WITH optional, #402), `[{ALL | category} TO VALUE]`
-  (`to_value_category`), `[THEN] REPLACING ...`, `[THEN] TO DEFAULT`
+  (`with_filler`; WITH optional, #402), `[{ALL | category} [TO] VALUE]`
+  (`to_value_category`; the TO-less form used to drop the phrase with a
+  warning, `test_initialize_value_without_to.py`), `[THEN] REPLACING ...`, `[THEN] TO DEFAULT`
   (`to_default`); `THEN` is optional (`_match_then`). Every phrase lookahead
   uses `peek_past_noise`, so a line break inside `ALL TO VALUE` / `THEN
   REPLACING` / `THEN TO DEFAULT` keeps the phrase (a raw `peek(1)` saw the
