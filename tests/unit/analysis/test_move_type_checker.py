@@ -1324,3 +1324,44 @@ class TestMoveCorrespondingPairs:
             ("AMT OF GRP-A", "AMT OF GRP-B"),
             ("NAME OF GRP-A", "NAME OF GRP-B"),
         ]
+
+
+# ---------------------------------------------------------------------------
+# ALL literal and prefixed literals: classified, not counted as unresolved
+# (lint blamed "an unresolved COPY" for MOVE ALL '-' / MOVE X'00' in a
+# program with no COPY at all, and left the MOVE unchecked).
+# ---------------------------------------------------------------------------
+
+
+class TestAllAndPrefixedLiterals:
+    _DATA = "       01 WS-LINE PIC X(80).\n" "       01 WS-NUM PIC 9(4).\n"
+
+    def test_classify(self):
+        assert _classify_literal('ALL "-"') == DataCategory.ALPHANUMERIC
+        assert _classify_literal("ALL SPACES") == DataCategory.FIGURATIVE
+        assert _classify_literal("X'00'") == DataCategory.ALPHANUMERIC
+        assert _classify_literal("Z'ABC'") == DataCategory.ALPHANUMERIC
+        # National literals are not modelled, like PIC N items.
+        assert _classify_literal("N'AB'") == DataCategory.UNKNOWN
+
+    def test_alphanumeric_receivers_are_clean_and_resolved(self):
+        for move in (
+            "MOVE ALL '-' TO WS-LINE",
+            "MOVE X'00' TO WS-LINE",
+            "MOVE Z'AB' TO WS-LINE",
+            "MOVE ALL SPACES TO WS-LINE",
+        ):
+            report = _check_source(self._DATA, move)
+            assert not report.violations, move
+            assert report.unresolved_count == 0, move
+
+    def test_numeric_receiver_is_checked(self):
+        report = _check_source(self._DATA, "MOVE ALL 'A' TO WS-NUM")
+        assert [v.kind for v in report.violations] == [MoveViolationKind.WARNING]
+        report = _check_source(self._DATA, "MOVE ALL SPACES TO WS-NUM")
+        assert [v.kind for v in report.violations] == [MoveViolationKind.ERROR]
+        # ALL '9' / ALL ZEROS have a digit value.
+        for move in ("MOVE ALL '9' TO WS-NUM", "MOVE ALL ZEROS TO WS-NUM"):
+            report = _check_source(self._DATA, move)
+            assert not report.violations, move
+            assert report.unresolved_count == 0, move

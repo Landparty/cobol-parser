@@ -632,6 +632,14 @@ x` operand integer NUMERIC. Unknown, they went unchecked and counted in
 `unresolved_count`, so lint told a program with no COPY to fix its copybook
 path. Pinned by `tests/regression/test_move_special_registers_issue_520.py`.
 
+**`ALL` and prefixed literals.** `_classify_literal` reads `ALL x` as `x`
+(`_strip_all`: `ALL '-'` is ALPHANUMERIC, `ALL SPACES` the SPACES figurative,
+`ALL '9'` a digit string) and `X'..'` / `Z'..'` as ALPHANUMERIC. National
+literals (`N'..'`, `NX'..'`) stay UNKNOWN, like PIC N. Before, all of them
+counted in `unresolved_count` and lint gave the `--copybook-path` hint to a
+program with no COPY. Pinned by
+`test_move_type_checker.py::TestAllAndPrefixedLiterals`.
+
 **Group receivers and `ZERO` → alphabetic.** A MOVE *into* a group item is a
 group move (bytes copied as alphanumeric) and legal from any sender, so group
 receivers are exempt from every elementary rule. `MOVE ZERO TO` a `PIC A` item

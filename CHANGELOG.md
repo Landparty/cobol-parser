@@ -17,6 +17,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   reported a PERFORM of it as an undefined name. The parser now assumes the
   period there, with the "missing its terminating period" warning, as it
   already did after MOVE, ADD, DISPLAY and the other operand lists.
+* **`move-type-check` classifies `ALL` literals and hex / null-terminated
+  literals.** `MOVE ALL '-' TO X`, `MOVE X'00' TO X` and `MOVE Z'..' TO X`
+  were counted as unresolved operands, so lint told a program with no COPY
+  to pass `--copybook-path`, and `MOVE ALL 'A' TO` a numeric item went
+  unchecked. They now take the category of their literal.
 
 ### Added
 
