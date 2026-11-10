@@ -29,6 +29,7 @@ from cobolparser.lexer import TokenType
 from cobolparser.models.ast_base import ASTNode, SourceLocation
 from cobolparser.models.program import CobolDivision, CobolParagraph, CobolSection
 from cobolparser.parsers.statements._utils import (
+    mark_top_level_statement,
     peek_past_noise,
     skip_statement_separators,
     skip_whitespace,
@@ -327,6 +328,18 @@ class ProcedureDivisionParser(BaseDivisionParser):
                 if not token_stream.is_empty() and _pp and _pp.value == ".":
                     token_stream.consume()  # consume period
 
+                if section_name in sections:
+                    # Invalid COBOL, but the second header used to replace
+                    # the first section silently, losing its statements.
+                    # Keep both bodies under the one name and say so.
+                    current_section = sections[section_name]
+                    self._warn_duplicate_section(
+                        section_name, current_section["location"], section_location
+                    )
+                    current_section.setdefault("duplicate_lines", []).append(
+                        getattr(section_location, "line", None)
+                    )
+                    continue
                 section_dict = {
                     "type": "section",
                     "name": section_name,
@@ -334,8 +347,7 @@ class ProcedureDivisionParser(BaseDivisionParser):
                     "paragraphs": [],
                     "declarative": in_declaratives,
                 }
-                if section_name not in section_order:
-                    section_order.append(section_name)
+                section_order.append(section_name)
                 sections[section_name] = section_dict
                 current_section = section_dict
 
@@ -367,6 +379,7 @@ class ProcedureDivisionParser(BaseDivisionParser):
                         type(parser).__name__,
                     )
                     self._attach_context(token_stream)
+                    mark_top_level_statement(token_stream)
                     try:
                         statement = parser.parse(token_stream)
                         active[-1]["statements"].append(
@@ -505,6 +518,7 @@ class ProcedureDivisionParser(BaseDivisionParser):
             if parser:
                 logger.debug("Dispatch %r -> %s", token.value, type(parser).__name__)
                 self._attach_context(token_stream)
+                mark_top_level_statement(token_stream)
                 try:
                     statement = parser.parse(token_stream)
                     statements.append(
@@ -576,6 +590,20 @@ class ProcedureDivisionParser(BaseDivisionParser):
     def _is_paragraph_or_section_start(self, token_stream: ITokenStream) -> bool:
         """Check for a paragraph/section start (delegates to procedure_boundaries)."""
         return is_paragraph_or_section_start(token_stream)
+
+    def _warn_duplicate_section(
+        self, name: str, first: SourceLocation, again: SourceLocation
+    ) -> None:
+        """Warn that a section name is defined twice."""
+        message = (
+            f"Section '{name}' is defined again at line "
+            f"{getattr(again, 'line', '?')} (first at line "
+            f"{getattr(first, 'line', '?')}): section names must be unique; "
+            "the paragraphs of both are kept in one section"
+        )
+        add_warning = getattr(self.host, "add_warning", None)
+        if callable(add_warning):
+            add_warning(message)
 
     def _is_section_marker(self, token_stream: ITokenStream) -> bool:
         """Check for a section marker (delegates to procedure_boundaries)."""
@@ -649,6 +677,10 @@ class ProcedureDivisionParser(BaseDivisionParser):
             section = CobolSection(section_name, section_location)
             if section_info.get("declarative"):
                 section.set_metadata("declarative", True)
+            if section_info.get("duplicate_lines"):
+                section.set_metadata(
+                    "duplicate_header_lines", list(section_info["duplicate_lines"])
+                )
 
             # Add paragraphs belonging to this section
             for para_info in section_info.get("paragraphs", []):

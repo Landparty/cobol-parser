@@ -527,6 +527,8 @@ historical name and signature; new clause logic goes in
 - Each token is either a paragraph/section header
   (`procedure_boundaries.is_paragraph_or_section_start`), a statement (the
   registry finds a parser), or recovery (`procedure_recovery.py`).
+- Before dispatching a statement the loop calls
+  `mark_top_level_statement` (see [statements.md](statements.md#clause-and-handler-bodies)).
 - An EOF token ends the loop explicitly. The "unknown token -> new paragraph
   name" fallback must never see EOF (its value is `""`), or every program gains a
   phantom empty trailing paragraph.
@@ -543,6 +545,12 @@ historical name and signature; new clause logic goes in
   paragraph named `.` holding the rest of the code -- mid-AST, so the analyzers
   lost its PERFORMs/terminators. Pinned by
   `tests/regression/test_implicit_paragraph_trailing_period.py`.
+- **Duplicate section names.** A second `NAME SECTION.` with a name already
+  used (invalid COBOL) used to replace the first section's dict, losing its
+  statements silently. It now continues the first section (its paragraphs
+  follow the earlier ones), sets `CobolSection` metadata
+  `duplicate_header_lines`, and warns "Section 'NAME' is defined again".
+  Pinned by `tests/regression/test_duplicate_section_name.py`.
 - **DECLARATIVES.** `DECLARATIVES.` and `END DECLARATIVES.` are consumed as
   markers (no pseudo-paragraphs), and every section opened in between is flagged:
   section dict key `declarative` -> `CobolSection` metadata `declarative` /
@@ -560,6 +568,11 @@ historical name and signature; new clause logic goes in
   which lex as `NUMERIC_LITERAL` / `LEVEL_NUMBER`, via its own
   `_is_procedure_name_token` (works on `token.type.name` strings, unlike the
   statement-level `_utils.is_procedure_name_token`).
+- The name's separator period may be on a later line (`2000-SEND-MAP` /
+  `.`, AWS CardDemo): `is_paragraph_or_section_start` looks past NEWLINE
+  tokens for the period or `SECTION`. It used to check only the next token,
+  dropping the name and merging its statements into the previous paragraph.
+  Pinned by `tests/regression/test_header_period_on_next_line.py`.
 - `is_section_marker` treats a token followed by `SECTION` as a section header
   -- except `EXIT` (reserved), so `EXIT SECTION.` right after a section header is
   a statement, not an empty section that swallows the paragraphs after it (#382).
