@@ -519,6 +519,8 @@ historical name and signature; new clause logic goes in
 - Each token is either a paragraph/section header
   (`procedure_boundaries.is_paragraph_or_section_start`), a statement (the
   registry finds a parser), or recovery (`procedure_recovery.py`).
+- Before dispatching a statement the loop calls
+  `mark_top_level_statement` (see [statements.md](statements.md#clause-and-handler-bodies)).
 - An EOF token ends the loop explicitly. The "unknown token -> new paragraph
   name" fallback must never see EOF (its value is `""`), or every program gains a
   phantom empty trailing paragraph.

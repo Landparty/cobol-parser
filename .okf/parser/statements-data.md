@@ -291,6 +291,16 @@ first. Node fields are in [ast-models.md](../ast-models.md).
   [THRU|THROUGH q]` starting at either word (`XML PARSE x PROCEDURE IS p` sets
   `processing_procedure`), looking past line breaks (`peek_past_noise`) for `IS`
   and `THRU` (#394, #405).
+- `_parse_exception_clauses` accepts either handler alone: a `NOT [ON]
+  EXCEPTION` with no `ON EXCEPTION` before it (IBM's JSON PARSE sample) used
+  to be left unparsed, its body hoisted into the paragraph as unconditional
+  statements. Nested in another statement's body and not closed by its own
+  END-XML/END-JSON before the period, a lone `NOT ON EXCEPTION` is left to
+  the enclosing statement (`CALL ... ON EXCEPTION JSON GENERATE ... NOT ON
+  EXCEPTION ... END-CALL`): the PROCEDURE loop marks the statements it
+  dispatches itself (`_utils.mark_top_level_statement` /
+  `is_top_level_statement`). Pinned by
+  `tests/regression/test_xml_json_not_on_exception_alone.py`.
 
 ## ALLOCATE and FREE
 
