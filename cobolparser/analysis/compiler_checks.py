@@ -132,6 +132,7 @@ from .bug_patterns import (
     _parse_operand,
     _section_of,
 )
+from .context import ProgramContext
 from .program_flow import ProgramFlowReport
 
 #: Every rule this module runs, in report order.
@@ -439,9 +440,12 @@ class CompilerCheckAnalyzer:
         self.rules = tuple(r for r in COMPILER_RULES if r in set(selected))
 
     def analyze(
-        self, ast: CobolProgram, *, flow_report: ProgramFlowReport | None = None
+        self,
+        ast: CobolProgram | ProgramContext,
+        *,
+        flow_report: ProgramFlowReport | None = None,
     ) -> CompilerCheckReport:
-        checks = CompilerChecks(_Context(ast, flow_report))
+        checks = CompilerChecks(_Context(ProgramContext.of(ast, flow=flow_report)))
         report = CompilerCheckReport()
         for rule in self.rules:
             report.findings.extend(checks.run(rule))

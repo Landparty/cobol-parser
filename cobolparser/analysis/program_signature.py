@@ -58,6 +58,7 @@ from ..models.data_items import CobolDataItem, ConditionNameItem
 from ..models.program import CobolProgram, CobolSection
 from ..models.statements.call import EntryStatement
 from ._names import QUALIFIER_SEPARATOR
+from .context import ProgramContext
 from .unused_variables import _ancestor_names
 from .xref import ROLE_CALL_ARGUMENT, ROLE_HOST_VARIABLE
 
@@ -344,7 +345,12 @@ class ProgramSignatureExtractor:
         # Bare names xref split into one qualified entry per record.
         self._qualified_names: set[str] = set()
 
-    def analyze(self, ast: CobolProgram) -> ProgramSignature:
+    def analyze(self, ast: CobolProgram | ProgramContext) -> ProgramSignature:
+        """The external interface of *ast* (one program unit), or of a
+        :class:`~.context.ProgramContext`'s unit, reusing its
+        cross-reference."""
+        ctx = ProgramContext.of(ast)
+        ast = ctx.ast
         signature = ProgramSignature(program_id=ast.program_name or "")
         self._ambiguous_roles = {}
         self._duplicate_declarations = set()
@@ -358,7 +364,7 @@ class ProgramSignatureExtractor:
                 if node.name and not node.is_filler:
                     declarations.setdefault(node.name.upper(), node)
 
-        directions = self._parameter_directions(ast, signature)
+        directions = self._parameter_directions(ctx, signature)
 
         named: set[str] = set()
         for entry in self._entry_points(ast, signature):
@@ -586,7 +592,7 @@ class ProgramSignatureExtractor:
         return entries
 
     def _parameter_directions(
-        self, ast: CobolProgram, signature: ProgramSignature
+        self, ctx: ProgramContext, signature: ProgramSignature
     ) -> dict[str, str]:
         """Classify each LINKAGE name as read, written, or both.
 
@@ -598,16 +604,7 @@ class ProgramSignatureExtractor:
         "input-only".
         """
         try:
-            from .xref import XrefAnalyzer
-        except Exception as exc:  # noqa: BLE001 - degrade, never fail
-            signature.unchecked.append(
-                f"parameter direction not classified ({type(exc).__name__}); "
-                "every parameter is reported as unknown"
-            )
-            return {}
-
-        try:
-            report = XrefAnalyzer().analyze(ast)
+            report = ctx.xref
         except Exception as exc:  # noqa: BLE001 - degrade, never fail
             signature.unchecked.append(
                 f"parameter direction not classified ({type(exc).__name__}); "

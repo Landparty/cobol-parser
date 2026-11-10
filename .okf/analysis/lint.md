@@ -331,8 +331,12 @@ unexamined* while the report read as clean. `analyze()` iterates
 unit into a shared `LintReport`, `rules_run` and `failed_rules` carry one
 entry per rule however many units it ran on (the reader needs to know the
 concern went unexamined, not the arithmetic), caveats are deduplicated, and
-the sort + dedup happen once at the end. A caller-supplied `flow_report`
-describes the outermost unit only; the others build their own. Passing a
+the sort + dedup happen once at the end. `analyze()` also takes a
+[`ProgramContext`](../analysis.md#calling-conventions) in place of the AST; each unit gets its own context
+(`ProgramContext.unit`), whose flow graph, xref and procedure index every rule
+of that unit shares (the bug-, code-pattern and compiler-check rules through
+`bug_patterns._Context`, which delegates those three to it). A
+caller-supplied `flow_report` seeds the outermost unit's context only. Passing a
 contained unit directly lints just that unit, which is what the CLI's
 `--program` does. `LinkageChecker.collect_scope_interfaces` runs once per file
 and is handed to every unit's `linkage-check` (see [data-use.md](data-use.md)).

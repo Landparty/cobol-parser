@@ -516,10 +516,10 @@ def _debt(parsed: ParsedProgram, unit: CobolProgram, redundancy: Any) -> Any:
     """The health score, sharing the flow graph and redundancy report the
     other tools already computed (the same key as ``program_brief``'s)."""
     from ..analysis.technical_debt import TechnicalDebtAnalyzer
-    from .tools.common import _flow
 
+    parsed.flow(unit)  # built under stdout_to_stderr, then shared
     return TechnicalDebtAnalyzer().analyze(
-        unit, flow_report=_flow(parsed, unit), redundancy_report=redundancy
+        parsed.context(unit), redundancy_report=redundancy
     )
 
 

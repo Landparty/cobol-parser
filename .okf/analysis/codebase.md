@@ -222,7 +222,8 @@ Every other program-scoped analyzer here answers a question about the program
 it is given. This one answers a question about the program *someone else* is
 calling: given `CALL "SUBPGM" USING ...`, what does SUBPGM actually expect —
 how many operands, in what order, of what shape, and which of them it writes
-back.
+back. `analyze()` takes a unit or its [`ProgramContext`](../analysis.md#calling-conventions), whose
+cross-reference the direction pass reuses.
 
 That is why `LinkageChecker` cannot cover it: that analyzer correlates CALL
 statements against ENTRY statements *in the same source unit*, and on a real

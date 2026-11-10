@@ -697,7 +697,7 @@ Each takes `file` plus **A** (and **+prof** per the
 | `analyze` | `DynamicCallAnalyzer`: dynamic `CALL` targets only (`called_program`, `is_dynamic`, `possible_values`, plus `"possible_values_incomplete": true` when the set is not fully resolvable, so it never reads as exhaustive). Not an all-analyzers summary |
 | `dead-code` | `DeadCodeAnalyzer`: unreachable paragraphs/sections; one referenced only from dead code is dead too (#384) |
 | `program-flow` | `ProgramFlowAnalyzer` CFG; `--format json` (`report.to_dict()`), `mermaid` / `dot` (`generators/flowchart.py`'s `MermaidFlowchartGenerator` / `DotFlowchartGenerator`) |
-| `recursion-check` | `RecursionRiskAnalyzer`: `cycle_details` cycles (`PERFORM_RECURSION` HIGH; `GOTO_LOOP`/`MIXED` HIGH or MEDIUM by escape route) and self-recursive CALLs (HIGH) |
+| `recursion-check` | `RecursionRiskAnalyzer` (builds its own flow graph): `cycle_details` cycles (`PERFORM_RECURSION` HIGH; `GOTO_LOOP`/`MIXED` HIGH or MEDIUM by escape route) and self-recursive CALLs (HIGH) |
 | `complexity` | `ComplexityAnalyzer`: per-paragraph McCabe and `extended_complexity`, nesting, fan-in/out, LOW/MODERATE/HIGH `rating`, program summary (`total_complexity`, `mean_complexity`, `goto_density`, ...) |
 | `health` | `TechnicalDebtAnalyzer`: 0-100 score, A-F grade, components, `top_offenders`, `complexity_summary`/`redundancy_summary`. A file parsed with errors exits 0 with `"grade": null`, nonzero `parse_error_count` and a caveat (#397) |
 | `io-sequence` / `move-type-check` / `linkage-check` / `language-env` | `IOSequenceAnalyzer` / `MoveTypeChecker` / `LinkageChecker` violations; LE function/service usage |

@@ -65,6 +65,7 @@ from .boundary_inventory import (
     _write_targets,
     call_argument_data_name,
 )
+from .context import ProgramContext
 
 if TYPE_CHECKING:
     # Deferred: cobolparser.generators (reached via generators/__init__.py's
@@ -75,6 +76,7 @@ if TYPE_CHECKING:
     # is a type annotation only; `from __future__ import annotations` keeps
     # it a lazy string at runtime.
     from ..layout.program import ProgramLayoutIndex, ResolvedField
+    from .xref import XrefReport
 
 # -- statement-walk discipline ------------------------------------------------
 #
@@ -533,7 +535,7 @@ class ConstraintExtractor:
 
     def extract(
         self,
-        ast: CobolProgram,
+        ast: CobolProgram | ProgramContext,
         index: ProgramLayoutIndex,
         boundary_report: BoundaryReport,
         *,
@@ -542,7 +544,12 @@ class ConstraintExtractor:
         """``extra_fed_names`` -- data names to treat as boundary-fed on top
         of what ``boundary_report`` feeds: a subprogram's own PROCEDURE
         DIVISION USING parameters, which its caller supplies
-        (``ProgramFixtureGenerator(entry_parameters=True)``)."""
+        (``ProgramFixtureGenerator(entry_parameters=True)``).
+
+        *ast* may be a :class:`~.context.ProgramContext`, whose
+        cross-reference is then shared with the caller."""
+        ctx = ProgramContext.of(ast)
+        ast = ctx.ast
         report = ConstraintReport()
         procedure = ast.get_division("PROCEDURE")
         if procedure is None:
@@ -550,11 +557,11 @@ class ConstraintExtractor:
 
         fed_names = _boundary_fed_names(boundary_report)
         fed_names.update(name.upper() for name in extra_fed_names)
-        index.named_constants = _named_constants(ast, index)
+        index.named_constants = _named_constants(ctx, index)
         report.status_tests = _status_tests(ast, procedure, index)
         report.statement_sites = _statement_sites(procedure, boundary_report, index)
         eof_flags = _collect_eof_flags(ast)
-        carriers = _Carriers(ast, procedure, index, fed_names)
+        carriers = _Carriers(ctx, procedure, index, fed_names)
         carriers.sql_lines = {
             b.ref.line
             for b in boundary_report.boundaries
@@ -2045,17 +2052,17 @@ class _Carriers:
 
     def __init__(
         self,
-        ast: CobolProgram,
+        ctx: ProgramContext,
         procedure: CobolDivision,
         index: ProgramLayoutIndex,
         fed_names: set[str],
     ) -> None:
-        self._ast = ast
+        self._ctx = ctx
+        self._ast = ctx.ast
         self._procedure = procedure
         self._index = index
         self._fed = fed_names
         self._moves: dict[str, list[tuple[str, MoveStatement, bool]]] | None = None
-        self._xref: Any = None
         self._by_paragraph: dict[str, list[tuple[Any, Any]]] | None = None
         #: Lines of the executable EXEC SQL boundaries (:meth:`sql_code`).
         self.sql_lines: set[int] = set()
@@ -2235,12 +2242,8 @@ class _Carriers:
             "statement sets it is not modeled"
         )
 
-    def _references(self) -> Any:
-        if self._xref is None:
-            from .xref import XrefAnalyzer
-
-            self._xref = XrefAnalyzer().analyze(self._ast)
-        return self._xref
+    def _references(self) -> XrefReport:
+        return self._ctx.xref
 
     def correlation(
         self,
@@ -2600,15 +2603,13 @@ def _status_tests(
     return {name: sorted(codes) for name, codes in found.items()}
 
 
-def _named_constants(ast: CobolProgram, index: ProgramLayoutIndex) -> dict[str, str]:
+def _named_constants(ctx: ProgramContext, index: ProgramLayoutIndex) -> dict[str, str]:
     """``{qualified name: VALUE literal}`` of every WORKING-STORAGE
     elementary item with a literal VALUE that nothing in the program writes,
     neither the item nor a group above it (a MOVE to the group, a READ INTO
     it, an INITIALIZE, a CALL that may change it all count as writes)."""
-    from .xref import XrefAnalyzer
-
     try:
-        entries = XrefAnalyzer().analyze(ast).entries
+        entries = ctx.xref.entries
     except Exception:  # noqa: BLE001 - best effort: no constants
         return {}
     changed = {

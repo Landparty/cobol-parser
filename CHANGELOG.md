@@ -9,6 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+* **`ProgramContext`: one program's cross-reference, flow graph and
+  procedure index, each built once.** `ProgramContext(ast)` (exported from
+  `cobolparser` and `cobolparser.analysis`) builds them lazily and hands the
+  same object to every analyzer it is passed to. The analyzers that read
+  them (`LintAnalyzer`, the bug-, code-pattern and compiler-check analyzers,
+  `ComplexityAnalyzer`, `RecursionRiskAnalyzer`, `TechnicalDebtAnalyzer`,
+  `ProgramSignatureExtractor`, `ConstraintExtractor`, `XrefAnalyzer`,
+  `ProgramFlowAnalyzer`, `ProgramFixtureGenerator`) accept a context wherever
+  they accepted an AST; a bare AST keeps working. `gen-fixtures` now builds
+  the cross-reference once per bundle instead of once per step and scenario,
+  and the MCP server keeps one context per program unit.
+
 * **Per-file limits for `batch` and `scan`.** `--timeout SECONDS` stops a
   file that is still being parsed or analyzed after that long (its worker
   process is terminated and reaped) and reports it as a failure;

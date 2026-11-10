@@ -623,7 +623,9 @@ def _signature(parsed: ParsedProgram, unit: CobolProgram) -> Any:
 def _debt(parsed: ParsedProgram, unit: CobolProgram) -> Any:
     from ...analysis.technical_debt import TechnicalDebtAnalyzer
 
-    return parsed.report("debt", unit, lambda: TechnicalDebtAnalyzer().analyze(unit))
+    return parsed.report(
+        "debt", unit, lambda: TechnicalDebtAnalyzer().analyze(parsed.context(unit))
+    )
 
 
 def _call_targets(values: list[str]) -> list[str]:

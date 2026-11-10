@@ -9,6 +9,10 @@ detection, and I/O logging.
 
 # Lazy import to avoid circular dependency with cobolparser.plugins
 def __getattr__(name: str) -> object:
+    if name == "ProgramContext":
+        from .context import ProgramContext
+
+        return ProgramContext
     if name == "DynamicCallAnalyzer":
         from .value_tracker import DynamicCallAnalyzer
 
@@ -341,6 +345,7 @@ def __getattr__(name: str) -> object:
 
 
 __all__ = [
+    "ProgramContext",
     "CRUDFlags",
     "DclgenChecker",
     "DclgenReport",

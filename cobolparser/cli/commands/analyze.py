@@ -265,13 +265,11 @@ def _cmd_program_flow(args: argparse.Namespace) -> None:
 
 
 def _cmd_recursion_check(args: argparse.Namespace) -> None:
-    from ...analysis.program_flow import ProgramFlowAnalyzer
     from ...analysis.recursion_risk import RecursionRiskAnalyzer
 
     ast, prof = _parse_or_fail(args)
 
-    flow_report = ProgramFlowAnalyzer().analyze(ast)
-    report = RecursionRiskAnalyzer().analyze(ast, flow_report=flow_report)
+    report = RecursionRiskAnalyzer().analyze(ast)
 
     _emit_report(report.to_dict(), args, prof, ast)
 

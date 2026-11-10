@@ -136,7 +136,7 @@ class StructureTools(BaseTools):
         limit: int | None = None,
     ) -> dict[str, Any]:
         """What *name* is in *file*: declaration, layout, every reference."""
-        from ...analysis.xref import XrefAnalyzer, is_special_register
+        from ...analysis.xref import is_special_register
 
         wanted = " ".join(name.split()).upper()
         if not wanted:
@@ -145,8 +145,7 @@ class StructureTools(BaseTools):
         response = Response()
         _carry_parse_caveats(parsed, response)
         unit = parsed.unit(program, response)
-        with stdout_to_stderr():
-            report = XrefAnalyzer().analyze(unit)
+        report = parsed.xref(unit)
 
         # A qualified name is resolved as the compiler resolves it: partial
         # chains, ``IN`` for ``OF``, and no need to qualify a unique name.
@@ -186,7 +185,7 @@ class StructureTools(BaseTools):
                 unit,
                 lambda other: any(
                     e.definition is not None
-                    for e in XrefAnalyzer().analyze(other).entries_named(wanted)
+                    for e in parsed.xref(other).entries_named(wanted)
                 ),
             )
             return response.build(not_found, program_info)

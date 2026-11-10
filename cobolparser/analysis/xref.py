@@ -99,6 +99,7 @@ from ._names import (
     split_qualified_name,
     strip_translator_arguments,
 )
+from .context import ProgramContext
 from .unused_variables import (
     _DATA_SECTION_NAMES,
     _DICT_LIST_EXTRAS,
@@ -695,15 +696,19 @@ class XrefAnalyzer:
     # Entry point
     # ------------------------------------------------------------------
 
-    def analyze(self, ast: CobolProgram) -> XrefReport:
+    def analyze(self, ast: CobolProgram | ProgramContext) -> XrefReport:
         """Cross-reference every symbol of *ast* (one program unit).
 
         Args:
-            ast: The parsed COBOL program AST.
+            ast: The parsed COBOL program AST, or a
+                :class:`~.context.ProgramContext`, whose memoized
+                cross-reference is returned (built once, shared).
 
         Returns:
             An XrefReport whose ``entries`` are sorted by kind then name.
         """
+        if isinstance(ast, ProgramContext):
+            return ast.xref
         self._entries = []
         self._data = {}
         self._data_items = {}

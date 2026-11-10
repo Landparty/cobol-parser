@@ -23,7 +23,8 @@ from typing import Any
 from ..models.ast_base import SourceLocation
 from ..models.program import CobolProgram
 from .complexity import ComplexityAnalyzer, ComplexityReport
-from .program_flow import ProgramFlowAnalyzer, ProgramFlowReport
+from .context import ProgramContext
+from .program_flow import ProgramFlowReport
 from .recursion_risk import RecursionRiskAnalyzer, RecursionRiskReport
 from .redundancy import RedundancyAnalyzer, RedundancyReport
 
@@ -174,7 +175,7 @@ class TechnicalDebtAnalyzer:
 
     def analyze(
         self,
-        ast: CobolProgram,
+        ast: CobolProgram | ProgramContext,
         *,
         flow_report: ProgramFlowReport | None = None,
         complexity_report: ComplexityReport | None = None,
@@ -187,7 +188,8 @@ class TechnicalDebtAnalyzer:
 
         Any of the four sub-reports can be passed in precomputed (a caller
         that already ran these analyzers avoids redundant passes over the
-        same AST); each is computed fresh when omitted.
+        same AST); each is computed fresh when omitted. *ast* may be a
+        :class:`~.context.ProgramContext`, whose flow graph is then reused.
 
         *parse_error_count* is ``len(ParseResult.errors)``. A file that mostly
         failed to parse hands over an AST with almost nothing in it, which
@@ -195,18 +197,15 @@ class TechnicalDebtAnalyzer:
         over what was recovered, but ``grade`` is ``None`` and ``caveats``
         says why (#397).
         """
-        if flow_report is None:
-            flow_report = ProgramFlowAnalyzer().analyze(ast)
+        ctx = ProgramContext.of(ast, flow=flow_report)
+        ast = ctx.ast
+        flow_report = ctx.flow
         if complexity_report is None:
-            complexity_report = ComplexityAnalyzer().analyze(
-                ast, flow_report=flow_report
-            )
+            complexity_report = ComplexityAnalyzer().analyze(ctx)
         if redundancy_report is None:
             redundancy_report = RedundancyAnalyzer().analyze(ast)
         if recursion_report is None:
-            recursion_report = RecursionRiskAnalyzer().analyze(
-                ast, flow_report=flow_report
-            )
+            recursion_report = RecursionRiskAnalyzer().analyze(ctx)
 
         weights = self._weights
         components = [

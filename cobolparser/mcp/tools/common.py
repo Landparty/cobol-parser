@@ -94,9 +94,7 @@ def _attempt(response: Response, what: str, build: Callable[[], _T]) -> _T | Non
 
 
 def _flow(parsed: ParsedProgram, unit: CobolProgram) -> Any:
-    from ...analysis.program_flow import ProgramFlowAnalyzer
-
-    return parsed.report("flow", unit, lambda: ProgramFlowAnalyzer().analyze(unit))
+    return parsed.flow(unit)
 
 
 @dataclass(frozen=True)
