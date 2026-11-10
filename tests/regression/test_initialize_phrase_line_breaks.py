@@ -26,6 +26,9 @@ FORMS = [
     "THEN TO DEFAULT",
     "INITIALIZE WS-G1 REPLACING ALPHANUMERIC DATA BY WS-DEF NUMERIC BY 7",
     "INITIALIZE WS-G1 THEN TO DEFAULT",
+    # TO is optional in ``{ALL | category} [TO] VALUE`` (corpus finding).
+    "INITIALIZE WS-G1 ALL VALUE",
+    "INITIALIZE WS-G1 WITH FILLER NUMERIC VALUE THEN TO DEFAULT",
 ]
 
 _LOCATION_KEYS = {"location", "line", "column", "end_line", "end_column"}

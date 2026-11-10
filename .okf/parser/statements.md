@@ -52,7 +52,7 @@ Writer, communication).
 | `evaluate_parser.py` | EVALUATE | control |
 | `exception_parsers.py` | RAISE, RESUME, VALIDATE (COBOL 2002) | control |
 | `go_parser.py` | GO TO | control |
-| `ibm_exec_statements.py` | EXEC SQL, EXEC CICS, EXEC IMS DLI | io |
+| `ibm_exec_statements.py` | EXEC SQL / SQLIMS, EXEC CICS, EXEC IMS DLI | io |
 | `if_parser.py` | IF | control |
 | `initialize_inspect_parsers.py` | INITIALIZE, INSPECT | data |
 | `invoke_parser.py` | INVOKE (OO method invocation) | control |
@@ -281,6 +281,12 @@ lookup silently misses qualified references.
   qualified table name (`BANK.ACCOUNT`) does.
 - **CALL exception handlers** and other handler-bodied verbs follow the same
   pattern (see [statements-control.md](statements-control.md)).
+- **Paragraph-level vs nested.** The PROCEDURE DIVISION loop calls
+  `mark_top_level_statement(stream)` before each statement it dispatches
+  itself; a parser that saved `stream.position` at its first token asks
+  `is_top_level_statement(stream, start)`. XML/JSON uses it to decide whether
+  a lone `NOT ON EXCEPTION` is its own (paragraph level, or closed by its own
+  END-XML/END-JSON) or the enclosing handler's.
 
 ## Literal re-quoting (`_literals.py`)
 

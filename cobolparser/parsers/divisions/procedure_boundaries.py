@@ -8,7 +8,7 @@ at a new paragraph, a section header, or a statement keyword.
 
 from cobolparser.core.interfaces import ITokenStream
 from cobolparser.lexer import Token
-from cobolparser.parsers.statements._utils import STATEMENT_KEYWORDS
+from cobolparser.parsers.statements._utils import SCOPE_TERMINATORS, STATEMENT_KEYWORDS
 
 # Token types that can carry a procedure (paragraph/section) name. COBOL
 # allows all-digit procedure names (``1000 THRU 1999`` style numbering is
@@ -36,6 +36,10 @@ def _is_procedure_name_token(token: Token | None) -> bool:
     if token is None or not token.value:
         return False
     if token.value.upper() in STATEMENT_KEYWORDS:
+        return False
+    # A reserved scope terminator is never a name either: ``END-DISPLAY`` /
+    # ``.`` on the next line ends a statement, it does not open a paragraph.
+    if token.value.upper() in SCOPE_TERMINATORS:
         return False
     if token.type.name == "IDENTIFIER":
         return True
@@ -105,8 +109,14 @@ def is_paragraph_or_section_start(token_stream: ITokenStream) -> bool:
     if not _is_procedure_name_token(token):
         return False
 
-    # Look ahead for SECTION or period
-    next_token = token_stream.peek(1)
+    # Look ahead for SECTION or period, past line breaks: the separator
+    # period of a header may sit on the next line (``P2`` / ``.``, as in
+    # AWS CardDemo's COTRTLIC), and it is still a header.
+    offset = 1
+    next_token = token_stream.peek(offset)
+    while next_token is not None and next_token.type.name == "NEWLINE":
+        offset += 1
+        next_token = token_stream.peek(offset)
     if not next_token:
         return False
 

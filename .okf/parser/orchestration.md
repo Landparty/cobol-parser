@@ -276,6 +276,16 @@ a *stacked* program, a separate compilation unit) and pushes it, and the
 `END PROGRAM` branch of `_handle_unmatched_token` pops it. Dropping everything after the first program would silently lose most of
 a member (NIST `IC228A`).
 
+**Header-less units.** COBOL 2002, GnuCOBOL and Micro Focus let a unit start at
+`PROGRAM-ID` / `FUNCTION-ID` with no `IDENTIFICATION DIVISION` header.
+`CobolParser._handle_headerless_unit` catches that marker in the division loop:
+when the current unit already has an IDENTIFICATION division (or divisions were
+parsed), it opens a new unit through `_attach_new_unit`, then calls
+`IdentificationDivisionParser.parse_headerless`, which sets division metadata
+`header_omitted`. Nested in another program, this used to replace the enclosing
+program's divisions with no diagnostic (GnuCOBOL testsuite, corpus harness);
+pinned by `tests/regression/test_headerless_program_id.py`.
+
 **Object-oriented units.** IBM OO `CLASS-ID` / `FACTORY` / `OBJECT` /
 `METHOD-ID` units nest the same way, tagged by `CobolProgram.unit_kind`
 (`"CLASS"` / `"FACTORY"` / `"OBJECT"` / `"METHOD"`). The IDENTIFICATION parser
