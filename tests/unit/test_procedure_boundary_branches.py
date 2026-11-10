@@ -229,15 +229,6 @@ class TestHeaders:
             for w in result.warnings
         )
 
-    @pytest.mark.xfail(
-        strict=True,
-        reason=(
-            "is_paragraph_or_section_start's main case checks only peek(1) "
-            "for the period, so a paragraph name whose separator period is on "
-            "the next line ('P2' / '.') is not a header: P2 is dropped as "
-            "unparsed tokens and its statements join the previous paragraph"
-        ),
-    )
     def test_paragraph_name_with_its_period_on_the_next_line(self):
         result = _parse("""\
        P1.
