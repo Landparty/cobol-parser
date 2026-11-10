@@ -32,9 +32,14 @@ def test_normalize_and_source_format_aliases_are_the_same_modules():
     ],
 )
 def test_moved_parse_helpers_resolve_with_a_warning(module, name):
-    with pytest.warns(DeprecationWarning, match=f"cobolparser.parser.{name}"):
+    # The warning names the path the caller used, and points at the caller.
+    with pytest.warns(
+        DeprecationWarning,
+        match=f"^{module}.{name} moved to cobolparser.parser.{name};",
+    ) as caught:
         found = getattr(importlib.import_module(module), name)
     assert found is getattr(parser, name)
+    assert caught[0].filename == __file__
 
 
 def test_new_homes_do_not_warn():

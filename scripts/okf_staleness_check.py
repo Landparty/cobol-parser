@@ -184,6 +184,7 @@ OKF_MAP = [
     ),
     ("cobolparser/analysis/__init__.py", [".okf/analysis.md"]),
     ("cobolparser/analysis/context.py", [".okf/analysis.md"]),
+    ("cobolparser/analysis/protocol.py", [".okf/analysis.md"]),
     ("cobolparser/analysis/program_flow/", [".okf/analysis/flow.md"]),
     ("cobolparser/analysis/dead_code.py", [".okf/analysis/flow.md"]),
     ("cobolparser/analysis/recursion_risk.py", [".okf/analysis/flow.md"]),

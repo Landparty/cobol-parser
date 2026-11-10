@@ -113,7 +113,15 @@ def __getattr__(name: str) -> object:
     # parse_cobol_with_expansion moved to cobolparser.parser; the old name
     # still resolves (with a DeprecationWarning) until the next major.
     if name == "parse_cobol_with_expansion":
-        from . import copybook_expander
+        import warnings
 
-        return getattr(copybook_expander, name)
+        warnings.warn(
+            f"cobolparser.preprocess.{name} moved to cobolparser.parser.{name}; "
+            "this path goes away in the next major release",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        from .. import parser
+
+        return getattr(parser, name)
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
