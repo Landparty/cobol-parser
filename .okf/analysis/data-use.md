@@ -278,16 +278,17 @@ even when never touched procedurally. Level-66 RENAMES targets
 (`renames_from`/`renames_through`) are marked used the same
 unconditional way.
 
-**Copybook provenance is set-difference, not line-tracking.** `analyze()`
-takes an optional `copybook_item_names: set[str]` the caller computes by
-diffing `collect_declared_items()` on an *unexpanded* parse against the
-expanded one -- see the `unused-variables` CLI subcommand
-(`_parse_without_copybook_expansion` in `cli/commands/analyze.py`; `lint` reuses it via
-`_lint_copybook_item_names`) for the reference implementation. The expansion
-source map (`CopybookExpansion.source_location_map` /
-`ParseResult.expansion_source_map`, see
-[../preprocessing.md](../preprocessing.md)) could answer the same question,
-but the analyzer and CLI use the set difference, which works.
+**Copybook provenance is the caller's answer.** `analyze()` takes an
+optional `copybook_item_names: set[str]`. `copybook_item_names(ast,
+source_map, main_file)` (this module) computes it from the expansion source
+map (`ParseResult.expansion_source_map`, see
+[../preprocessing.md](../preprocessing.md)): a name declared on a line that
+maps to another file, minus any name the program declares itself, over every
+program unit. `lint` (`_lint_copybook_item_names`) and `scan`
+(`_copybook_names`) use it; the `unused-variables` subcommand still diffs
+`collect_declared_items()` on an unexpanded second parse against the
+expanded one (`_parse_without_copybook_expansion` in
+`cli/commands/analyze.py`).
 `include_copybook_variables=False` then excludes any
 unused item in that set from `report.unused_items` (tallied instead in
 `report.skipped_copybook_count`); the flag is a documented no-op when

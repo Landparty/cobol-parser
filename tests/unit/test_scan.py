@@ -132,10 +132,10 @@ class TestScanOne:
 
         real = scan_module._run_analyzer
 
-        def explode(name, unit, options, source_map=None):
+        def explode(name, unit, options, *args):
             if name == "health":
                 raise RuntimeError("boom")
-            return real(name, unit, options, source_map)
+            return real(name, unit, options, *args)
 
         monkeypatch.setattr(scan_module, "_run_analyzer", explode)
 
@@ -549,6 +549,35 @@ class TestCopybookExpansion:
         ]
         # The copybook's own fields are counted only once expansion ran.
         assert expanded_total > plain_total
+
+    def test_copybook_fields_are_marked_as_the_cli_marks_them(
+        self, tmp_path: Path
+    ) -> None:
+        """Scan's unused-variables said ``from_copybook: false`` for a field
+        its own ``origin`` placed in the copybook, and its lint graded the
+        field a warning; the ``unused-variables`` and ``lint`` subcommands
+        say ``true`` and ``info``."""
+        (tmp_path / "TESTCPY.cpy").write_text(self.COPYBOOK)
+        path = _write(tmp_path, "COPYUSER.cbl", self.PROGRAM)
+
+        scan = scan_one(
+            path,
+            ScanOptions(
+                analyzers=("unused-variables", "lint"),
+                copybook_paths=(str(tmp_path),),
+            ),
+        )
+        unused = scan.units[0].reports["unused-variables"]["unused_variables"]
+        assert {u["name"]: u["from_copybook"] for u in unused} == {
+            "CPY-FIELD-A": True,
+            "CPY-FIELD-B": True,
+        }
+        lint = [
+            f
+            for f in scan.reports["lint"]["findings"]
+            if f["rule"] == "unused-variables"
+        ]
+        assert lint and {f["severity"] for f in lint} == {"info"}
 
     def test_expanded_locations_carry_their_on_disk_origin(
         self, tmp_path: Path

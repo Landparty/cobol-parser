@@ -22,6 +22,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   were counted as unresolved operands, so lint told a program with no COPY
   to pass `--copybook-path`, and `MOVE ALL 'A' TO` a numeric item went
   unchecked. They now take the category of their literal.
+* **`scan` marks copybook fields as the CLI does.** With copybooks
+  expanded, scan's `unused-variables` said `from_copybook: false` for a field
+  its own `origin` placed in a copybook, and its `lint` graded an unused
+  copybook field `warning` where the `lint` subcommand says `info`. The
+  copybook-origin names now come from one function,
+  `cobolparser.analysis.unused_variables.copybook_item_names`.
 
 ### Added
 
