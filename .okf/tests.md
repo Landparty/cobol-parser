@@ -200,6 +200,30 @@ failure -- that is expected.
 | `tests/samples/enterprise/` | 22 programs, one per IBM Enterprise COBOL program type (see next section) |
 | `examples/cobol/` | NIST COBOL-85 test suite (459 .CBL files + 51 .CPY copybooks); **all 459** parse error-free, pinned by `test_nist_cobol85_support.py`. Its strict-xfail `KNOWN_ISSUES` ratchet is empty (a new entry must be a known, tracked failure); SM101A is parsed through copybook expansion (`REQUIRES_COPYBOOK_EXPANSION`) since its COPY members are statement fragments. Minimal repros for NIST edge cases live in `tests/regression/test_nist_edge_case_fixes.py` |
 | `examples/cobol/shamrice/` | 24 IBM COBOL programs from shamrice/COBOL-Examples; all parse cleanly under FAIL_FAST; the gen-fixtures corpus tests sweep it |
+| `tools/corpus/` (fetched, not vendored) | open-source COBOL corpus for the AST completeness harness -- see next section |
+
+## Open-source corpus (AST completeness)
+
+`tools/corpus/manifest.toml` lists public COBOL sources (CardDemo, GenApp,
+IBM DBB / zappbuild / Z Open Editor samples, the Open Mainframe COBOL course
+and cobol-check, proleap's tests, the GnuCOBOL `run_*`/`data_*` autotests,
+NIST from `examples/cobol`) at pinned commits with their licences.
+`fetch.py` clones them shallow into `.corpus/` (git-ignored; never vendored)
+and unpacks GnuCOBOL `.at` files. `run.py` expands copybooks, parses each
+program with COLLECT_ALL and diffs the AST (`ast_census.py`) against an
+independent census of the same text (`census.py`: statements per verb,
+paragraph/section names, data entries -- its own tokenizer, not the lexer).
+Each file gets a status: crash, timeout, errors, dropped (a drop warning),
+mismatch (silent loss: no diagnostic but the counts disagree), unchecked
+(REPLACE / unexpanded COPY make the census unreliable), clean.
+`baseline.json` records every non-clean file; `--check-baseline` (and
+`tests/integration/test_open_source_corpus.py`, `slow`) fails when a file
+gets worse, and runs the NIST part always, the fetched part only when
+`.corpus/` (or `$COBOLPARSER_CORPUS`) exists. The census is pinned by
+`tests/unit/test_corpus_census.py`; it opens a unit at a header-less
+`PROGRAM-ID` / `FUNCTION-ID` as the parser does. Known census blind spots, kept in the
+baseline: NIST comment-entry paragraphs holding fake code (OBNC1M) and NIST
+`C`-column copybook lines (SM101A/SM201A).
 
 ## Enterprise program-type corpus
 

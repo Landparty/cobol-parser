@@ -176,3 +176,4 @@ error_log.txt
 
 # MCP benchmark runs (tests/eval/run_eval.py)
 .eval-runs/
+.corpus/
