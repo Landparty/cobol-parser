@@ -79,6 +79,7 @@ from dataclasses import dataclass, field, replace
 from typing import Any
 
 from .._literals import QUOTED_LITERAL_RE
+from .._vocabulary import FIGURATIVE_CONSTANTS_WITH_ALL
 from ..models.ast_base import SourceLocation
 from ..models.data_items import CobolDataItem, ConditionNameItem
 from ..models.program import CobolParagraph, CobolProgram, CobolSection
@@ -107,6 +108,7 @@ from ..models.statements.misc import (
     NextSentenceStatement,
     SelectStatement,
 )
+from ..models.walk import all_paragraphs
 from ._abend import abend_call_target
 from ._cics import cics_exit_kind, cics_terminator_kind
 from ._procedures import (
@@ -169,24 +171,7 @@ _SUBSCRIPTED_RE = re.compile(rf"(?<![A-Za-z0-9-])({_NAME})\s*\(([^()]*)\)")
 _ADDRESS_OF_RE = re.compile(rf"\bADDRESS\s+OF\s+({_NAME})", re.IGNORECASE)
 _INTEGER_RE = re.compile(r"^[+]?\d+$")
 _COMPUTE_TOKEN_RE = re.compile(rf"{_NAME}|\d+(?:\.\d+)?|[-+()]|\S")
-_FIGURATIVE = frozenset(
-    {
-        "ZERO",
-        "ZEROS",
-        "ZEROES",
-        "SPACE",
-        "SPACES",
-        "HIGH-VALUE",
-        "HIGH-VALUES",
-        "LOW-VALUE",
-        "LOW-VALUES",
-        "QUOTE",
-        "QUOTES",
-        "NULL",
-        "NULLS",
-        "ALL",
-    }
-)
+_FIGURATIVE = FIGURATIVE_CONSTANTS_WITH_ALL
 #: Fields of the SQL communication area: DB2 stores into them.
 _SQLCA_NAMES = frozenset(
     {"SQLCA", "SQLCODE", "SQLSTATE", "SQLERRD", "SQLWARN", "SQLERRM", "SQLCADE"}
@@ -519,7 +504,7 @@ class _Context:
         if division is None:
             return []
         out: list[Any] = []
-        for para in _all_paragraphs(division):
+        for para in all_paragraphs(division):
             out.extend(para.statements)
         return out
 
@@ -1057,7 +1042,7 @@ class _Context:
             )
         ]
         division = self.ast.procedure_division
-        paragraphs = _all_paragraphs(division) if division is not None else []
+        paragraphs = all_paragraphs(division)
         if paragraphs and not paragraphs[0].paragraph_name and paragraphs[0].statements:
             # Statements before the first paragraph name: the main line
             # starts there, ahead of every named procedure.
@@ -1324,19 +1309,6 @@ class _Context:
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
-
-
-def _all_paragraphs(division: Any) -> list[CobolParagraph]:
-    """Every paragraph of a PROCEDURE DIVISION in source order, the unnamed
-    one holding statements written before the first paragraph name included
-    (``ProcedureIndex`` leaves it out: it is not a procedure anyone can
-    name)."""
-    paragraphs: list[CobolParagraph] = list(division.paragraphs)
-    for section in division.sections:
-        if isinstance(section, CobolSection):
-            paragraphs.extend(section.paragraphs)
-    unique = list({id(p): p for p in paragraphs}.values())
-    return sorted(unique, key=lambda p: (p.location.line, p.location.column))
 
 
 def _section_of(item: CobolDataItem) -> str | None:

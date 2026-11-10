@@ -9,6 +9,7 @@ and initial VALUE clauses in data definitions.
 import re
 from typing import Any
 
+from .._vocabulary import HIGH_VALUE_WORDS, LOW_VALUE_WORDS, SPACE_WORDS, ZERO_WORDS
 from ..models.ast_base import ASTNode
 from ..models.data_items import CobolDataItem, ConditionNameItem
 from ..models.program import CobolDivision, CobolProgram, CobolSection
@@ -1170,15 +1171,7 @@ class DynamicCallAnalyzer:
         if s and s.replace("-", "").replace("+", "").replace(".", "").isdigit():
             return True
         return s.upper() in (
-            "ZERO",
-            "ZEROS",
-            "ZEROES",
-            "SPACE",
-            "SPACES",
-            "LOW-VALUE",
-            "LOW-VALUES",
-            "HIGH-VALUE",
-            "HIGH-VALUES",
+            ZERO_WORDS | SPACE_WORDS | LOW_VALUE_WORDS | HIGH_VALUE_WORDS
         )
 
     def _extract_literal_value(self, source: str) -> str | None:
@@ -1212,9 +1205,9 @@ class DynamicCallAnalyzer:
 
         # Check for ZERO/ZEROS/ZEROES, SPACE/SPACES
         upper_source = source.upper()
-        if upper_source in ("ZERO", "ZEROS", "ZEROES"):
+        if upper_source in ZERO_WORDS:
             return "0"
-        if upper_source in ("SPACE", "SPACES"):
+        if upper_source in SPACE_WORDS:
             return " "
         if upper_source in ("LOW-VALUE", "LOW-VALUES"):
             return "\x00"

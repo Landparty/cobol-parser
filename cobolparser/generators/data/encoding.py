@@ -60,6 +60,7 @@ from ..._storage import (
     binary_byte_length,
     is_known_usage,
 )
+from ..._vocabulary import FIGURATIVE_CONSTANTS
 from ...layout.errors import CopybookLayoutError
 from ...layout.fields import (
     FieldCategory,
@@ -669,10 +670,7 @@ _FIGURATIVE_FILL: dict[str, str] = {
 }
 
 #: Every figurative word, writable or not.
-_ALL_FIGURATIVES = frozenset(
-    {*_FIGURATIVE_FILL, "LOW-VALUE", "LOW-VALUES", "HIGH-VALUE", "HIGH-VALUES"}
-    | {"NULL", "NULLS"}
-)
+_ALL_FIGURATIVES = FIGURATIVE_CONSTANTS
 
 
 def _ordinary_literal_cells(spec: FieldSpec) -> list[str]:

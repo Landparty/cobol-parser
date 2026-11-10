@@ -393,9 +393,9 @@ def _record_io_writes(
     ``REWRITE`` / ``RELEASE`` record ``FROM`` x, which moves x into the
     record first (sure or possible as a MOVE to that record would be).
     Returns (sure, possible) rows like :func:`_writes`' with ``via``."""
+    from ..models.walk import own_statements
     from .envelope import Response
     from .navigation import _procedure_of, statement_verb
-    from .tools.common import _own_statements
 
     if storage.unit is None or not storage.placed:
         return [], []
@@ -403,7 +403,7 @@ def _record_io_writes(
     exact_of[field_name.split(" OF ")[0]] = True
     sure: list[dict[str, Any]] = []
     possible: list[dict[str, Any]] = []
-    for statement in _own_statements(storage.unit):
+    for statement in own_statements(storage.unit):
         verb = statement_verb(statement)
         exact: bool | None = None
         via = ""

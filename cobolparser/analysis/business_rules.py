@@ -74,9 +74,10 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from .._literals import is_quoted_literal
+from .._vocabulary import FIGURATIVE_CONSTANTS
 from ..models.ast_base import SourceLocation
 from ..models.data_items import CobolDataItem, ConditionNameItem
-from ..models.program import CobolParagraph, CobolProgram
+from ..models.program import CobolProgram
 from ..models.statements.arithmetic import (
     AddStatement,
     ArithmeticStatement,
@@ -112,6 +113,7 @@ from ..models.statements.data import (
 )
 from ..models.statements.io import IOReadStatement
 from ..models.statements.misc import ReturnStatement, SelectStatement
+from ..models.walk import section_paragraphs
 from ._procedures import ProcedureEntry, ProcedureIndex
 from .dead_code import DeadCodeAnalyzer
 from .program_flow.condition_text import render_condition_text
@@ -176,23 +178,7 @@ _CLASS_TEST_RE = re.compile(
     re.IGNORECASE,
 )
 
-_FIGURATIVES = frozenset(
-    {
-        "ZERO",
-        "ZEROS",
-        "ZEROES",
-        "SPACE",
-        "SPACES",
-        "HIGH-VALUE",
-        "HIGH-VALUES",
-        "LOW-VALUE",
-        "LOW-VALUES",
-        "QUOTE",
-        "QUOTES",
-        "NULL",
-        "NULLS",
-    }
-)
+_FIGURATIVES = FIGURATIVE_CONSTANTS
 _NUMERIC_LITERAL_RE = re.compile(r"^[+-]?(\d+\.?\d*|\.\d+)$")
 _SPLIT_SIGN_RE = re.compile(r"^([+-])\s+(?=\d|\.\d)")
 _THROUGH_PREFIX = "THROUGH:"
@@ -515,7 +501,7 @@ class BusinessRuleExtractor:
         self._collect_declarations(ast)
         self._collect_technical_items(ast)
 
-        for section_name, para in self._ordered_paragraphs(ast):
+        for section_name, para in section_paragraphs(ast.procedure_division):
             name = (para.paragraph_name or "").upper()
             self._walk(para.statements, name, section_name, guards=[], owner=None)
 
@@ -617,21 +603,6 @@ class BusinessRuleExtractor:
     # ------------------------------------------------------------------
     # Procedure walk
     # ------------------------------------------------------------------
-
-    @staticmethod
-    def _ordered_paragraphs(
-        ast: CobolProgram,
-    ) -> list[tuple[str | None, CobolParagraph]]:
-        proc = ast.procedure_division
-        assert proc is not None
-        found: list[tuple[str | None, CobolParagraph]] = []
-        for section in proc._sections.values():
-            section_name = (section.section_name or "").upper() or None
-            for para in section.paragraphs:
-                found.append((section_name, para))
-        for para in proc.paragraphs:
-            found.append((None, para))
-        return sorted(found, key=lambda pair: pair[1].location.line)
 
     def _walk(
         self,

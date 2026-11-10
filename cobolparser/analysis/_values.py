@@ -44,6 +44,7 @@ from typing import TYPE_CHECKING, Any
 
 from .._literals import unquote_literal
 from .._storage import storage_size
+from .._vocabulary import ZERO_WORDS
 from ..models.data_items import CobolDataItem, ConditionNameItem
 from ..models.program import CobolProgram, CobolSection
 from ..models.statements.arithmetic import AddStatement, SubtractStatement
@@ -87,7 +88,7 @@ _FIGURATIVE_FILL = {
     "HIGH-VALUE": "\xff",
     "HIGH-VALUES": "\xff",
 }
-_ZERO_WORDS = frozenset({"ZERO", "ZEROS", "ZEROES"})
+_ZERO_WORDS = ZERO_WORDS
 _RELATIONS = {
     "EQUAL": lambda a, b: a == b,
     "NOT_EQUAL": lambda a, b: a != b,

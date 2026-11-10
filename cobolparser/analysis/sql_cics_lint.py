@@ -103,6 +103,7 @@ from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
 from typing import Any
 
+from .._vocabulary import FIGURATIVE_CONSTANTS_WITH_ALL
 from ..models.ast_base import ASTNode, SourceLocation
 from ..models.program import CobolParagraph, CobolProgram, CobolSection
 from ..models.sql_statements import (
@@ -259,24 +260,7 @@ _EXECUTE_IMMEDIATE_RE = re.compile(r"^\s*EXECUTE\s+IMMEDIATE\b", re.IGNORECASE)
 
 #: A COBOL literal as the parser preserves it in a MOVE: quoted text, a
 #: number, or a figurative constant.
-_FIGURATIVE_CONSTANTS = frozenset(
-    {
-        "SPACE",
-        "SPACES",
-        "ZERO",
-        "ZEROS",
-        "ZEROES",
-        "QUOTE",
-        "QUOTES",
-        "HIGH-VALUE",
-        "HIGH-VALUES",
-        "LOW-VALUE",
-        "LOW-VALUES",
-        "NULL",
-        "NULLS",
-        "ALL",
-    }
-)
+_FIGURATIVE_CONSTANTS = FIGURATIVE_CONSTANTS_WITH_ALL
 
 #: Attributes that hold nested statements without being AST children: the
 #: statement models' canonical ``NESTED_BODY_ATTRS`` (an SQL statement inside

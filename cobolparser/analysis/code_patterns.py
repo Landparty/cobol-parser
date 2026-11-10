@@ -710,9 +710,9 @@ def _statement_blocks(ctx: _Context) -> Iterator[list[Any]]:
     division = ctx.ast.procedure_division
     if division is None:
         return
-    from .bug_patterns import _all_paragraphs
+    from ..models.walk import all_paragraphs
 
-    for para in _all_paragraphs(division):
+    for para in all_paragraphs(division):
         yield list(para.statements)
     for stmt in ctx.statements():
         yield from _nested_lists(stmt)

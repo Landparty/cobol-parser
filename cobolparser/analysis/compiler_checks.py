@@ -107,6 +107,7 @@ from collections.abc import Callable, Iterable, Iterator
 from typing import Any
 
 from .._literals import QUOTED_LITERAL_RE
+from .._vocabulary import ZERO_WORDS
 from ..models.data_items import CobolDataItem, ConditionNameItem
 from ..models.program import CobolProgram, CobolSection
 from ..models.statements.arithmetic import (
@@ -123,10 +124,10 @@ from ..models.statements.base import (
 )
 from ..models.statements.control import SearchStatement
 from ..models.statements.data import MoveStatement
+from ..models.walk import all_paragraphs
 from .bug_patterns import (
     _FIGURATIVE,
     BugFinding,
-    _all_paragraphs,
     _Context,
     _is_elementary,
     _parse_operand,
@@ -1234,7 +1235,7 @@ class CompilerChecks:
         if division is None:
             return []
         findings: list[BugFinding] = []
-        paragraphs = [p for p in _all_paragraphs(division) if p.paragraph_name]
+        paragraphs = [p for p in all_paragraphs(division) if p.paragraph_name]
         groups: dict[tuple[str, str], list[Any]] = {}
         for para in paragraphs:
             if getattr(para, "is_declarative", False):
@@ -1419,7 +1420,7 @@ def _file_names(ast: CobolProgram) -> set[str]:
 
 def _is_zero(text: str) -> bool:
     text = text.strip().upper()
-    return text in ("ZERO", "ZEROS", "ZEROES") or bool(
+    return text in ZERO_WORDS or bool(
         _ZERO_LITERAL_RE.match(text) and any(c.isdigit() for c in text)
     )
 

@@ -17,6 +17,8 @@ from cobolparser.models.ast_base import SourceLocation
 from cobolparser.models.data_items import CobolDataItem, OccursClause, PictureClause
 from cobolparser.parsers.statements._utils import peek_past_noise
 
+from ..._vocabulary import ZERO_WORDS
+
 # Constants for COMP/COMPUTATIONAL usage keywords and token types.
 # These appear in multiple parsing methods; keeping them in one place avoids
 # duplication and makes adding new variants trivial.
@@ -881,7 +883,7 @@ class DataItemClauseParser:
         if nxt and nxt.value and nxt.value.upper() == "WHEN":
             token_stream.consume()
         nxt = token_stream.peek()
-        if nxt and nxt.value and nxt.value.upper() in {"ZERO", "ZEROS", "ZEROES"}:
+        if nxt and nxt.value and nxt.value.upper() in ZERO_WORDS:
             token_stream.consume()
         data_item.blank_when_zero = True
 

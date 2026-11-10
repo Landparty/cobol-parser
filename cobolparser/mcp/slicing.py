@@ -321,10 +321,10 @@ def _by_role(rows: list[dict[str, Any]]) -> dict[str, int]:
 
 def _statements_by_line(unit: CobolProgram) -> dict[int, Any]:
     """The innermost statement starting on each parsed line of *unit*."""
-    from .tools.common import _own_statements
+    from ..models.walk import own_statements
 
     by_line: dict[int, Any] = {}
-    for statement in _own_statements(unit):
+    for statement in own_statements(unit):
         location = getattr(statement, "location", None)
         if location is None or not location.line:
             continue

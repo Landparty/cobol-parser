@@ -43,6 +43,7 @@ LAYERS: dict[str, int] = {
     "_file_limits": 0,
     "_source_directive": 0,
     "_version": 0,
+    "_vocabulary": 0,
     "profiling": 0,
     "jcl": 0,
     "definitions": 1,

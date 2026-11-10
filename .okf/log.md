@@ -14,6 +14,18 @@ deliberate. Anything else appended to the bottom is a mistake: five
 entries, including both 2026-09-15 sections, were found there on
 2026-09-15 and moved back up.
 
+## 2026-11-10 -- shared word lists and AST walks
+
+- [lexer.md](lexer.md): new `cobolparser/_vocabulary.py` (figurative
+  constants and their spellings); the lexer and the parser, layout,
+  analysis and generator copies read it.
+- [ast-models.md](ast-models.md): new `models/walk.py` (`all_paragraphs`,
+  `section_paragraphs`, `own_statements`); the private copies in
+  constraints, boundary inventory, bug / code patterns, compiler checks,
+  business rules, recursion risk, unused variables, dead code, codebase and
+  the MCP tools are gone. [index.md](index.md) lists `_vocabulary` as a leaf.
+  Tests: `tests/unit/test_walk_and_vocabulary.py`.
+
 ## 2026-11-10 -- `ProgramContext`: shared per-program facts
 
 - [analysis.md](analysis.md): new `analysis/context.py` (`ProgramContext`,

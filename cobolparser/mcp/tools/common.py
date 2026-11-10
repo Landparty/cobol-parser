@@ -186,20 +186,6 @@ def _label_runs_as(
         answer["runs_as_because"] = evidence
 
 
-def _own_statements(unit: CobolProgram) -> list[Any]:
-    """*unit*'s statements without those of the programs it contains.
-
-    ``get_all_statements()`` walks into nested programs and OO methods;
-    a brief of the outer unit must not count theirs.
-    """
-    nested = {
-        id(statement)
-        for contained in unit.contained_programs
-        for statement in contained.get_all_statements()
-    }
-    return [s for s in unit.get_all_statements() if id(s) not in nested]
-
-
 def _worth_showing(value: Any) -> bool:
     """A layout value that says something: not absent, empty or ``False``.
 

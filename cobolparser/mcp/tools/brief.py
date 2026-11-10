@@ -9,6 +9,7 @@ from typing import Any
 
 from ..._lines import split_source_lines
 from ...models.program import CobolProgram
+from ...models.walk import own_statements
 from ..envelope import Response, ToolError, clamp_limit
 from ..link_decks import bound_into, own_decks
 from ..workspace import ParsedProgram, Workspace
@@ -23,7 +24,6 @@ from .common import (
     _flow,
     _label_runs_as,
     _notes,
-    _own_statements,
     _Reachability,
     _reachability,
     _worth_showing,
@@ -92,7 +92,7 @@ class BriefTools(BaseTools):
             answer["size"] = {
                 "sections": sum(1 for n in nodes if n.procedure_type == "SECTION"),
                 "paragraphs": sum(1 for n in nodes if n.procedure_type == "PARAGRAPH"),
-                "statements": len(_own_statements(unit)),
+                "statements": len(own_statements(unit)),
             }
             answer["entry_points"] = list(flow.entry_points)
             reach = _reachability(parsed, unit, response)
@@ -209,7 +209,7 @@ class BriefTools(BaseTools):
             if calls is not None:
                 answer["calls"] = response.cap(calls, cap, "calls")
 
-        statements = _own_statements(unit)
+        statements = own_statements(unit)
         cics = _verb_counts(statements, "EXEC_CICS", "cics_command")
         if cics:
             answer["cics_commands"] = cics
@@ -445,7 +445,7 @@ class BriefTools(BaseTools):
             out["files"] = files
         if tables:
             out["sql_tables"] = tables
-        cics = _verb_counts(_own_statements(unit), "EXEC_CICS", "cics_command")
+        cics = _verb_counts(own_statements(unit), "EXEC_CICS", "cics_command")
         if cics:
             out["cics_commands"] = cics
         return out
@@ -673,7 +673,7 @@ def _calls(
                 "location": parsed.locate(line, None, response),
             }
         )
-    for statement in _own_statements(unit):
+    for statement in own_statements(unit):
         if getattr(statement, "node_type", None) != "EXEC_CICS":
             continue
         cics: Any = statement
@@ -708,7 +708,7 @@ def _calls(
         # paragraph declares: control passes to that FUNCTION-ID unit.
         from ...analysis.language_env_analyzer import function_references
 
-        for statement in _own_statements(unit):
+        for statement in own_statements(unit):
             for name in function_references(statement, declared):
                 if name not in declared:
                     continue
@@ -808,7 +808,7 @@ def _file_open_close_notes(
     """
     closed: set[str] = set()
     sorted_by: set[str] = set()
-    for statement in _own_statements(unit):
+    for statement in own_statements(unit):
         kind = getattr(statement, "statement_type", "")
         if kind == "CLOSE":
             closed.update(n.upper() for n in getattr(statement, "file_names", []))

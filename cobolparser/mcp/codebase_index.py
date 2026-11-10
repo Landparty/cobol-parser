@@ -173,13 +173,14 @@ def _units_with_depth(
 
 def _entry_names(unit: CobolProgram) -> list[str]:
     """*unit*'s own ``ENTRY 'name'`` names, normalized like PROGRAM-IDs."""
-    from ..analysis.codebase import _normalize_program_name, _unit_statements
+    from ..analysis.codebase import _normalize_program_name
     from ..models.statements.call import EntryStatement
+    from ..models.walk import own_statements
 
     return sorted(
         {
             _normalize_program_name(statement.entry_name)
-            for statement in _unit_statements(unit)
+            for statement in own_statements(unit)
             if isinstance(statement, EntryStatement) and statement.entry_name
         }
         - {""}
@@ -625,10 +626,10 @@ def unit_services(unit: Any) -> list[str]:
     """The services a COBOL unit requests itself: ``CICS``, ``DB2 SQL``,
     ``IMS`` (EXEC DLI or a CALL to a DL/I interface), the vocabulary of a
     PL/I or assembler source's ``services``."""
-    from .tools.common import _own_statements
+    from ..models.walk import own_statements
 
     found: set[str] = set()
-    for statement in _own_statements(unit):
+    for statement in own_statements(unit):
         kind = type(statement).__name__
         if kind == "ExecCicsStatement":
             found.add("CICS")

@@ -282,6 +282,17 @@ substring: `WS-A` does not match `WS-AMOUNT`). Intrinsic-function and LE
 usage is `LanguageEnvironmentAnalyzer`'s job; `CobolProgram` no longer
 imports any analyzer, so `models` stays below `analysis`.
 
+**`models/walk.py`** -- the shared traversal API: `all_paragraphs(division)`
+(every PROCEDURE DIVISION paragraph, top-level and in sections, each once, in
+source order; the unnamed leading paragraph included; `None` -> `[]`),
+`section_paragraphs(division)` (the same, paired with the owning section's
+upper-cased name or `None`), `own_statements(unit)` (a unit's statements
+without its contained programs', #274), and re-exports of `walk_statements` /
+`iter_clause_bodies`. Analyzers, generators and the MCP server use these
+instead of private copies. `RedundancyAnalyzer._collect_paragraphs` keeps
+its own sections-first order on purpose: clone-group membership order is
+pinned by its tests.
+
 ## ASTNodeFactory
 
 ```python

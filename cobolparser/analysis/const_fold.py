@@ -76,6 +76,7 @@ from fractions import Fraction
 from typing import TYPE_CHECKING, Any
 
 from .._literals import unquote_literal
+from .._vocabulary import FIGURATIVE_CONSTANTS, SPACE_WORDS, ZERO_WORDS
 from ..models.data_items import CobolDataItem, RenamesItem
 from ..models.program import CobolParagraph, CobolProgram
 from ..models.statements.arithmetic import (
@@ -132,7 +133,7 @@ _NUMERIC_LITERAL_RE = re.compile(r"^[+-]?\d+(\.\d+)?$")
 _QUOTED_LITERAL_RE = re.compile(r'^(["\'])(.*)\1$', re.DOTALL)
 #: The figurative constant ZERO in all three spellings: numeric zero moved
 #: into a numeric field, a run of "0" characters into an alphanumeric one.
-_ZERO_FIGURATIVES = frozenset({"ZERO", "ZEROS", "ZEROES"})
+_ZERO_FIGURATIVES = ZERO_WORDS
 #: A subscript or reference-modification suffix: ``WS-T ( 1 )``, ``WS-B(1:1)``.
 
 #: Statement visits the main walk may make before giving up. Fall-through
@@ -1709,25 +1710,9 @@ _SIGNS = {
     "ZEROS": lambda v: v == 0,
     "ZEROES": lambda v: v == 0,
 }
-_SPACE_FIGURATIVES = frozenset({"SPACE", "SPACES"})
+_SPACE_FIGURATIVES = SPACE_WORDS
 #: Words a level-88 VALUE entry may hold as a figurative constant.
-_FIGURATIVE_WORDS = frozenset(
-    {
-        "SPACE",
-        "SPACES",
-        "ZERO",
-        "ZEROS",
-        "ZEROES",
-        "HIGH-VALUE",
-        "HIGH-VALUES",
-        "LOW-VALUE",
-        "LOW-VALUES",
-        "QUOTE",
-        "QUOTES",
-        "NULL",
-        "NULLS",
-    }
-)
+_FIGURATIVE_WORDS = FIGURATIVE_CONSTANTS
 
 #: A condition operand the walk knows: ``("num", Decimal)`` for a numeric
 #: value (a numeric literal, ZERO, or a numeric field the walk holds), or

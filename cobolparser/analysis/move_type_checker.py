@@ -26,6 +26,7 @@ import re
 from dataclasses import dataclass, field
 from enum import Enum, auto
 
+from .._vocabulary import FIGURATIVE_CONSTANTS, ZERO_WORDS
 from ..dialects.le_signatures import intrinsic_signature
 from ..models.ast_base import ASTNode, SourceLocation
 from ..models.data_items import CobolDataItem, PictureClause
@@ -136,29 +137,13 @@ _PIC_EDITED_CHARS_RE = re.compile(r"[Z\*\+\-\$\.,/B0]", re.IGNORECASE)
 # inside the parenthesised repeat count.
 _PIC_REPEAT_RE = re.compile(r"\(\d+\)")
 
-_FIGURATIVE_CONSTANTS = frozenset(
-    {
-        "ZERO",
-        "ZEROS",
-        "ZEROES",
-        "SPACE",
-        "SPACES",
-        "HIGH-VALUE",
-        "HIGH-VALUES",
-        "LOW-VALUE",
-        "LOW-VALUES",
-        "QUOTE",
-        "QUOTES",
-        "NULL",
-        "NULLS",
-    }
-)
+_FIGURATIVE_CONSTANTS = FIGURATIVE_CONSTANTS
 
 # ZERO has a digit value, so it is a legal MOVE source into every category
 # this checker models (numeric, numeric-edited, alphabetic, alphanumeric,
 # alphanumeric-edited) -- unlike the other figurative constants below, it
 # never produces a violation and never needs the catalog to resolve it.
-_FIGURATIVE_ZERO = frozenset({"ZERO", "ZEROS", "ZEROES"})
+_FIGURATIVE_ZERO = ZERO_WORDS
 
 # The "fill" figurative constants: legal into an alphabetic, alphanumeric or
 # alphanumeric-edited receiver (they fill it with the given character/byte),

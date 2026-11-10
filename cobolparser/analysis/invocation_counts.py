@@ -58,6 +58,7 @@ from dataclasses import dataclass, field
 from decimal import Decimal, InvalidOperation
 from typing import TYPE_CHECKING, Any
 
+from .._vocabulary import SPACE_WORDS, ZERO_WORDS
 from ..models.program import CobolProgram
 from ..models.sql_statements import ExecSQLStatement
 from ..models.statements.base import (
@@ -786,9 +787,9 @@ def _literal_like(
     """
     stripped = text.strip()
     upper = stripped.upper()
-    if upper in ("ZERO", "ZEROS", "ZEROES"):
+    if upper in ZERO_WORDS:
         return Decimal(0) if isinstance(like, Decimal) else "0" * max(len(like), 1)
-    if upper in ("SPACE", "SPACES"):
+    if upper in SPACE_WORDS:
         return None if isinstance(like, Decimal) else " "
     if upper in _FIGURATIVES:
         return None

@@ -11,6 +11,7 @@ from typing import Any
 
 from .._literals import typed_literal_content, unquote_literal
 from .._storage import FLOAT_USAGES, storage_size
+from .._vocabulary import FIGURATIVE_CONSTANTS
 from ..models.data_items import (
     CobolDataItem,
     ConditionNameItem,
@@ -679,23 +680,7 @@ def condition_values_exhaustive(raw_values: list[str], decimal_digits: int) -> b
 
 
 #: Figurative constants as they can appear in a level-88 VALUE clause.
-_FIGURATIVE_WORDS = frozenset(
-    {
-        "SPACE",
-        "SPACES",
-        "ZERO",
-        "ZEROS",
-        "ZEROES",
-        "LOW-VALUE",
-        "LOW-VALUES",
-        "HIGH-VALUE",
-        "HIGH-VALUES",
-        "QUOTE",
-        "QUOTES",
-        "NULL",
-        "NULLS",
-    }
-)
+_FIGURATIVE_WORDS = FIGURATIVE_CONSTANTS
 
 
 #: Field categories whose DISPLAY bytes are one character per byte, so a

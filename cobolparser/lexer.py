@@ -17,6 +17,7 @@ from enum import IntEnum, auto
 
 from ._lines import split_source_lines
 from ._literals import is_quoted_literal
+from ._vocabulary import FIGURATIVE_CONSTANTS_WITH_ALL
 from .models.ast_base import SourceLocation
 from .plugins.core import DialectType, ParseError
 
@@ -903,31 +904,10 @@ class CobolLexer:
     }
     KEYWORDS = {sys.intern(k): v for k, v in KEYWORDS.items()}
 
-    # Figurative constants
-    FIGURATIVE_CONSTANTS = {
-        "ZERO",
-        "ZEROS",
-        "ZEROES",
-        "SPACE",
-        "SPACES",
-        "HIGH-VALUE",
-        "HIGH-VALUES",
-        "LOW-VALUE",
-        "LOW-VALUES",
-        "QUOTE",
-        "QUOTES",
-        "ALL",
-        # NULL/NULLS: the VALUE of USAGE POINTER / PROCEDURE-POINTER /
-        # FUNCTION-POINTER data items (VALUE IS NULL) and the operand of
-        # SET ptr TO NULL / relational pointer comparisons. Several
-        # analysis modules (analysis/move_type_checker.py,
-        # analysis/constraints.py, generators/data/values.py) already
-        # carried their own private NULL/NULLS figurative-constant lists in
-        # anticipation of this; the lexer is the single source of truth for
-        # token classification, so it belongs here too.
-        "NULL",
-        "NULLS",
-    }
+    # Figurative constants, plus ALL (the prefix of an ``ALL literal``):
+    # one list for the whole package, in _vocabulary. A mutable copy, as
+    # this class attribute always was.
+    FIGURATIVE_CONSTANTS = set(FIGURATIVE_CONSTANTS_WITH_ALL)
 
     # Typed-literal prefixes (IBM Enterprise COBOL and ISO COBOL).
     # A single letter (or the two-letter ``NX``) immediately followed by a

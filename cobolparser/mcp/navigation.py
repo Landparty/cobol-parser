@@ -146,7 +146,7 @@ def statement_rows(
     parsed: ParsedProgram, lines: _Lines, response: Response
 ) -> Iterator[StatementRow]:
     """Every statement of every unit of *parsed*, with its operands."""
-    from .tools.common import _own_statements
+    from ..models.walk import own_statements
 
     for unit in parsed.ast.program_units():
         name = unit.program_name or "<unnamed>"
@@ -164,7 +164,7 @@ def statement_rows(
                 for n in names:
                     held.setdefault(n, set()).add(ref.role)
         cursors = _cursor_tables(unit)
-        for statement in _own_statements(unit):
+        for statement in own_statements(unit):
             location = getattr(statement, "location", None)
             if location is None or not location.line:
                 continue
@@ -182,7 +182,9 @@ def statement_rows(
                         ops.setdefault(qualified, set()).add(role)
                 if text.upper() == "EXEC SQL":
                     # The statement itself is on the lines that follow.
-                    text = _statement_text("EXEC SQL " + statement.sql_text)
+                    text = _statement_text(
+                        "EXEC SQL " + str(getattr(statement, "sql_text", ""))
+                    )
             yield StatementRow(
                 program=name,
                 file=located["file"],
