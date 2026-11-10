@@ -276,6 +276,11 @@ class ProcedureDivisionParser(BaseDivisionParser):
             # starts the next unit the same way.
             if token_value == "FUNCTION-ID":
                 break
+            # So does a header-less PROGRAM-ID (a nested or stacked program
+            # with no IDENTIFICATION DIVISION header): reading it as a
+            # paragraph swallowed that program's divisions into this one.
+            if token_value == "PROGRAM-ID":
+                break
 
             # Skip stray control markers so following statements can be recovered.
             if token_value in ("ELSE", "WHEN", "END-IF", "END-PERFORM", "END-EVALUATE"):

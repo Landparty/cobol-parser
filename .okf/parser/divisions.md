@@ -151,6 +151,14 @@ Individual statement parsers are in [statements.md](statements.md).
   whole compilation unit failed with "PROGRAM-ID is mandatory". `END FUNCTION`
   ends the unit's PROCEDURE DIVISION wherever `END PROGRAM` does (the procedure
   loop, `bare_end_starts_at_end_clause`, READ's `NOT AT END` lookahead).
+- **Header omitted.** `parse_headerless` parses the division from a bare
+  `PROGRAM-ID` / `FUNCTION-ID` (metadata `header_omitted` = True); see
+  "Header-less units" in [orchestration.md](orchestration.md). So that one is
+  seen, the PROCEDURE statement loop breaks at `PROGRAM-ID` as it does at
+  `FUNCTION-ID`, and the DATA DIVISION's item scanners and section loop stop at
+  a unit boundary (`_at_unit_boundary`: `PROGRAM-ID`, `FUNCTION-ID`, or `END
+  PROGRAM|FUNCTION`). The section loop used to consume `END PROGRAM` as an
+  unknown section, so a data-only program swallowed the unit after it.
 
 ## ENVIRONMENT DIVISION
 
