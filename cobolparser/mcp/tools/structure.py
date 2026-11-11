@@ -23,6 +23,7 @@ from .common import (
     _attempt,
     _carry_parse_caveats,
     _declared_elsewhere,
+    _degraded_declaration,
     _file_facts,
     _worth_showing,
 )
@@ -188,6 +189,7 @@ class StructureTools(BaseTools):
                     for e in parsed.xref(other).entries_named(wanted)
                 ),
             )
+            _degraded_declaration(not_found, parsed, wanted)
             return response.build(not_found, program_info)
 
         if len(matches) > 1:
@@ -273,6 +275,8 @@ class StructureTools(BaseTools):
                     )
                     if _worth_showing(item.get(key))
                 }
+            if entry.definition is None:
+                _degraded_declaration(symbol, parsed, entry.name.upper())
             symbols.append(symbol)
 
         return response.build(
@@ -363,6 +367,7 @@ class StructureTools(BaseTools):
                     or _renames_node(other, wanted.split(" OF ")[0].strip())
                 ),
             )
+            _degraded_declaration(answer, parsed, wanted)
             return response.build(answer, program_info)
         if len(items) > 1 and fact is None:
             response.caveat(

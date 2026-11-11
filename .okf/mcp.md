@@ -42,7 +42,8 @@ the Model Context Protocol, on stdin/stdout. Design and later phases:
 | `cobolparser/mcp/prompts.py` | `PROMPTS` (`PromptSpec`): `explain_program`, `review_program`, `plan_change`, `document_business_rules`, `onboard_codebase`, each a plain function returning the request text | no |
 | `cobolparser/mcp/codebase_index.py` | `programs_index` / `lineage_index` / `health_index`: assembled from per-file facts, cached by `Workspace.index()` | no |
 | `cobolparser/mcp/facts.py` | `FileFacts` (one parse's facts for every index), `compute_facts()`, `FactsStore` (current facts kept, stale ones recomputed in a spawn pool, pickled to `cache_dir` with `HEAVY_FIELDS` in per-file shards, `warm()`, `load_extra()` / `save_extra()`), `store_for()`, `surveyed()`, `default_cache_dir()` | no |
-| `cobolparser/mcp/server.py` | `build_server()`, `run_stdio()`: typed wrappers registered on `FastMCP`, and `PROMPTS` through `Prompt.from_function` | **yes** (`[mcp]` extra) |
+| `cobolparser/mcp/tool_groups.py` | `TOOL_GROUPS`, `ALL_TOOLS`: kept apart from `server.py` so `mcp --help` can list the tools without the `[mcp]` extra | no |
+| `cobolparser/mcp/server.py` | `build_server()`, `run_stdio()`: typed wrappers registered on `FastMCP` (each wrapped by `_on_the_wire()`, see the envelope), `PROMPTS` through `Prompt.from_function`; `serverInfo.version` is the package's `__version__` (FastMCP takes none and the low-level server would report the SDK's) | **yes** (`[mcp]` extra) |
 
 ## Contents
 
@@ -107,7 +108,7 @@ Invariants:
   (`_declared_elsewhere`): the default unit is the outermost, so a name only
   a nested program declares otherwise reads as missing.
 
-Tool selection (`server.py`): `TOOL_GROUPS` (`core`, `data`, `jcl`) and
+Tool selection (`server.py`, groups in `tool_groups.py`): `TOOL_GROUPS` (`core`, `data`, `jcl`) and
 `select_tools(spec, workspace)`; `--tools auto` (the CLI default) is `core`
 plus `jcl` when `Workspace.has_jcl()`; `build_server(workspace)` defaults to
 `all`. `instructions_for(enabled)` sends `INSTRUCTIONS` (incl. the
@@ -185,9 +186,18 @@ Every tool returns `{"surface_version", "answer", "caveats", "truncated",
 adds `next`, at most `MAX_HINTS` (2) `tool(arg="v")` strings derived from the
 answer alone, naming only offered tools, and never failing the call; then
 `envelope.fit_budget(result, max_answer_bytes)` (`--max-answer-bytes`,
-`DEFAULT_ANSWER_BYTES` 24000, compact-JSON bytes) halves the answer's
+`DEFAULT_ANSWER_BYTES` 24000) halves the answer's
 largest list from the end until it fits, each cut a `truncated` entry with
-`reason: "answer budget"` (an earlier `limit` cut keeps its `total`). A location anywhere in `answer` is
+`reason: "answer budget"` (an earlier `limit` cut keeps its `total`); once
+every list is down to one item, the answer's longest strings (over 200
+characters) are halved, each cut with `shown_chars` / `total_chars`. The
+size is `envelope.wire_size()`: the `structuredContent` plus the text copy
+sent beside it, JSON-escaped. `_on_the_wire()` makes each tool return a
+`CallToolResult` whose text copy is `wire_text()` (compact JSON): left to
+FastMCP it was pretty-printed, and an answer cut to 24000 compact bytes
+went out at about three times that. Only the envelope outside `answer`
+(caveats, `truncated`, `next`) is never cut, so a budget below it
+(about 2 KB on a large root) cannot be met. A location anywhere in `answer` is
 `{"file", "line", "column"?}` in the file on disk, root-relative when it can
 be; `null` with an `unmapped-location` caveat when the source map has no
 entry. `caveats[].kind` is closed: <!-- okf:gen mcp-caveat-kinds -->`unresolved-copybook`, `partial-parse`, `analyzer-failed`, `incomplete-analysis`, `ambiguous-name`, `duplicate-declaration`, `unmapped-location`, `program-unit-selected`<!-- /okf:gen -->.
@@ -273,9 +283,29 @@ bad severity) raises `ToolError`, which the SDK returns as an error result.
   with the bare class, `MCPContext`: `Context[...]` is not detected).
   `off_loop` sets `Workspace.progress` for that one call; `FactsStore._compute()`
   in `facts.py` reports `(done, total, "reading FILE")` per file, sent
-  through `anyio.from_thread.run(ctx.report_progress, ...)` at most once a
-  `PROGRESS_INTERVAL`. A listener that raises is dropped, never fails the
+  through `anyio.from_thread.run(ctx.report_progress, ..., token=...)` at
+  most once a `PROGRESS_INTERVAL`. The token is taken on the event loop in
+  `off_loop`: a call waiting on the warm-up thread's pooled build is
+  reported from that thread, which anyio did not start; the warm-up build
+  reports too (it used to compute with reporting off, so no progress was
+  ever sent while the first call waited on it). A listener that raises is dropped, never fails the
   build.
+- **Members read badly.** `_parse()` maps every lexer / parser problem's
+  line (`_member_diagnostics()`: `ParseError.line_number`, or "line N" in a
+  warning) through the source map; each COPY member one lands in gets an
+  `incomplete-analysis` caveat ("copybook X was read with N lexer or parser
+  problem(s)", most often a member read in the wrong source format), and
+  `ParsedProgram.degraded_names` holds the data names its text declares
+  (`names_declared_in()`, read in both formats). `lint` withholds the
+  undefined-name findings about those names (`_without_degraded_undefined()`,
+  with a caveat); `record_layout` (not found) and `explain_symbol`
+  (undeclared) add `declared_in_degraded_copybook` and a `hint`
+  (`_degraded_declaration()`). `decode_record` compares the decoded
+  record's fields with the PICTURE entries of that record in the member's
+  text (`_missing_fields_caveat()`). The `partial-parse` caveat and the
+  "not expanded" warnings cite each line as `file:line` on disk
+  (`_describe_error()`, `_cite_expanded_lines()`), not as a line of the
+  expanded text past the end of the program.
 - **Report memo.** `ParsedProgram.report(name, unit, build)` keeps each
   analyzer report beside the parse, so `program_brief` and `callers_of`
   share one flow graph and the cache drops both together.

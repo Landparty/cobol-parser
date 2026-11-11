@@ -129,6 +129,41 @@ def _size(value: Any) -> int:
     return len(json.dumps(value, default=str, separators=(",", ":")))
 
 
+def wire_text(result: dict[str, Any]) -> str:
+    """The text copy of *result* the server sends beside its structured
+    copy: compact JSON, so the two together cost about twice the answer
+    rather than the three times a pretty-printed copy would."""
+    return json.dumps(result, default=str, separators=(",", ":"))
+
+
+def wire_size(result: dict[str, Any]) -> int:
+    """Bytes *result* costs on the wire: its ``structuredContent`` plus its
+    text copy, the latter once more JSON-escaped inside the response."""
+    return _size(result) + len(json.dumps(wire_text(result)))
+
+
+#: A string is shortened by the budget only when it is longer than this.
+_MIN_CUT_CHARS = 200
+
+
+def _strings(node: Any, path: str) -> Iterator[tuple[str, str, Any, Any]]:
+    """Every string under *node* as ``(dotted path, text, parent, key)``."""
+    if isinstance(node, dict):
+        for key, value in node.items():
+            sub = f"{path}.{key}" if path else str(key)
+            if isinstance(value, str):
+                yield sub, value, node, key
+            else:
+                yield from _strings(value, sub)
+    elif isinstance(node, list):
+        for number, value in enumerate(node):
+            sub = f"{path}[{number}]"
+            if isinstance(value, str):
+                yield sub, value, node, number
+            else:
+                yield from _strings(value, sub)
+
+
 def _lists(node: Any, path: str) -> Iterator[tuple[str, list[Any], Any, Any]]:
     """Every list under *node* as ``(dotted path, list, parent, key)``."""
     if isinstance(node, dict):
@@ -147,13 +182,19 @@ def fit_budget(result: dict[str, Any], max_bytes: int | None) -> dict[str, Any]:
     result fits in *max_bytes*, each cut recorded in ``truncated`` (with
     ``reason: "answer budget"``) like a ``limit`` cut. Lists are cut from
     the end, so an item that refers to an earlier one (``from_hit``) still
-    finds it. A list is never cut below one item; the result may then stay
-    over budget."""
-    if not max_bytes or _size(result) <= max_bytes:
+    finds it. A list is never cut below one item.
+
+    The size measured is the wire size (:func:`wire_size`): the structured
+    copy plus the text copy the server sends with it. When every list is
+    down to one item and the result is still over, the answer's longest
+    strings (source text, long descriptions) are halved in turn, each cut
+    recorded with ``shown_chars`` and ``total_chars``. Only what lies
+    outside the answer (caveats, program, hints) can then keep it over."""
+    if not max_bytes or wire_size(result) <= max_bytes:
         return result
     answer = result.get("answer")
     truncated: list[dict[str, Any]] = result.setdefault("truncated", [])
-    while _size(result) > max_bytes:
+    while wire_size(result) > max_bytes:
         candidates = [
             (_size(items), path, items, parent, key)
             for path, items, parent, key in _lists(answer, "")
@@ -177,4 +218,27 @@ def fit_budget(result: dict[str, Any], max_bytes: int | None) -> dict[str, Any]:
             entry["shown"] = keep
             entry["reason"] = "answer budget"
         parent[key] = items[:keep]
+    while wire_size(result) > max_bytes:
+        texts = [
+            (len(text), path, text, parent, key)
+            for path, text, parent, key in _strings(answer, "")
+            if len(text) > _MIN_CUT_CHARS
+        ]
+        if not texts:
+            break
+        _, path, text, parent, key = max(texts, key=lambda c: c[0])
+        keep = len(text) // 2
+        entry = next((t for t in truncated if t.get("field") == path), None)
+        if entry is None:
+            truncated.append(
+                {
+                    "field": path,
+                    "shown_chars": keep,
+                    "total_chars": len(text),
+                    "reason": "answer budget",
+                }
+            )
+        else:
+            entry["shown_chars"] = keep
+        parent[key] = text[:keep]
     return result

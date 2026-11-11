@@ -70,7 +70,6 @@ def slice_field(
     from .navigation import (
         _Lines,
         _procedure_of,
-        _statement_text,
         _statements_under,
         statement_verb,
     )
@@ -237,11 +236,7 @@ def slice_field(
             "paragraph": row.paragraph,
             "verb": row.verb,
             "role": row.role,
-            "text": (
-                _statement_text(lines.line(located["file"], located["line"]))
-                if located
-                else ""
-            ),
+            "text": (lines.text(located["file"], located["line"]) if located else ""),
         }
         if row.flows:
             entry["flows"] = sorted(row.flows)

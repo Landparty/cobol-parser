@@ -68,7 +68,13 @@ argparse's flat `{parse,batch,...}` block), then a quick start, the exit
 codes and where defaults come from. Every registered subcommand must sit in
 exactly one group (`tests/unit/cli/test_cli_help_overview.py`), so a new one
 needs a line there too. `<name> --help` shows flags,
-defaults and runnable examples. **Adding a single-file analyzer:** add an
+defaults and runnable examples: subparsers are built with
+`parser_class=SubcommandParser` (`cli/_help.py`), a plain
+`argparse.ArgumentParser` whose `format_help()` adds the
+`SUBCOMMAND_CONFIG_NOTE` (`--config` / `--no-config`). They used to inherit
+`TopLevelParser`, so every `<name> --help` printed the top-level overview.
+`mcp --help` lists every tool by group (`_mcp_tool_list()`, from
+`mcp/tool_groups.py`, so it needs no `[mcp]` extra). **Adding a single-file analyzer:** add an
 `AnalyzerCommand(help=..., examples=..., profiling=...)` entry to
 `ANALYZERS` in `cli/commands/analyze.py` and an `_add_analyzer(subparsers,
 "name")` line at its place in `_build_parser()`. Both build through

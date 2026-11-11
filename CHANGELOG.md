@@ -9,6 +9,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+* **MCP answers stay within `--max-answer-bytes`.** The budget measured
+  compact JSON while the server sent a pretty-printed text copy beside the
+  structured one, so a `codebase_overview` cut to 24 KB went out at about
+  52 KB. The text copy is now compact, the budget measures both copies as
+  sent, and an answer whose lists are down to one item has its longest
+  strings halved.
+* **MCP answers say when a copybook was read badly.** A member read in the
+  wrong source format lost its declarations with no caveat: `record_layout`
+  said not found, `explain_symbol` said undeclared, and `lint` reported
+  undefined names the member declares. Each such member now draws a caveat,
+  those undefined-name findings are withheld (with a caveat), the lookups
+  name the member, `decode_record` names the fields the layout is missing,
+  and parse errors are cited at the file and line on disk rather than a
+  line of the expanded text.
+* **`check_claims` `flows_to` confirms a group-to-group flow.** A group
+  MOVE reaches the group's children in the lineage, so the claim that the
+  group flows to the other group was called contradicted.
+* **MCP polish.** `serverInfo.version` is this package's version (it was
+  the MCP SDK's), `mcp --help` lists every tool and the `--config` /
+  `--no-config` flags, every subcommand's `--help` shows its own help (it
+  showed the top-level overview), progress notifications are sent while
+  the cross-program facts are read, and `find_statements` no longer keeps
+  the sequence area of a fixed-format line.
+
 * **NUL and control bytes in a copybook no longer stop expansion.** A member
   with raw bytes typed into its VALUE literals (low-values, printer control
   codes that survived the EBCDIC transfer) was refused as "Binary content

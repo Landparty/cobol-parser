@@ -115,6 +115,7 @@ class _Lines:
     def __init__(self, workspace: Workspace) -> None:
         self.workspace = workspace
         self._held: dict[str, list[str]] = {}
+        self._fixed: dict[str, bool] = {}
 
     def of(self, file: str) -> list[str]:
         if file not in self._held:
@@ -131,12 +132,29 @@ class _Lines:
         lines = self.of(file)
         return lines[number - 1] if 0 < number <= len(lines) else ""
 
+    def fixed(self, file: str) -> bool:
+        """Whether *file* is fixed-format, judged once over the whole file
+        (as the parse judges it), so a line whose columns 1-6 hold a change
+        tag (``Y2K``) loses them like any other."""
+        if file not in self._fixed:
+            from ..preprocess.copybook_expander import _looks_fixed_format
 
-def _statement_text(text: str) -> str:
+            self._fixed[file] = _looks_fixed_format("\n".join(self.of(file)))
+        return self._fixed[file]
+
+    def text(self, file: str, number: int) -> str:
+        """Line *number* of *file* as a row shows it (:func:`_statement_text`)."""
+        return _statement_text(self.line(file, number), fixed=self.fixed(file))
+
+
+def _statement_text(text: str, *, fixed: bool | None = None) -> str:
     """A source line as a row shows it: sequence and indicator areas off
-    (when the line looks fixed-format), blanks collapsed, at most
-    :data:`MAX_TEXT` characters."""
-    if len(text) > 7 and (text[:6].strip().isdigit() or not text[:6].strip()):
+    (in a fixed-format file -- *fixed*; when None, when the line itself
+    looks fixed-format), blanks collapsed, at most :data:`MAX_TEXT`
+    characters."""
+    if fixed is None:
+        fixed = text[:6].strip().isdigit() or not text[:6].strip()
+    if len(text) > 7 and fixed:
         text = text[7:72]
     text = " ".join(text.split())
     return text if len(text) <= MAX_TEXT else text[: MAX_TEXT - 1] + "…"
@@ -173,7 +191,7 @@ def statement_rows(
                 continue
             paragraph, section = _procedure_of(statement)
             ops = operands.get((location.line, type(statement).__name__), {})
-            text = _statement_text(lines.line(located["file"], located["line"]))
+            text = lines.text(located["file"], located["line"])
             tables = _sql_table_roles(statement, cursors)
             if tables:
                 ops = {k: set(v) for k, v in ops.items()}

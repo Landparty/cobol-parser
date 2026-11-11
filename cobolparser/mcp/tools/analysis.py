@@ -238,11 +238,40 @@ def _run_lint(
         )
     for caveat in report.caveats:
         response.caveat("incomplete-analysis", caveat)
+    findings = _without_degraded_undefined(parsed, report.findings, response)
     rank = {name: i for i, name in enumerate(SEVERITIES)}
     ordered = sorted(
-        enumerate(report.findings), key=lambda pair: (rank[pair[1].severity], pair[0])
+        enumerate(findings), key=lambda pair: (rank[pair[1].severity], pair[0])
     )
     return report, [f for _, f in ordered]
+
+
+def _without_degraded_undefined(
+    parsed: ParsedProgram, findings: list[Any], response: Response
+) -> list[Any]:
+    """*findings* less the undefined-name ones about a name that a COPY
+    member read badly declares (:attr:`ParsedProgram.degraded_names`): the
+    declaration is there on disk, the parse lost it. The drop is a caveat,
+    so the program is not reported clean either."""
+    if not parsed.degraded_names:
+        return findings
+    kept: list[Any] = []
+    dropped: dict[str, set[str]] = {}
+    for finding in findings:
+        member = parsed.degraded_names.get(str(finding.symbol or "").upper())
+        if finding.rule == "undefined-name" and member is not None:
+            dropped.setdefault(member, set()).add(str(finding.symbol))
+            continue
+        kept.append(finding)
+    for member, names in sorted(dropped.items()):
+        response.caveat(
+            "incomplete-analysis",
+            f"{len(names)} undefined-name finding(s) withheld "
+            f"({', '.join(sorted(names)[:5])}): {member} declares them, but "
+            "the parse read that member badly",
+            "fix how the member is read (its source format) to check those " "names",
+        )
+    return kept
 
 
 def _lint_summary(findings: list[Any]) -> dict[str, int]:
