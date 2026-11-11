@@ -20,6 +20,7 @@ from typing import Any
 from .._storage import (
     BINARY_USAGES,
     FLOAT_USAGES,
+    PICTURELESS_USAGES,
     POINTER_USAGES,
     is_known_usage,
     storage_size,
@@ -645,7 +646,28 @@ def flag_record_layout(record: CobolDataItem, layout: list[LayoutItem]) -> list[
     _flag_unknown_usage(layout, unresolved)
     _flag_partial_condition_values(layout, unresolved)
     _flag_unbounded_occurs(layout, unresolved)
+    _flag_pictureless_elementary(layout, unresolved)
     return unresolved
+
+
+def _flag_pictureless_elementary(
+    layout: list[LayoutItem], unresolved: list[str]
+) -> None:
+    """Say which elementary items have neither a PICTURE nor a usage that
+    sizes them (``05 JUNK.`` with no children): sized 0 bytes here and in
+    gen-data / decode alike. Typically a line the parse misread -- a
+    comment read as code -- rather than a real field."""
+    for entry in layout:
+        if (
+            entry.is_group
+            or entry.level in (66, 88)
+            or entry.picture
+            or (entry.usage or "DISPLAY").upper() in PICTURELESS_USAGES
+        ):
+            continue
+        unresolved.append(
+            f"{entry.qualified_name}: elementary item with no PICTURE; sized " "0 bytes"
+        )
 
 
 def _flag_unbounded_occurs(layout: list[LayoutItem], unresolved: list[str]) -> None:

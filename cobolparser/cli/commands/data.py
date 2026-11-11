@@ -903,10 +903,15 @@ def _build_gen_fixtures_parser(
     )
     p.add_argument(
         "--max-occurs",
-        type=int,
-        default=None,
-        metavar="N",
-        help="Cap the occurrences expanded per OCCURS table",
+        type=_fixtures_max_occurs,
+        default=GEN_FIXTURES_DEFAULT_MAX_OCCURS,
+        metavar="N|all",
+        help=(
+            "Cap the occurrences expanded per OCCURS table (default: "
+            f"{GEN_FIXTURES_DEFAULT_MAX_OCCURS}; 'all' expands every one). "
+            "Every scenario carries its own fixtures, so an uncapped "
+            "OCCURS 160 table multiplies the bundle by the scenario count"
+        ),
     )
     p.add_argument(
         "--scenarios",
@@ -935,9 +940,51 @@ def _build_gen_fixtures_parser(
         help="Exit 2 if the bundle has any unresolved boundary/argument",
     )
     _add_compact_arg(p)
+    p.add_argument(
+        "--pretty",
+        action="store_true",
+        help=(
+            "Indent the JSON bundle. gen-fixtures writes compact JSON by "
+            "default: a bundle runs to megabytes, and indentation alone "
+            "adds about a third"
+        ),
+    )
     _add_output_arg(p)
     _add_debug_lines_arg(p)
     p.set_defaults(func=_cmd_gen_fixtures)
+
+
+#: gen-fixtures' default ``--max-occurs``. Uncapped, one program with
+#: OCCURS 160 tables and 97 scenarios produced a 1.5 GB bundle.
+GEN_FIXTURES_DEFAULT_MAX_OCCURS = 10
+#: A bundle larger than this draws a warning naming the levers.
+GEN_FIXTURES_SIZE_WARNING_BYTES = 10 * 1024 * 1024
+
+
+def _fixtures_max_occurs(text: str) -> int | None:
+    """``--max-occurs``: a positive count, or ``all`` for no cap."""
+    if text.strip().lower() == "all":
+        return None
+    try:
+        value = int(text)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(
+            f"expected a positive number or 'all', got {text!r}"
+        ) from exc
+    return value
+
+
+def _capped_tables(ast: Any, cap: int | None) -> list[str]:
+    """Names of the OCCURS tables in *ast* with more occurrences than *cap*."""
+    if cap is None:
+        return []
+    names: list[str] = []
+    for item in ast.find_all_by_type("DataItem"):
+        occurs = getattr(item, "occurs_clause", None)
+        times = getattr(occurs, "max_times", None) if occurs is not None else None
+        if isinstance(times, int) and times > cap and item.name not in names:
+            names.append(item.name)
+    return names
 
 
 def _verification_reasons(verification: dict[str, Any]) -> list[str]:
@@ -1058,8 +1105,35 @@ def _cmd_gen_fixtures(args: argparse.Namespace) -> None:
             _fail(f"Cannot write output directory: {e}")
         return
 
-    _json_out(
+    capped = _capped_tables(ast, args.max_occurs)
+    if capped and args.max_occurs == GEN_FIXTURES_DEFAULT_MAX_OCCURS:
+        shown = ", ".join(capped[:5]) + (" ..." if len(capped) > 5 else "")
+        print(
+            f"note: {len(capped)} OCCURS table(s) capped at "
+            f"{args.max_occurs} occurrences by default ({shown}); pass "
+            "--max-occurs all to expand every occurrence",
+            file=sys.stderr,
+        )
+    pretty = bool(getattr(args, "pretty", False)) and not args.compact
+    text = json.dumps(
         {"source_file": args.file, **bundle.to_dict()},
-        args.compact,
-        getattr(args, "output", None),
+        indent=2 if pretty else None,
     )
+    if len(text) > GEN_FIXTURES_SIZE_WARNING_BYTES:
+        print(
+            f"warning: the bundle is {len(text) / (1024 * 1024):.1f} MB "
+            f"({len(bundle.scenarios)} scenario(s), each with its own "
+            "fixtures); --max-occurs, --rows and --scenarios happy make it "
+            "smaller",
+            file=sys.stderr,
+        )
+    output_path = getattr(args, "output", None)
+    if output_path:
+        try:
+            with open(output_path, "w", encoding="utf-8") as handle:
+                handle.write(text)
+                handle.write("\n")
+        except OSError as e:
+            _fail(f"Cannot write output file: {e}")
+    else:
+        print(text)

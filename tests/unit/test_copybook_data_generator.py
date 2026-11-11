@@ -378,7 +378,7 @@ class TestGeneration:
     def test_record_with_no_generatable_fields_raises(self):
         source = "01 ONLY-FILLER.\n  05 FILLER PIC X(4).\n"
         generator = CopybookDataGenerator(DataGeneratorOptions(rows=1, seed=1))
-        with pytest.raises(CopybookLayoutError, match="no generatable fields"):
+        with pytest.raises(CopybookLayoutError, match="generatable fields"):
             generator.generate_from_source(source)
 
 

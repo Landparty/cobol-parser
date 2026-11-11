@@ -26,8 +26,15 @@ class TestGenFixturesParser:
         assert args.format == "json"
         assert args.scenarios == "happy"
 
-    def test_max_occurs_flag_defaults_to_none(self):
+    def test_max_occurs_flag_defaults_to_ten(self):
+        # Uncapped, OCCURS 160 tables x 97 scenarios made a 1.5 GB bundle.
         args = _build_parser().parse_args(["gen-fixtures", FILE_OPERATIONS])
+        assert args.max_occurs == 10
+
+    def test_max_occurs_all_lifts_the_cap(self):
+        args = _build_parser().parse_args(
+            ["gen-fixtures", FILE_OPERATIONS, "--max-occurs", "all"]
+        )
         assert args.max_occurs is None
 
     def test_max_occurs_flag_parses(self):

@@ -316,6 +316,32 @@ RNG*: they are storage, not data, and reach the factory PICTURE-less, where
 the numeric path's 9-digit default would emit a random number that looks like
 data. Not drawing keeps the RNG stream of every other field unchanged.
 
+**FILLER draws nothing either** (`values._filler_without_content`): a FILLER
+with no VALUE, or a figurative fill (`SPACES`, `LOW-VALUES`, ...), returns
+`""` before any draw (`blank_rate` included) -- the record-image encoder
+writes its fill whatever the cell holds. A FILLER that owns level-88s is
+generated, but from a side stream seeded by `(seed state, row, column)`, and
+`encode_field` now writes its cell. Because `for_record_image()` always adds
+FILLER while the CSV defaults leave it out, a draw per FILLER used to shift
+every later value: the same seed gave different values in the CSV and the
+record image (405 of 906 copybooks in one checkout). Only a caller's own
+`--max-occurs` cap (which the record image lifts) still changes the stream.
+
+**PICTURE-less elementary items** that no usage sizes (`05 JUNK.` with no
+children, usually a misread line) are 0 bytes, `ALPHANUMERIC`, like
+`data-items` sizes them; the 9-digit fallback of `_digit_counts` stays only
+for `PICTURELESS_USAGES` (`_sized_by_usage`). `pictureless_field_caveats()`
+names them in gen-data's `caveats` and decode's, and
+`flag_record_layout` (`_flag_pictureless_elementary`) in `data-items`'
+`unresolved`. Before 2026-11-11 gen-data / decode sized them 9 bytes.
+
+**Default record:** with no `--record`, gen-data and decode use
+`first_generatable_record(records, options)` -- the first 01 that flattens
+to at least one field -- not the first 01 outright (an all-FILLER header
+failed with "no generatable fields" though later 01s qualified). With none
+generatable, gen-data names the records it tried and decode falls back to
+the first 01; a named record with no field lists the ones that have some.
+
 `COMP-1`/`COMP-2` do not go through `_format_number` at all — they carry no
 PICTURE to fit. `_float_value` draws one uniform over ±10,000 and hands it to
 `_render_float(value, single=...)`, which quantises through binary32 for a

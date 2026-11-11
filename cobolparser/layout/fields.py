@@ -10,7 +10,7 @@ from enum import StrEnum
 from typing import Any
 
 from .._literals import typed_literal_content, unquote_literal
-from .._storage import FLOAT_USAGES, storage_size
+from .._storage import FLOAT_USAGES, PICTURELESS_USAGES, storage_size
 from .._vocabulary import FIGURATIVE_CONSTANTS
 from ..models.data_items import (
     CobolDataItem,
@@ -1040,6 +1040,11 @@ def _classify(item: CobolDataItem, picture: PictureClause | None) -> FieldCatego
     return FieldCategory.ALPHANUMERIC
 
 
+def _sized_by_usage(usage: str | None) -> bool:
+    """Whether a PICTURE-less item's width comes from its usage alone."""
+    return (usage or "DISPLAY").upper() in PICTURELESS_USAGES
+
+
 def _is_signed(picture: PictureClause | None) -> bool:
     """True when the picture can hold a negative value.
 
@@ -1319,6 +1324,15 @@ def _flatten_into(
         size = (picture.size if picture and picture.size else 0) or max(
             1, integer_digits + decimal_digits
         )
+        if picture is None and not _sized_by_usage(item.usage):
+            # An elementary item with no PICTURE and a usage that gives it no
+            # width (``05 JUNK.``, usually a misread line): 0 bytes, as
+            # data-items sizes it. The nine-digit fallback above is only for
+            # INDEX / POINTER / floats; applied here it padded the record
+            # with 9 bytes per such item, so gen-data and decode disagreed
+            # with data-items on every later offset.
+            category = FieldCategory.ALPHANUMERIC
+            integer_digits = decimal_digits = size = 0
         out.append(
             FieldSpec(
                 name=item.layout_name,
@@ -1502,6 +1516,30 @@ def _occurrence_weight(item: CobolDataItem, opts: DataGeneratorOptions) -> int:
     if not children:
         return 1
     return sum(_occurrence_weight(child, opts) for child in children)
+
+
+def pictureless_field_caveats(fields: list[FieldSpec]) -> list[str]:
+    """One sentence naming the elementary fields sized 0 bytes because they
+    have no PICTURE and no usage that sizes them (``05 JUNK.``) -- the same
+    items ``data-items`` lists in ``unresolved``. Empty when there are none."""
+    names = sorted(
+        {
+            spec.qualified_name
+            for spec in fields
+            if spec.picture is None
+            and spec.size == 0
+            and not _sized_by_usage(spec.usage)
+        }
+    )
+    if not names:
+        return []
+    shown = ", ".join(names[:5]) + (
+        f" and {len(names) - 5} more" if len(names) > 5 else ""
+    )
+    return [
+        f"{len(names)} elementary item(s) have no PICTURE and are sized 0 bytes "
+        f"({shown}); a misread line in the copybook is the usual cause"
+    ]
 
 
 def occurs_expansion_caveats(

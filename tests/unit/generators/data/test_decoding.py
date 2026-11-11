@@ -638,7 +638,9 @@ def test_a_numeric_field_cut_short_is_an_error_not_a_value():
     "picture", ["S9(7) COMP-3", "S9(9) COMP", "S9(9) COMP-5", "COMP-2"]
 )
 def test_a_binary_field_cut_short_is_an_error_not_a_value(picture):
-    source = f"       01  R.\n           05  K PIC X.\n           05  N {picture}.\n"
+    source = (
+        f"       01  R.\n           05  K PIC X.\n           05  N PIC {picture}.\n"
+    )
     source = source.replace("PIC COMP-2", "COMP-2")
     view = build_record_views(parse_copybook_records(source)[0]).base
     fields = decode_record(view, b"K\x00\x01", EncodingOptions())

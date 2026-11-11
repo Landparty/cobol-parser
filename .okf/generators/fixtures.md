@@ -570,6 +570,15 @@ the group's first. Plain FILLERs keep `FILLER`. Pinned by
 
 ## Determinism, `unresolved`, callees, `write_csv_dir`
 
+**Bundle size (CLI).** Every scenario carries its own fixtures, so a program
+with OCCURS 160 tables and 97 scenarios made a 1.5 GB bundle. `gen-fixtures`
+therefore defaults `--max-occurs` to `GEN_FIXTURES_DEFAULT_MAX_OCCURS` (10;
+`--max-occurs all` lifts it) and notes on stderr which tables the default
+cut, writes compact JSON unless `--pretty`, and warns over
+`GEN_FIXTURES_SIZE_WARNING_BYTES` (10 MB). The library API
+(`ProgramFixtureGenerator`, mocky-mock's contract) is unchanged: its
+`DataGeneratorOptions.max_occurs` still defaults to `None`.
+
 **Per-boundary sub-seeds.** One `bundle.seed`. Each boundary derives its own
 `zlib.crc32(f"{scenario}|{category}|{key}".encode()) ^ bundle_seed`, feeding
 a fresh `random.Random`/`ValueFactory`. Deliberate: a single shared RNG

@@ -9,6 +9,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+* **The same seed gives the same values in the CSV and the record image.**
+  The record image always includes FILLER, and every FILLER drew values that
+  were then never written, shifting every later value. A FILLER whose bytes
+  no value changes now draws nothing (its CSV cell is empty, as written), and
+  a FILLER with level-88s draws from a stream of its own and is written.
+* **A PICTURE-less elementary item is 0 bytes in gen-data and decode too**,
+  as `data-items` sizes it, instead of a 9-digit number; all three now name
+  it.
+* **gen-data and decode default to the first record with generatable
+  fields**, not the first 01; a record with none lists the ones that have
+  some.
+
+### Changed
+
+* **`gen-fixtures` caps OCCURS tables at 10 occurrences by default**
+  (`--max-occurs all` expands every one; a note says which tables were cut)
+  and writes compact JSON unless `--pretty`. A bundle over 10 MB draws a
+  warning. Uncapped and pretty-printed, one program's bundle reached 1.5 GB.
+
 * **NUL and control bytes in a copybook no longer stop expansion.** A member
   with raw bytes typed into its VALUE literals (low-values, printer control
   codes that survived the EBCDIC transfer) was refused as "Binary content
