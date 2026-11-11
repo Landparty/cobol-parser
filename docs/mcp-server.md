@@ -82,8 +82,8 @@ cannot make arbitrary files readable. The boundary is:
   directory is ignored, unlike the CLI, which walks up to find one.
 - **Under a copybook directory outside `--root`** (a shared copy library),
   only copybook members are readable. A member is a file named with one of
-  the suffixes COPY resolution itself tries: `.cpy`, `.cbl`, `.cob` (any
-  case), or no suffix at all, since COPY resolves extensionless members and
+  the suffixes COPY resolution itself tries: `.cpy`, `.cbl`, `.cob`,
+  `.copy`, `.dcl` (any case), or no suffix at all, since COPY resolves extensionless members and
   mainframe downloads often have none. A file or subdirectory whose name
   starts with `.` is refused, so `.env` or `.git/` inside the library are not
   readable. Anything else there (`secret.txt`, `notes.md`) is refused with a

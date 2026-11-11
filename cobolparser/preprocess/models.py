@@ -244,7 +244,22 @@ class CopybookSearchPath:
 
     directories: list[str] = field(default_factory=list)
     extensions: list[str] = field(
-        default_factory=lambda: [".cpy", ".CPY", ".cbl", ".CBL", ".cob", ".COB", ""]
+        default_factory=lambda: [
+            ".cpy",
+            ".CPY",
+            ".cbl",
+            ".CBL",
+            ".cob",
+            ".COB",
+            # Copy libraries checked out of a PDS are also named ``.copy``,
+            # and DCLGEN members (``EXEC SQL INCLUDE DCLTAB``) are commonly
+            # kept as ``.dcl`` -- CardDemo's DCLTRTYP.dcl was never found.
+            ".copy",
+            ".COPY",
+            ".dcl",
+            ".DCL",
+            "",
+        ]
     )
     case_sensitive: bool = field(default_factory=get_default_case_sensitivity)
     max_nesting_depth: int = 100

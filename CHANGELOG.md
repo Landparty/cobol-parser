@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+* **COPY and `EXEC SQL INCLUDE` find `.copy` and `.dcl` members.** The
+  default copybook extensions stopped at `.cpy`, `.cbl` and `.cob`, so DCLGEN
+  members kept as `.dcl` (CardDemo `dcl/DCLTRTYP.dcl`) and `.copy` files were
+  never found, even with their folder on the path. `.cpy` still wins when a
+  member exists under several suffixes.
 * **Analyzer fixes from running every analyzer over the open-source
   corpus.** Clone digests no longer change when `DynamicCallAnalyzer` has
   annotated an EXEC CICS XCTL / LINK / LOAD first (`possible_values_incomplete`

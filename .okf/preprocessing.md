@@ -127,7 +127,10 @@ filled only with `preserve_source_locations=True`), `statistics`
 (`ExpansionStatistics`: `parse_time_ms`, `file_count`, `total_lines`,
 `peak_memory_bytes`, `warnings`, `total_bytes_processed`),
 `dropped_debug_lines`. `CopybookSearchPath` fields: `directories`,
-`extensions`, `case_sensitive`, `max_nesting_depth`, `max_file_size`,
+`extensions` (default `.cpy .CPY .cbl .CBL .cob .COB .copy .COPY .dcl .DCL`
+then `""`, tried in that order; `.copy`/`.dcl` cover PDS checkouts and
+DCLGEN members, pinned by
+`tests/regression/test_copybook_dcl_copy_extensions.py`), `case_sensitive`, `max_nesting_depth`, `max_file_size`,
 `max_total_size`, `max_cache_entries`, `encoding`, `encoding_errors`.
 
 ## Module map
