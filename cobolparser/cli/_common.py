@@ -593,6 +593,7 @@ def _parse_result_or_fail(args: argparse.Namespace) -> tuple[Any, Any]:
 
 
 _UNEXPANDED_COPY = re.compile(r"^COPY (\S+) was not expanded")
+_UNEXPANDED_SQL_INCLUDE = re.compile(r"^EXEC SQL INCLUDE (\S+) was not expanded")
 
 
 def _hint_unexpanded_copybooks(args: argparse.Namespace, result: Any) -> None:
@@ -603,6 +604,7 @@ def _hint_unexpanded_copybooks(args: argparse.Namespace, result: Any) -> None:
     copybooks was a warning inside the JSON, and an analyzer report silently
     covered less of the program than the user expected.
     """
+    _hint_unexpanded_sql_includes(args, result)
     names = []
     for warning in getattr(result, "warnings", None) or []:
         match = _UNEXPANDED_COPY.match(str(warning))
@@ -623,6 +625,32 @@ def _hint_unexpanded_copybooks(args: argparse.Namespace, result: Any) -> None:
     print(
         f"warning: {args.file}: {len(names)} copybook(s) not expanded "
         f"({shown}); {advice}",
+        file=sys.stderr,
+    )
+
+
+def _hint_unexpanded_sql_includes(args: argparse.Namespace, result: Any) -> None:
+    """Say on stderr when an ``EXEC SQL INCLUDE`` member could not be found.
+
+    Unlike a missing COPY member, a missing INCLUDE never fails the parse
+    (``SQLCA`` / ``SQLDA`` come from the precompiler, so the expander leaves
+    every unresolved INCLUDE as written), so this is the only sign that the
+    program was analyzed without the declarations it pulls in -- with or
+    without ``--copybook-path``.
+    """
+    names = []
+    for warning in getattr(result, "warnings", None) or []:
+        match = _UNEXPANDED_SQL_INCLUDE.match(str(warning))
+        if match and match.group(1) not in names:
+            names.append(match.group(1))
+    if not names:
+        return
+    shown = ", ".join(names[:5]) + (
+        f" and {len(names) - 5} more" if len(names) > 5 else ""
+    )
+    print(
+        f"warning: {args.file}: {len(names)} EXEC SQL INCLUDE member(s) not "
+        f"found ({shown}); their declarations are missing from the analysis",
         file=sys.stderr,
     )
 
