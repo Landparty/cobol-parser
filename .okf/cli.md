@@ -961,6 +961,16 @@ report (problems printed first), the start matches no declared item (report
 still printed with `"start_found": false`), or on an argument error. Files
 that failed while others parsed stay in `problems` only.
 
+**Unexpanded copybooks are a caveat** (`_unresolved_copybook_caveat`): any
+file whose `FileScan` has `unexpanded_copybooks` or a `copybook_error` is
+named in one leading entry of the result's `caveats` (field-impact and
+widen-check alike: "copybooks not expanded in N program file(s): ... (members:
+...); field flows in those members are missing ..."), and a start that
+matches nothing adds the same text to the exit-1 error. Before, GenApp's
+`field-impact CA-CUSTOMER-NUM` reported 2 of 21 programs with nothing said;
+MCP `impact_of_change` already had the `unresolved-copybook` caveat. Pinned
+by `tests/regression/test_impact_unresolved_copybook_caveat.py`.
+
 ## diff, codebase-graph, copybook-impact, jcl, le-info
 
 Their arguments do not fit `_build_analyzer_parser`'s single-`file` shape, so

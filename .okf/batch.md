@@ -315,7 +315,10 @@ consumer can prove every file it handed over was accounted for.
   unparseable / parsed to nothing; a file with an error has no units and is
   listed under `failures`), `parse_error_count` (errors `COLLECT_ALL`
   recovered from — the grade is worth labelling, not dropping),
-  `copybook_error` (serialized only when set).
+  `copybook_error` (serialized only when set), `unexpanded_copybooks` (the
+  members the parser's "COPY / EXEC SQL INCLUDE X was not expanded" warnings
+  name, once each, in source order; every COPY when scanned with no
+  copybook path; serialized only when non-empty).
 * `UnitScan` — `program_name`, `depth` (the source nesting,
   `CobolProgram.nesting_depth`: 0 = outermost or stacked, 1 = nested in it,
   ..., #532), `reports: {analyzer: dict}`, `failed_analyzers: {analyzer:

@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+* **field-impact and widen-check say when copybooks were not expanded.** A
+  field reached only through a member that did not resolve was invisible, and
+  the report said nothing: on GenApp, `field-impact CA-CUSTOMER-NUM` listed 2
+  of the 21 programs with `problems: []`. Both commands now lead their
+  `caveats` with the program files and members that were not expanded (as
+  MCP `impact_of_change` already did), and a field found nowhere says it may
+  be declared in one of them. `FileScan` gains `unexpanded_copybooks`.
 * **Analyzer fixes from running every analyzer over the open-source
   corpus.** Clone digests no longer change when `DynamicCallAnalyzer` has
   annotated an EXEC CICS XCTL / LINK / LOAD first (`possible_values_incomplete`
