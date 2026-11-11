@@ -127,7 +127,10 @@ filled only with `preserve_source_locations=True`), `statistics`
 (`ExpansionStatistics`: `parse_time_ms`, `file_count`, `total_lines`,
 `peak_memory_bytes`, `warnings`, `total_bytes_processed`),
 `dropped_debug_lines`. `CopybookSearchPath` fields: `directories`,
-`extensions`, `case_sensitive`, `case_fallback`, `max_nesting_depth`, `max_file_size`,
+`extensions` (default `.cpy .CPY .cbl .CBL .cob .COB .copy .COPY .dcl .DCL`
+then `""`, tried in that order; `.copy`/`.dcl` cover PDS checkouts and
+DCLGEN members, pinned by
+`tests/regression/test_copybook_dcl_copy_extensions.py`), `case_sensitive`, `case_fallback`, `max_nesting_depth`, `max_file_size`,
 `max_total_size`, `max_cache_entries`, `encoding`, `encoding_errors`.
 
 ## Module map
@@ -605,7 +608,13 @@ exponentially on unterminated REPLACING).
   `sql_include=True` (`_EXEC_SQL_TAIL_RE` anchors the span at `EXEC`) as
   `CopyStatement(sql_include=True)`. The expander turns it on and leaves the
   statement as written on `CopybookNotFoundError` (SQLCA/SQLDA come from the
-  precompiler); `strip_unexpanded_copy_statements` keeps it off. The codebase
+  precompiler). Any member outside `models.PRECOMPILER_MEMBERS` also gets an
+  "EXEC SQL INCLUDE X was not expanded: ...; the statement was left as
+  written" warning in `statistics.warnings` (it reaches `ParseResult.warnings`),
+  and the CLI analyzers print one stderr line naming the members
+  (`_hint_unexpanded_sql_includes`), with or without `--copybook-path`.
+  Pinned by `tests/regression/test_missing_sql_include_warns.py`.
+  `strip_unexpanded_copy_statements` keeps it off. The codebase
   graph sees INCLUDE edges through `extract_copy_statements(...,
   sql_include=True)` (#295).
 * **`skip_missing_copybooks=True`** (`expand_copybooks`,

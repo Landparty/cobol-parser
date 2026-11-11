@@ -208,7 +208,7 @@ bad severity) raises `ToolError`, which the SDK returns as an error result.
   accepts anything under the root and, under a kept copybook directory
   outside the root (`_outside`), only a *member* (`_member_of`): suffix in
   `COPYBOOK_MEMBER_SUFFIXES` (lower-cased `CopybookSearchPath().extensions`:
-  `.cpy`, `.cbl`, `.cob`, `""`) and no dot-named component below the
+  `.cpy`, `.cbl`, `.cob`, `.copy`, `.dcl`, `""`) and no dot-named component below the
   directory. A non-member there gets "not a copybook member"; anything else
   "outside the workspace". The index walk (`program_files()`,
   `files_named()`) applies the same `_within()`, so a symlink out of the
