@@ -22,6 +22,7 @@ from .._lines import split_source_lines
 from .._source_directive import free_format_flags, source_format_directive
 from .normalize import (
     ALL_COMMENT_INDICATORS,
+    COMMENT_INDICATORS,
     DEBUG_INDICATORS,
     INDICATOR_COL,
     TEXT_END_COL,
@@ -89,6 +90,27 @@ def _sequence_area_is_fixed_like(seq_area: str) -> tuple[bool, bool]:
     if _CHANGE_TAG_RE.match(stripped):
         return False, True
     return False, False
+
+
+def _is_column7_comment(line: str) -> bool:
+    """A ``*`` / ``/`` comment line, whatever its columns 1-6 hold.
+
+    IBM never reads the sequence area, so a comment line is a comment even
+    when columns 1-6 hold a banner (``*******...`` typed from column 1) or a
+    change note with blanks in it (``CR 12 *``). Neither shape is a valid
+    free-format line, where a comment is ``*>``. Judging these lines by
+    their sequence area alone made a member that opens with such a banner
+    look free-form: its column-7 comment lines were then spliced in as code
+    and a comment such as ``* MOVE THE TOTAL`` failed with "MOVE statement
+    requires TO". ``*>`` lines are left to the ordinary rule: an indented
+    free-format comment also has its ``*`` in column 7.
+    """
+    return (
+        len(line) >= 7
+        and line[6] in COMMENT_INDICATORS
+        and not line.lstrip().startswith("*>")
+        and not line.startswith("*>", 6)
+    )
 
 
 def _is_numbered_blank_line(line: str) -> bool:
@@ -251,6 +273,11 @@ def detect_fixed_format(source: str) -> bool:
             if _is_numbered_blank_line(line):
                 strict_hits += 1
                 relaxed_hits += 1
+            continue
+
+        if _is_column7_comment(line):
+            strict_hits += 1
+            relaxed_hits += 1
             continue
 
         seq_area = line[:6]

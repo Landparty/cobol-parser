@@ -403,6 +403,17 @@ hatch is in [cli.md](cli.md).
   was skipped but still counted in the sample, so a copybook with a few in
   its banner was judged free-form and its comment lines reached the lexer
   (`Invalid character: #`, `tests/regression/test_numbered_blank_copybook_lines.py`).
+* **Column-7 comment lines count whatever columns 1-6 hold**
+  (`_is_column7_comment`): a `*` / `/` in column 7 is a strict hit even when
+  the sequence area is a column-1 asterisk banner (`*******...`) or a change
+  note with blanks (`CR 12 *`); neither is a valid free-format line. `*>`
+  lines are excluded (an indented free-format comment has its `*` in column
+  7 too). `_looks_fixed_format()`'s short-member path skips them the same
+  way. Before 2026-11-11 a member opening with such a banner was judged
+  free-form and its column-7 comments were spliced in as code (`* MOVE THE
+  TOTAL` -> "MOVE statement requires TO"); a program opening with one was
+  not normalized at all
+  (`tests/regression/test_copybook_control_bytes_and_banners.py`).
 * **Rule 2 (change tags `SAPR24`, `28486`, `JSINT` in columns 1-6):** a
   tag-like sequence area (`_sequence_area_is_fixed_like`, `_CHANGE_TAG_RE`:
   one unbroken `[A-Za-z0-9#@$][A-Za-z0-9_/#@$.-]*` token -- no internal
@@ -717,9 +728,17 @@ one) and builds a new one only for `None`; the supplied resolver's
 ### Content validation
 
 `validate_copybook_content(content, ..., raw_content=None,
-indicator_position=6)` raises `CopybookSyntaxError` only for NUL bytes;
-everything else is a warning, shown to users in the COBOL Analyzer's
-expanded-listing banner, so false positives matter.
+indicator_position=6)` raises `CopybookSyntaxError` only for binary
+content: NUL / C0 control bytes (`_CONTROL_BYTE_RE`, tab, LF, CR and FF
+excepted) making up more than half of the non-blank characters. Fewer draw a
+warning naming the lines (`_control_byte_lines`, first 10 listed): raw bytes
+typed into VALUE literals survive an EBCDIC transfer as control characters,
+IBM compiles them, and the lexer keeps them in a literal and skips them with a
+warning elsewhere. Before 2026-11-11 any NUL refused the member and stopped
+the whole program's expansion
+(`tests/regression/test_copybook_control_bytes_and_banners.py`). Everything
+else is a warning, shown to users in the COBOL Analyzer's expanded-listing
+banner, so false positives matter.
 
 * **Missing period is judged per entry** (`_unterminated_data_entries`): an
   entry runs from a `_DATA_ENTRY_START_RE` match to the next entry, an `EXEC`
@@ -1031,7 +1050,7 @@ so `except ParseError` does not catch them:
 | `NestingDepthError` | COPY nesting exceeds configured limit |
 | `CopybookSizeExceededError` | One copybook exceeds `max_file_size` |
 | `TotalExpansionSizeExceededError` | The whole expansion exceeds `max_total_size` |
-| `CopybookSyntaxError` | `validate_copybook_content` finds binary content (NUL bytes); everything else it checks is a warning |
+| `CopybookSyntaxError` | `validate_copybook_content` finds binary content (mostly NUL/control bytes; a few only warn); everything else it checks is a warning |
 
 `LevelNumberMismatchWarning` is a `UserWarning`, not a `PreprocessingError`.
 `CopybookNotFoundError`, `PathTraversalError` and `CopybookSizeExceededError`

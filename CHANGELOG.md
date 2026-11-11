@@ -9,6 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+* **NUL and control bytes in a copybook no longer stop expansion.** A member
+  with raw bytes typed into its VALUE literals (low-values, printer control
+  codes that survived the EBCDIC transfer) was refused as "Binary content
+  detected (null bytes found)" and the program was not expanded at all. Such
+  members are now expanded with a warning naming the lines; the literal keeps
+  its bytes. Only content that is mostly NUL/control bytes is still refused.
+* **Comment lines after a column-1 asterisk banner stay comments.** A
+  copybook (or program) whose first lines are `*******...` typed from column
+  1, or whose comment lines carry blanks in columns 1-6, was judged
+  free-form: its column-7 comments were parsed as code, so a comment such as
+  `* MOVE THE TOTAL` failed with "MOVE statement requires TO".
+
 * **One missing copybook no longer stops the analysis.** `parse` and every
   single-file analyzer (`dead-code`, `xref`, `lineage`, `diff`, ...) now
   behave the way `lint` already did: the IBM-supplied CICS members DFHAID and

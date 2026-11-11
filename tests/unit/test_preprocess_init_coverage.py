@@ -611,13 +611,21 @@ class TestValidateCopybookContent:
         assert "is empty" in warnings[0].lower()
 
     def test_binary_content_raises(self):
-        """Test that binary content raises CopybookSyntaxError."""
-        content = "Some text\x00with null bytes"
+        """Content that is mostly NUL/control bytes raises CopybookSyntaxError."""
+        content = "AB\x00\x00\x00\x01\x02\x03"
 
         with pytest.raises(CopybookSyntaxError) as exc_info:
             validate_copybook_content(content, "/path/test.cpy")
 
         assert "Binary content" in str(exc_info.value)
+
+    def test_a_few_null_bytes_only_warn(self):
+        """A stray NUL in otherwise readable text is a warning, not an error."""
+        content = "Some text\x00with null bytes"
+
+        warnings = validate_copybook_content(content, "/path/test.cpy")
+
+        assert any("1 NUL or control byte(s) on line(s) 1" in w for w in warnings)
 
     def test_unbalanced_single_quotes(self):
         """Test detection of unbalanced single quotes."""

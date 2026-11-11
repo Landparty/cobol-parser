@@ -2257,6 +2257,23 @@ def preprocess_conditional_compilation(
     return "\n".join(result_lines)
 
 
+#: C0 control characters (and DEL) that are not layout: tab, line feed,
+#: carriage return and form feed are ordinary source text.
+_CONTROL_BYTE_RE = re.compile(r"[\x00-\x08\x0b\x0e-\x1f\x7f]")
+
+
+def _control_byte_lines(content: str) -> dict[int, int]:
+    """1-based line number -> count of NUL/control bytes on that line."""
+    if not _CONTROL_BYTE_RE.search(content):
+        return {}
+    counts: dict[int, int] = {}
+    for number, line in enumerate(split_source_lines(content), start=1):
+        hits = len(_CONTROL_BYTE_RE.findall(line))
+        if hits:
+            counts[number] = hits
+    return counts
+
+
 def validate_copybook_content(
     content: str,
     copybook_path: str,
@@ -2295,7 +2312,8 @@ def validate_copybook_content(
         List of warning messages (empty if no issues)
 
     Raises:
-        CopybookSyntaxError: For fatal syntax issues like binary content
+        CopybookSyntaxError: When the content is binary (mostly NUL or
+            control bytes); a few such bytes only draw a warning
     """
     warnings = []
 
@@ -2317,10 +2335,32 @@ def validate_copybook_content(
     if not lines:
         warnings.append(f"Copybook '{copybook_path}' contains only comments")
 
-    # Check for binary content indicators
-    if "\x00" in content:
-        raise CopybookSyntaxError(
-            copybook_path, "Binary content detected (null bytes found)"
+    # NUL and other control bytes. A mainframe member often carries raw
+    # bytes typed into an alphanumeric literal (``VALUE '<X'00'>'``, a
+    # low-value or a printer control code) that survive the EBCDIC -> ASCII
+    # transfer as C0 control characters. IBM compiles them, and the lexer
+    # keeps them inside a literal and skips them (with a warning) anywhere
+    # else, so they are reported here and expansion goes on. Only content
+    # that is mostly control bytes -- an object module or other binary file
+    # saved under a copybook name -- is refused.
+    control_lines = _control_byte_lines(content)
+    if control_lines:
+        control_count = sum(control_lines.values())
+        non_blank = sum(1 for ch in content if not ch.isspace())
+        if control_count * 2 > non_blank:
+            raise CopybookSyntaxError(
+                copybook_path,
+                f"Binary content detected ({control_count} of {non_blank} "
+                "non-blank characters are NUL or control bytes)",
+            )
+        shown = ", ".join(str(n) for n in list(control_lines)[:10])
+        more = (
+            "" if len(control_lines) <= 10 else f" and {len(control_lines) - 10} more"
+        )
+        warnings.append(
+            f"Copybook '{copybook_path}' contains {control_count} NUL or control "
+            f"byte(s) on line(s) {shown}{more}; kept as written (inside a "
+            "literal they are part of its value, elsewhere the lexer skips them)"
         )
 
     # Check for unbalanced quotes (simple check). Quotes are counted per
