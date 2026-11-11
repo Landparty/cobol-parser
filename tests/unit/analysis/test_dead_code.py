@@ -2457,6 +2457,61 @@ class TestFallThroughEdges:
             ("2000-A", "2000-B"),
         }
 
+    def test_thru_range_end_does_not_run_on_under_its_perform(self) -> None:
+        # C6 of the 2026-11 corpus review: a GO TO onto the range end from
+        # inside the range is the range's early exit, so the end returns and
+        # the next paragraph is not entered.
+        edges = self._edges("""\
+       0000-MAIN.
+           PERFORM 1000-INIT THRU 1000-EXIT
+           PERFORM 2000-PROC
+           STOP RUN.
+       1000-INIT.
+           IF 1 = 1 GO TO 1000-EXIT.
+           DISPLAY 'I'.
+       1000-EXIT.
+           EXIT.
+       2000-PROC.
+           DISPLAY 'P'.
+""")
+        assert ("1000-EXIT", "2000-PROC") not in edges
+
+    def test_thru_range_end_runs_on_when_its_start_is_performed_alone(
+        self,
+    ) -> None:
+        # The same paragraph also PERFORMed without THRU: its GO TO 1000-EXIT
+        # then leaves the active range, nothing returns at 1000-EXIT, and
+        # control really runs on into 2000-PROC.
+        edges = self._edges("""\
+       0000-MAIN.
+           PERFORM 1000-INIT THRU 1000-EXIT
+           PERFORM 1000-INIT
+           STOP RUN.
+       1000-INIT.
+           IF 1 = 1 GO TO 1000-EXIT.
+           DISPLAY 'I'.
+       1000-EXIT.
+           EXIT.
+       2000-PROC.
+           DISPLAY 'P'.
+""")
+        assert ("1000-EXIT", "2000-PROC") in edges
+
+    def test_thru_range_end_runs_on_inside_a_longer_range(self) -> None:
+        edges = self._edges("""\
+       0000-MAIN.
+           PERFORM 1000-INIT THRU 1000-EXIT
+           PERFORM 1000-INIT THRU 2000-PROC
+           STOP RUN.
+       1000-INIT.
+           DISPLAY 'I'.
+       1000-EXIT.
+           EXIT.
+       2000-PROC.
+           DISPLAY 'P'.
+""")
+        assert ("1000-EXIT", "2000-PROC") in edges
+
     def test_not_serialized(self) -> None:
         report = DeadCodeReport(fall_through_edges={("A", "B")})
         assert "fall_through_edges" not in report.to_dict()

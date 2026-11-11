@@ -779,6 +779,26 @@ FLOWT = """\
            DISPLAY 'DEAD'.
 """
 
+RANGE_END_GOTO = """\
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. RANGEGO.
+       DATA DIVISION.
+       WORKING-STORAGE SECTION.
+       01  WS-A  PIC X.
+       PROCEDURE DIVISION.
+       0000-MAIN.
+           PERFORM 1000-INIT THRU 1000-EXIT
+           PERFORM 1000-INIT
+           GOBACK.
+       1000-INIT.
+           IF WS-A = 'B' GO TO 1000-EXIT.
+           DISPLAY WS-A.
+       1000-EXIT.
+           EXIT.
+       2000-PROC.
+           DISPLAY 'P'.
+"""
+
 AFTER_PERFORMED = """\
        IDENTIFICATION DIVISION.
        PROGRAM-ID. AFTERP.
@@ -941,6 +961,31 @@ class TestCallersOf:
         assert dead["reachable"] is False
         assert dead["caller_count"] == 0
         assert "5000-DEAD" in line_of(root, dead["declared_at"])
+
+    def test_fall_through_out_of_a_thru_range_end_says_why(self, root: Path) -> None:
+        # C6 of the 2026-11 corpus review: a range end listed as a caller of
+        # the next paragraph looked wrong without the GO TO that causes it.
+        (root / "RANGEGO.cbl").write_text(RANGE_END_GOTO)
+        tools = tools_for(root)
+        [proc] = tools.callers_of("RANGEGO.cbl", "2000-PROC")["answer"]["procedures"]
+        [caller] = proc["callers"]
+        assert caller["from"] == "1000-EXIT"
+        assert caller["type"] == "FALL_THROUGH"
+        assert "ends a PERFORM ... THRU range" in caller["note"]
+        assert caller["entered_by_goto"] == [
+            {"from": "1000-INIT", "location": {"file": "RANGEGO.cbl", "line": 12}}
+        ]
+
+    def test_no_caller_from_a_thru_range_end_under_its_perform(
+        self, root: Path
+    ) -> None:
+        source = RANGE_END_GOTO.replace(
+            "           PERFORM 1000-INIT\n", "           PERFORM 2000-PROC\n"
+        )
+        (root / "RANGEOK.cbl").write_text(source)
+        tools = tools_for(root)
+        [proc] = tools.callers_of("RANGEOK.cbl", "2000-PROC")["answer"]["procedures"]
+        assert [c["type"] for c in proc["callers"]] == ["PERFORM"]
 
     def test_paragraph_after_a_performed_one_is_unreachable(self, root: Path) -> None:
         # Issue #486: the flow graph's fall-through out of A-PARA (only ever

@@ -98,6 +98,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+* **`batch --copybook-path`.** `batch` took no copybook path, so every COPY
+  of a multi-file run went unexpanded (over a thousand warnings on one real
+  codebase). It now takes `--copybook-path` (and `project.copybook_path` from
+  `cobol.yml`) and expands through `parse_files_with_copybooks`. A missing
+  member is left as written; `--strict-copybooks` fails that file instead
+  (`copybook_error`, exit 2). Each entry lists `unexpanded_copybooks`, with
+  or without `--errors`, and stderr says how many files have them.
+* **`gen-fixtures` and `expand` finish without a missing copybook.** Both
+  failed the whole program (exit 1) on one missing member. They now work like
+  the analyzers: the member is left out, and `--strict-copybooks` restores
+  exit 1. `gen-fixtures` names each one in the bundle's `unresolved`, so
+  `--strict` still exits 2 on it; `expand` lists them in
+  `unexpanded_copybooks`. Both print a warning on stderr.
+  `ProgramFixtureGenerator.analyze_from_file()` gains `strict_copybooks`
+  (default True). `ProgramLayoutIndex.from_file(strict_copybooks=False)`
+  skips only the missing member instead of expanding nothing. Any COPY
+  missing from the layout, including when no copybook path is given, is now
+  an `unresolved` entry.
+* **`callers_of` explains a fall-through out of a THRU range end.** When the
+  exit paragraph of a `PERFORM ... THRU` range is listed as a caller of the
+  next paragraph, the caller now has a `note` saying why control can run on
+  (the exit is reached outside a PERFORM of the range). It also has
+  `entered_by_goto`, naming the GO TOs that land on the exit. The usual cause
+  is a paragraph PERFORMed without THRU that does `GO TO its-EXIT`.
+
 * **A written public API and one analyzer interface.** `docs/public-api.md`
   says what is semver-stable (the facade, whose list a test keeps equal to
   `cobolparser.__all__`; the stable subpackages) and what is internal.
@@ -382,6 +407,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `MCP_SURFACE_VERSION` stays "1".
 
 ### Changed
+
+* **Multi-file `lint` exits 2 when a file could not be linted.** That is the
+  code `scan`, `batch`, `codebase-graph` and `call-check` use when one file
+  of a multi-file run fails. It was 1, which elsewhere means "the CLI never
+  ran". One FILE that cannot be linted still exits 1, and `--fail-on` still
+  exits 3.
+* **`call-check` caps findings against a possible dynamic target at warning.**
+  The value set behind a dynamic `CALL identifier` includes every MOVE to the
+  identifier anywhere in the program. When that set names several programs,
+  a mismatch with any one of them is only possible: the finding now reads
+  `dynamic CALL (possible target 'X', one of N)`, carries `possible_targets`,
+  and is a warning instead of an error. Static and one-target CALLs are
+  unchanged.
 
 * **Record layout moved to `cobolparser.layout` (breaking).** Field specs,
   byte offsets, `ProgramLayoutIndex`, copybook record parsing, `ValueFactory`,

@@ -577,16 +577,21 @@ class ProgramFixtureGenerator:
         copybook_paths: list[str] | None = None,
         callee_paths: list[str] | None = None,
         debug_lines: bool = False,
+        strict_copybooks: bool = True,
     ) -> tuple[CobolProgram, ProgramLayoutIndex, BoundaryReport]:
         """Parse *path* and run Phases 1-2 without generating a bundle --
         the shared entry point behind both `generate_from_file` and the
         CLI's `--list-boundaries` (which has no use for generated values).
         ``debug_lines`` compiles ``D``-in-column-7 lines as code in the
-        program and in every callee parsed from ``callee_paths``."""
+        program and in every callee parsed from ``callee_paths``.
+        ``strict_copybooks=False`` builds the layout without a COPY member
+        that is not on ``copybook_paths`` instead of raising
+        :class:`ProgramLayoutError`; each one left out becomes an
+        ``unresolved`` entry (``ProgramLayoutIndex.from_file``)."""
         index = ProgramLayoutIndex.from_file(
             path,
             copybook_paths=copybook_paths,
-            strict_copybooks=True,
+            strict_copybooks=strict_copybooks,
             debug_lines=debug_lines,
         )
         assert index.ast is not None  # from_file() always sets it on success

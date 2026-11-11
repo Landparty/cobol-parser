@@ -23,8 +23,11 @@ _ALL_CBL = sorted(SHAMRICE_DIR.glob("*.cbl"))
 # report_test.cbl's FD names a Report Writer REPORT SECTION record (RD), not a
 # FILE SECTION 01 -- outside this index's scope (no REPORT SECTION support),
 # so its FD is expected to land in `unresolved` rather than resolve.
+# mouse_example.cbl COPYs GnuCOBOL's screenio, which is not in the corpus: a
+# COPY that never reached the layout is named in `unresolved`.
 _EXPECTED_UNRESOLVED = {
     "report_test.cbl": ["FD-REPORT-FILE"],
+    "mouse_example.cbl": ["COPY screenio was not expanded"],
 }
 
 

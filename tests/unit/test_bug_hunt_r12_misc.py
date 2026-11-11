@@ -61,7 +61,15 @@ def test_expand_missing_copybook_is_a_clean_error(
         _program("", data="       COPY MISSING.\n"),
         encoding="utf-8",
     )
-    code = _run_main(monkeypatch, "expand", str(src), "--copybook-path", str(tmp_path))
+    # Lenient by default now (C2); --strict-copybooks keeps the clean error.
+    code = _run_main(
+        monkeypatch,
+        "expand",
+        str(src),
+        "--copybook-path",
+        str(tmp_path),
+        "--strict-copybooks",
+    )
     err = capsys.readouterr().err
     assert code == 1
     assert "Copybook expansion failed" in err
