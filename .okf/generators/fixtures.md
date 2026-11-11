@@ -154,7 +154,12 @@ path string as literal, unparseable source text), a program that does not
 parse to an AST at all, or — in the default `strict_copybooks=True` mode — a
 COPY member `copybook_paths` cannot resolve (a layout with a hole in it is
 wrong, not partial). `strict_copybooks=False` downgrades the last case to an
-`unresolved` entry and falls back to parsing without expansion.
+`unresolved` entry and falls back to parsing without expansion. Any other
+expansion failure (a member refused by `validate_copybook_content` as
+binary -- `CopybookSyntaxError` -- or a circular COPY) still propagates as a
+`PreprocessingError`; the `gen-fixtures` CLI (both paths, including
+`--list-boundaries`) turns it into `error: Copybook expansion failed for
+<file>: ...` and exit 1 rather than a traceback (2026-11-11).
 `build()`/`from_file()` also stamp `index.ast` with the `CobolProgram` the
 index was built from, so a caller that kept only the index can reach the AST
 without re-parsing (`ProgramFixtureGenerator.generate_from_file` depends on

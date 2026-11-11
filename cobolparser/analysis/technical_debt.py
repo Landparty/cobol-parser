@@ -183,6 +183,7 @@ class TechnicalDebtAnalyzer:
         recursion_report: RecursionRiskReport | None = None,
         top_n: int = 5,
         parse_error_count: int = 0,
+        copybook_error: str | None = None,
     ) -> TechnicalDebtReport:
         """Analyze a COBOL program and compute its technical-debt score.
 
@@ -195,7 +196,11 @@ class TechnicalDebtAnalyzer:
         failed to parse hands over an AST with almost nothing in it, which
         scores as debt-free; when it is nonzero the score is still computed
         over what was recovered, but ``grade`` is ``None`` and ``caveats``
-        says why (#397).
+        says why (#397). *copybook_error* is why copybook expansion failed
+        when the caller fell back to an unexpanded parse (``scan``'s
+        ``copybook_error``): that parse is usually error-free, but it graded
+        a program without the declarations its members hold, so it withholds
+        the grade the same way.
         """
         ctx = ProgramContext.of(ast, flow=flow_report)
         ast = ctx.ast
@@ -244,11 +249,17 @@ class TechnicalDebtAnalyzer:
                 "score covers only what the parser recovered, so no grade "
                 "is given"
             )
+        if copybook_error:
+            caveats.append(
+                f"copybook expansion failed ({copybook_error}): the score "
+                "covers the program without its copybooks, so no grade is given"
+            )
+        graded = parse_error_count <= 0 and not copybook_error
 
         return TechnicalDebtReport(
             program_name=ast.program_name,
             score=score,
-            grade=_grade_for(score) if parse_error_count <= 0 else None,
+            grade=_grade_for(score) if graded else None,
             parse_error_count=max(0, parse_error_count),
             caveats=caveats,
             weights=weights,

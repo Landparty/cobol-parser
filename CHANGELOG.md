@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+* **`scan` no longer grades files that failed to parse.** Its `health` report
+  never received the parse-error count or the copybook expansion failure, so
+  a file the `health` subcommand leaves ungraded got a B, and one whose
+  copybooks failed to expand got an A with no caveat. The grade is now
+  withheld with a caveat, and the summary gains `degraded_file_count`.
+* **`gen-fixtures` reports a copybook that fails validation as `error: ...`
+  with exit 1**, not a `CopybookSyntaxError` traceback.
+
 * **NUL and control bytes in a copybook no longer stop expansion.** A member
   with raw bytes typed into its VALUE literals (low-values, printer control
   codes that survived the EBCDIC transfer) was refused as "Binary content

@@ -315,8 +315,11 @@ set. Pinned by `tests/unit/test_facts_cache.py`.
 `SCAN_VERSION` (currently `1`) is bumped whenever the document's shape
 changes; the COBOL Analyzer extension reads it before any other key.
 `summary` = `{file_count, scanned_file_count, failed_file_count,
-program_unit_count}`, and `file_count == scanned + failed` always — a
-consumer can prove every file it handed over was accounted for.
+degraded_file_count, program_unit_count}`, and `file_count == scanned +
+failed` always — a consumer can prove every file it handed over was
+accounted for. `degraded_file_count` counts the scanned files with a
+`parse_error_count` or a `copybook_error`; their `health` grade is withheld
+(`TechnicalDebtAnalyzer.analyze(parse_error_count=, copybook_error=)`).
 
 * `FileScan` — `path`, `units: list[UnitScan]`, `error` (unreadable /
   unparseable / parsed to nothing; a file with an error has no units and is
