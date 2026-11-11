@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+* **`DISPLAY X(I)(1:N)` keeps its reference modification.** The `(1:N)`
+  after a subscript was dropped, along with every DISPLAY item after it.
+
 * **NUL and control bytes in a copybook no longer stop expansion.** A member
   with raw bytes typed into its VALUE literals (low-values, printer control
   codes that survived the EBCDIC transfer) was refused as "Binary content
