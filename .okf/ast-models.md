@@ -778,7 +778,8 @@ Fields that are easy to miss, grouped by node.
   `add_after_clause(variable, from_value, by_value, until_condition=None)`
   (which registers the condition as a child); serialized only when non-empty.
   BY is optional (COBOL 2002, GnuCOBOL): omitted, `by_value` is `"1"` and the
-  statement's metadata carries `by_implied: True`.
+  phrase's clause dict (`varying_clause` or that `after_clauses` entry)
+  carries `"by_implied": True`.
 * `StopStatement.returning` — `STOP RUN RETURNING x` return code.
 
 **Data (`data.py`)**

@@ -20,10 +20,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   corpus.** Clone digests no longer change when `DynamicCallAnalyzer` has
   annotated an EXEC CICS XCTL / LINK / LOAD first (`possible_values_incomplete`
   was fingerprinted). `PERFORM VARYING ... FROM x UNTIL c` without `BY`
-  (COBOL 2002, GnuCOBOL) keeps its VARYING clause, with `BY 1` implied, so its
+  (COBOL 2002, GnuCOBOL) keeps its VARYING clause, with `BY 1` implied and
+  `"by_implied": true` on the phrase that omitted it, so its
   counter is no longer reported unused. A section-qualified ALTER target
   (`TO PROCEED TO P OF S2`) resolves to the named section in dead-code and
-  program-flow. The nested-OCCURS budget counts every field of a table, so a
+  program-flow. The nested-OCCURS budget counts every field of a table nested
+  in another (an outermost table still expands to the per-table cap), so a
   41-line program with `OCCURS 10` around `OCCURS 2200` of 47 fields lays out
   in 2 s, not 45. `InputDependenceAnalyzer`'s value pass also stops on a
   comparison budget, so an 8,000-line program finishes in 4 s, not over a
