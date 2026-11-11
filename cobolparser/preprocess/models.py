@@ -31,6 +31,11 @@ def get_default_case_sensitivity() -> bool:
 MAX_COPYBOOK_SIZE_BYTES = 10 * 1024 * 1024  # 10MB per copybook
 MAX_TOTAL_EXPANSION_BYTES = 100 * 1024 * 1024  # 100MB total expansion
 
+#: ``EXEC SQL INCLUDE`` members the DB2 precompiler supplies itself. An
+#: INCLUDE of one of them is expected not to resolve on a copybook path; any
+#: other member that does not resolve is reported as not expanded.
+PRECOMPILER_MEMBERS: frozenset[str] = frozenset({"SQLCA", "SQLDA"})
+
 
 @dataclass
 class ReplacingClause:
