@@ -255,6 +255,11 @@ Every pass preserves the line count, so token locations stay true to the source.
   any unit's SOURCE-COMPUTER is `WITH DEBUGGING MODE` (`_debugging_mode_on()`
   reads the CONFIGURATION section's `source_computer` metadata). Reset per parse
   in `_begin_parse`. Details in [preprocessing.md](../preprocessing.md).
+- **DATA DIVISION lost to a comment-entry.** `_warn_data_without_data_division()`
+  (after `parse_program()`) warns for each unit with no DATA DIVISION whose
+  IDENTIFICATION comment-entry metadata (`author` ... `remarks`) holds DATA
+  DIVISION / storage-section text (`_SWALLOWED_DATA_RE`): the declarations
+  were read as documentation and every data name is undefined.
 
 ## Multi-unit compilation units
 
