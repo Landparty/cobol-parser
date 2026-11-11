@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+* **COPY and `EXEC SQL INCLUDE` find `.copy` and `.dcl` members.** The
+  default copybook extensions stopped at `.cpy`, `.cbl` and `.cob`, so DCLGEN
+  members kept as `.dcl` (CardDemo `dcl/DCLTRTYP.dcl`) and `.copy` files were
+  never found, even with their folder on the path. `.cpy` still wins when a
+  member exists under several suffixes.
 * **A missing `EXEC SQL INCLUDE` member is reported.** The expander leaves an
   INCLUDE it cannot find as written, which is right for SQLCA and SQLDA (the
   precompiler supplies them) but hid every other member: a DCLGEN or a shared
