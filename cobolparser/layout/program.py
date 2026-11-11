@@ -295,10 +295,14 @@ class ProgramLayoutIndex:
         member that cannot be resolved raises :class:`ProgramLayoutError`
         when ``strict_copybooks`` is True (the default) -- a record layout
         with a hole in it is wrong, not partial. With
-        ``strict_copybooks=False`` the failure is recorded on
-        :attr:`unresolved` instead, and indexing falls back to parsing
-        without expansion (so unexpanded COPY statements contribute nothing
-        to the layout, rather than aborting it).
+        ``strict_copybooks=False`` a missing member is left out and every
+        other member is still expanded (the bundled DFHAID/DFHBMSCA
+        stand-ins are searched last); a circular COPY falls back to parsing
+        without any expansion.
+
+        Either way, each COPY that did not reach the layout (missing, or no
+        ``copybook_paths`` at all) is named on :attr:`unresolved`, so a
+        fixture bundle built from this index carries it as a caveat.
 
         ``debug_lines`` is ``parse_cobol``'s: compile fixed-format debugging
         lines (``D`` in column 7) as code, through copybook expansion too.
@@ -314,12 +318,18 @@ class ProgramLayoutIndex:
         if copybook_paths:
             with open(path, encoding="utf-8", errors="replace") as handle:
                 source = handle.read()
+            search_paths = list(copybook_paths)
+            if not strict_copybooks:
+                from ..preprocess._system_copybooks import with_system_copybooks
+
+                search_paths = with_system_copybooks(search_paths)
             try:
                 result = parse_cobol_with_expansion(
                     source,
                     filename=str(path),
-                    copybook_paths=list(copybook_paths),
+                    copybook_paths=search_paths,
                     debug_lines=debug_lines,
+                    skip_missing_copybooks=not strict_copybooks,
                 )
             except (CopybookNotFoundError, CircularReferenceError) as exc:
                 if strict_copybooks:
@@ -335,6 +345,7 @@ class ProgramLayoutIndex:
                     ) from exc
                 index = cls.build(result.ast)
                 index.unresolved.append(f"copybooks not expanded: {exc}")
+                index.unresolved.extend(_unexpanded_copy_notes(result.warnings))
                 return index
         else:
             result = parse_cobol(path, debug_lines=debug_lines)
@@ -347,6 +358,7 @@ class ProgramLayoutIndex:
             )
         index = cls.build(result.ast)
         index.source_map = getattr(result, "expansion_source_map", None)
+        index.unresolved.extend(_unexpanded_copy_notes(result.warnings))
         return index
 
     # -- public lookups ------------------------------------------------------
@@ -740,6 +752,25 @@ class ProgramLayoutIndex:
                 record_names=tuple(r.name for r in records),
                 record_type=record_type,
             )
+
+
+_UNEXPANDED_COPY = re.compile(r"^(COPY|EXEC SQL INCLUDE) (\S+) was not expanded")
+
+
+def _unexpanded_copy_notes(warnings: list[str] | None) -> list[str]:
+    """One ``unresolved`` note per COPY / ``EXEC SQL INCLUDE`` member the
+    parse left out (read off its "was not expanded" warnings)."""
+    notes: list[str] = []
+    for warning in warnings or []:
+        match = _UNEXPANDED_COPY.match(str(warning))
+        if match:
+            note = (
+                f"{match.group(1)} {match.group(2)} was not expanded; fields it declares "
+                "are missing from the layout"
+            )
+            if note not in notes:
+                notes.append(note)
+    return notes
 
 
 __all__ = [
