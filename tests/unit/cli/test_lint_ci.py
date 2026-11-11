@@ -248,7 +248,7 @@ class TestManyFiles:
         data = json.loads(capsys.readouterr().out)
         assert [f["program_id"] for f in data["files"]] == ["CLEAN"]
 
-    def test_unreadable_file_is_reported_and_exits_one(
+    def test_unreadable_file_is_reported_and_exits_two(
         self, estate: Path, capsys
     ) -> None:
         code = _exit_code(
@@ -258,7 +258,8 @@ class TestManyFiles:
         )
         captured = capsys.readouterr()
         data = json.loads(captured.out)
-        assert code == 1
+        # 2, as scan / batch exit when one file of a multi-file run failed.
+        assert code == 2
         assert data["summary"]["linted"] == 1
         [failure] = data["failures"]
         assert failure["source_file"].endswith("MISSING.cbl")
@@ -270,7 +271,7 @@ class TestManyFiles:
         code = _exit_code(
             str(bad), str(estate / "src" / "MISSING.cbl"), "--fail-on", "error"
         )
-        assert code == 1
+        assert code == 2
 
     def test_fail_on_any_file_exits_three(self, estate: Path) -> None:
         bad = estate / "src" / "BAD.cbl"

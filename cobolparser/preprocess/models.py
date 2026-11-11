@@ -333,6 +333,10 @@ class ExpansionContext:
     #: instead of failing the whole expansion
     #: (``expand_copybooks(skip_missing_copybooks=True)``).
     skip_missing: bool = False
+    #: ``"fixed"`` reads the main program and every member as fixed format
+    #: (``expand_copybooks(source_format="fixed")``, the ``--source-format
+    #: fixed`` / ``source_format: fixed`` setting); ``"auto"`` detects each.
+    source_format: str = "auto"
 
     # LRU management (OrderedDict provides O(1) move_to_end/popitem)
     max_cache_size: int = 512

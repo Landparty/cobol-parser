@@ -521,8 +521,13 @@ the rest of the line as one `COMMENT_ENTRY` token, verbatim. Area rules
 match the IDENTIFICATION parser's: a paragraph name at or left of the
 `IDENTIFICATION DIVISION` header's indentation (Area A) also claims every
 following line indented deeper (Area B) -- NIST OBNC1M's phony program
-included -- up to the next Area A line; one indented deeper claims only its
-own line. The whole scan is skipped unless one multiline regex search finds
+included -- up to the next Area A line, or to an Area B line opening with
+`COPY`, `EJECT`, `SKIP1-3` or `TITLE` (`_COMMENT_ENTRY_END_RE`: IBM processes
+those wherever they are written, so `DATE-COMPILED.` over an indented `COPY
+E1MDFRE1.` now copies the member instead of hiding its ENVIRONMENT and DATA
+DIVISIONs); one indented deeper claims only its own line. `CobolParser`
+warns when a unit has no DATA DIVISION but a comment-entry holds DATA
+DIVISION / storage-section text (`_warn_data_without_data_division`). The whole scan is skipped unless one multiline regex search finds
 a comment-entry paragraph name at a line start. The fixed-format
 (`free_form=False`) path does not do this; the parser always lexes normalized
 free-form text. `tests/regression/test_comment_entry_verbatim.py`.

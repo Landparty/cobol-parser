@@ -335,7 +335,10 @@ longer = info), `usage` (warning: storage class by `_USAGE_CLASS`, so COMP /
 COMP-4 / BINARY agree; then numeric vs alphanumeric DISPLAY), `returning`
 (warning, one side only). A callee with no USING has a zero-operand primary
 entry. Targets: a static name, every `possible_values` target of a dynamic
-CALL (an incomplete set is noted in `unchecked`), and a nested program by
+CALL (an incomplete set is noted in `unchecked`; a set of more than one
+name is flow-insensitive, so each finding against one of them gets
+`possible_targets`, the message `dynamic CALL (possible target 'X', one of
+N)` and severity capped at warning), and a nested program by
 COBOL scope (`nested_program_called`, graph id `OUTER/INNER`). A target
 declared in two files is not checked (noted).
 

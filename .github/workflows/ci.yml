@@ -57,4 +57,7 @@ jobs:
           python-version: ${{ matrix.python-version }}
           cache: pip
       - run: pip install -e ".[dev]"
+      # Graphviz renders the DOT outputs in tests/integration/test_dot_graphviz.py
+      # (skipped where `dot` is missing).
+      - run: sudo apt-get install -y --no-install-recommends graphviz
       - run: python -m pytest tests/ -q -p no:randomly -n auto

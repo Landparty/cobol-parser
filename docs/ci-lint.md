@@ -52,8 +52,8 @@ cobol-parser lint --changed-since origin/main --format github
 | Exit | Meaning |
 |------|---------|
 | 0 | every file linted; no finding reached `--fail-on` |
-| 1 | a file could not be read or parsed, the output could not be written, or git could not answer `--changed-since` |
-| 2 | bad arguments |
+| 1 | the one FILE given could not be read or parsed, the output could not be written, or git could not answer `--changed-since` |
+| 2 | bad arguments, or a file of a multi-file run could not be read or parsed (the others are still reported, as `scan` and `batch` do) |
 | 3 | a finding at or above `--fail-on` |
 
 ## Adopting the gate on an existing codebase
@@ -102,7 +102,8 @@ IBM's CICS copybooks `DFHAID` and `DFHBMSCA` are built in (searched after
 your `copybook_path`, so a real copy wins). Any other COPY lint cannot find
 is left out, the file is still linted, and the report's caveats name the
 member, since rules that needed its fields could not check them. Pass
-`--strict-copybooks` to fail such a file instead (exit 1).
+`--strict-copybooks` to fail such a file instead (exit 1 for one FILE, 2 in a
+multi-file run).
 
 ## The `line-length` rule
 
