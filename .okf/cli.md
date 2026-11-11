@@ -104,6 +104,11 @@ and origin-stamped.
   pass --copybook-path DIR ...` to stderr (`_hint_unexpanded_copybooks`):
   the parse still succeeds, and before this the only trace was a warning
   inside the JSON.
+* An `EXEC SQL INCLUDE` member that a copybook path does not resolve (other
+  than SQLCA / SQLDA) prints `warning: FILE: N EXEC SQL INCLUDE member(s) not
+  found (A); their declarations are missing from the analysis`
+  (`_hint_unexpanded_sql_includes`), since an unresolved INCLUDE never fails
+  the parse.
 * A closed stdout (`... | head`) exits **141** quietly, no `BrokenPipeError`.
 * CLI errors go through `_fail()`: one `error: ...` line on stderr, exit 1,
   never a traceback.

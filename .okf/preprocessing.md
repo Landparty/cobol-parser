@@ -608,7 +608,13 @@ exponentially on unterminated REPLACING).
   `sql_include=True` (`_EXEC_SQL_TAIL_RE` anchors the span at `EXEC`) as
   `CopyStatement(sql_include=True)`. The expander turns it on and leaves the
   statement as written on `CopybookNotFoundError` (SQLCA/SQLDA come from the
-  precompiler); `strip_unexpanded_copy_statements` keeps it off. The codebase
+  precompiler). Any member outside `models.PRECOMPILER_MEMBERS` also gets an
+  "EXEC SQL INCLUDE X was not expanded: ...; the statement was left as
+  written" warning in `statistics.warnings` (it reaches `ParseResult.warnings`),
+  and the CLI analyzers print one stderr line naming the members
+  (`_hint_unexpanded_sql_includes`), with or without `--copybook-path`.
+  Pinned by `tests/regression/test_missing_sql_include_warns.py`.
+  `strip_unexpanded_copy_statements` keeps it off. The codebase
   graph sees INCLUDE edges through `extract_copy_statements(...,
   sql_include=True)` (#295).
 * **`skip_missing_copybooks=True`** (`expand_copybooks`,

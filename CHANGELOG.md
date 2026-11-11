@@ -14,14 +14,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   members kept as `.dcl` (CardDemo `dcl/DCLTRTYP.dcl`) and `.copy` files were
   never found, even with their folder on the path. `.cpy` still wins when a
   member exists under several suffixes.
+* **A missing `EXEC SQL INCLUDE` member is reported.** The expander leaves an
+  INCLUDE it cannot find as written, which is right for SQLCA and SQLDA (the
+  precompiler supplies them) but hid every other member: a DCLGEN or a shared
+  COMMAREA layout vanished with no warning, and the analyzers read the program
+  without its declarations (GenApp `lgapdb01`: 54 undefined names in xref).
+  Such a member now adds a "was not expanded" warning to the parse result, and
+  the analyzer subcommands name it on stderr.
 * **Analyzer fixes from running every analyzer over the open-source
   corpus.** Clone digests no longer change when `DynamicCallAnalyzer` has
   annotated an EXEC CICS XCTL / LINK / LOAD first (`possible_values_incomplete`
   was fingerprinted). `PERFORM VARYING ... FROM x UNTIL c` without `BY`
-  (COBOL 2002, GnuCOBOL) keeps its VARYING clause, with `BY 1` implied, so its
+  (COBOL 2002, GnuCOBOL) keeps its VARYING clause, with `BY 1` implied and
+  `"by_implied": true` on the phrase that omitted it, so its
   counter is no longer reported unused. A section-qualified ALTER target
   (`TO PROCEED TO P OF S2`) resolves to the named section in dead-code and
-  program-flow. The nested-OCCURS budget counts every field of a table, so a
+  program-flow. The nested-OCCURS budget counts every field of a table nested
+  in another (an outermost table still expands to the per-table cap), so a
   41-line program with `OCCURS 10` around `OCCURS 2200` of 47 fields lays out
   in 2 s, not 45. `InputDependenceAnalyzer`'s value pass also stops on a
   comparison budget, so an 8,000-line program finishes in 4 s, not over a

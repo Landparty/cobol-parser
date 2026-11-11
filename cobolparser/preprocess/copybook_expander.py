@@ -44,6 +44,7 @@ from .copy_statement_parser import (
 from .models import (
     MAX_COPYBOOK_SIZE_BYTES,
     MAX_TOTAL_EXPANSION_BYTES,
+    PRECOMPILER_MEMBERS,
     CopybookExpansion,
     CopybookSearchPath,
     ExpansionContext,
@@ -1530,6 +1531,18 @@ def _expand_source_recursive(
                 # (SQLCA, SQLDA) or one the shop keeps elsewhere: leave the
                 # statement as written -- the parser handles it as the EXEC
                 # SQL statement it is -- rather than failing the expansion.
+                # Only the precompiler's own members are expected to be
+                # missing; any other name (a DCLGEN, a shared COMMAREA) was
+                # left out silently before, and every analyzer then read a
+                # program without its declarations with nothing to say so.
+                if (
+                    stats is not None
+                    and statement.member_name.upper() not in PRECOMPILER_MEMBERS
+                ):
+                    stats.warnings.append(
+                        f"EXEC SQL INCLUDE {statement.member_name} was not "
+                        f"expanded: {exc}; the statement was left as written"
+                    )
                 continue
             if context.skip_missing:
                 # One missing member must not cost every other one its
