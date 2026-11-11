@@ -155,6 +155,13 @@ never resolved — otherwise a member that only exists for the other branch
 (`COPY DFHAID` under `>>IF CICS DEFINED`) would push the whole file onto
 this fallback.
 
+`skip_missing_copybooks=True` (default False; `_CopybookJob` carries it)
+narrows the fallback to what it must cover: a member that cannot be found is
+left as written, every other member expands, the IBM stand-ins
+(`DFHAID`, `DFHBMSCA`) are searched last, and the warnings name the member;
+`copybook_error` is then only for a circular COPY or a limit.
+`CodebaseGraphBuilder` and `CallInterfaceChecker` pass it.
+
 Pinned by
 `tests/integration/test_batch_coverage_gaps.py::TestParseFilesWithCopybooksParseException`
 and `::TestParseFilesWithCopybooksDecodeError`.
@@ -356,7 +363,13 @@ consumer can prove every file it handed over was accounted for.
 not be scanned` on stderr, so a script gating on `$?` never reads "nothing
 scanned" as success. `scan_files()` itself is unchanged.
 
-**Copybook expansion failure degrades, as in `batch.py`.** The file falls
+**A missing member is skipped, not fatal.** `_parse` expands with
+`skip_missing_copybooks=True` and the IBM stand-ins searched last, so one
+missing member costs only itself; it is listed in
+`FileScan.unexpanded_copybooks`.
+
+**Copybook expansion failure degrades, as in `batch.py`.** When expansion
+fails outright (a circular COPY, a limit), the file falls
 back to the unexpanded parse and keeps the reason as
 `FileScan.copybook_error` (the unexpanded parse is usually error-free, so
 without it the reports would be indistinguishable from an expanded scan's).

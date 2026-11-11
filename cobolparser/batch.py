@@ -483,6 +483,7 @@ class _CopybookJob:
     prof_output: str | None
     debug_lines: bool
     max_file_bytes: int | None
+    skip_missing_copybooks: bool = False
 
 
 @dataclass
@@ -585,6 +586,7 @@ def _parse_one_with_copybooks(
             preserve_source_locations=True,
             source_file=path_str,
             debug_lines=job.debug_lines,
+            skip_missing_copybooks=job.skip_missing_copybooks,
         )
         expanded_source = expansion.expanded_source
         expansion_warnings = decode_warnings + list(
@@ -674,6 +676,7 @@ def parse_files_with_copybooks(
     debug_lines: bool = False,
     timeout_seconds: float | None = None,
     max_file_bytes: int | None = None,
+    skip_missing_copybooks: bool = False,
 ) -> list[BatchResult]:
     """Parse multiple COBOL files with shared copybook path resolution.
 
@@ -713,6 +716,11 @@ def parse_files_with_copybooks(
         max_file_bytes: Programs larger than this on disk are not read (a
             ``read_error`` starting ``"skipped:"``). Copybooks are not
             checked. None = no limit.
+        skip_missing_copybooks: Leave a COPY whose member cannot be found as
+            written (the result's warnings name it) and expand every other
+            member, with the bundled DFHAID/DFHBMSCA stand-ins searched last.
+            False (default): one missing member fails the file's expansion,
+            and the file is parsed with no COPY expanded (``copybook_error``).
 
     Returns:
         list[BatchResult] in input order.
@@ -732,6 +740,10 @@ def parse_files_with_copybooks(
     if not path_list:
         return []
 
+    if skip_missing_copybooks:
+        from cobolparser.preprocess._system_copybooks import with_system_copybooks
+
+        copybook_paths = with_system_copybooks(list(copybook_paths))
     job = _CopybookJob(
         copybook_paths=tuple(copybook_paths),
         error_recovery=error_recovery,
@@ -745,6 +757,7 @@ def parse_files_with_copybooks(
         prof_output=prof_output,
         debug_lines=debug_lines,
         max_file_bytes=max_file_bytes,
+        skip_missing_copybooks=skip_missing_copybooks,
     )
     prof_names = _prof_file_names(path_list)
 

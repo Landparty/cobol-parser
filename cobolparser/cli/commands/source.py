@@ -25,6 +25,7 @@ from .._common import (
     _do_parse,
     _fail,
     _get_error_recovery,
+    _hint_unexpanded_copybooks,
     _identification,
     _json_out,
     _limit_kwargs,
@@ -64,7 +65,7 @@ def _build_parse_parser(
     _add_source_format_args(p)
     _add_dialect_arg(p)
     _add_error_recovery_arg(p)
-    _add_copybook_args(p)
+    _add_copybook_args(p, strict_flag=True)
     _add_define_args(p)
     _add_output_arg(p)
     p.add_argument(
@@ -99,6 +100,7 @@ def _stats_dict(stats: Any) -> dict[str, Any]:
 
 def _cmd_parse(args: argparse.Namespace) -> None:
     result, prof = _do_parse(args)
+    _hint_unexpanded_copybooks(args, result)
 
     if result.ast is None:
         error_lines = [str(e) for e in result.errors]

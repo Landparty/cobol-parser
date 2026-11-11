@@ -638,8 +638,10 @@ def _parse(
     program's LINKAGE and WORKING-STORAGE are missing whatever its COPY
     members declare, so `unused-variables` (and therefore `health`'s
     redundancy component, and therefore the grade a portfolio table sorts
-    on) would grade a program against a record layout it cannot see. When
-    expansion fails the file is NOT dropped -- the unexpanded parse still
+    on) would grade a program against a record layout it cannot see. A
+    member that cannot be found is skipped (the rest still expand) and
+    reported through ``unexpanded_copybooks``. When expansion fails outright
+    (a circular COPY, a size limit) the file is NOT dropped -- the unexpanded parse still
     grades the procedure division correctly -- but the reason is appended
     to *expansion_failures*, which ``scan_one`` reports as the file's
     ``copybook_error``. (``parse_error_count`` cannot carry it: the
@@ -659,12 +661,18 @@ def _parse(
 
     if options.copybook_paths:
         from cobolparser.parser import parse_cobol_with_expansion
+        from cobolparser.preprocess._system_copybooks import with_system_copybooks
 
         try:
             return parse_cobol_with_expansion(
                 source,
                 path,
-                copybook_paths=list(options.copybook_paths),
+                # A missing member is left as written (and listed in the
+                # file's ``unexpanded_copybooks``) rather than costing every
+                # other member its expansion; DFHAID/DFHBMSCA fall back to
+                # the bundled stand-ins.
+                copybook_paths=with_system_copybooks(list(options.copybook_paths)),
+                skip_missing_copybooks=True,
                 # The expander evaluates the directives itself, so the
                 # symbols reach the members COPYd under them too.
                 defined_symbols=defines or None,

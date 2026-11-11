@@ -128,7 +128,8 @@ Verified against `python -m cobolparser <cmd> --help` on 2026-10-15. Order is
   (default), `--error-recovery {fail-fast,collect-all}` (default `collect-all`),
   `--copybook-path DIR`..., `--program NAME` (default: the outermost unit),
   `--define SYMBOL[=VALUE]`..., `--encoding ENC` (default: detected, #522),
-  `-o/--output FILE`.
+  `--strict-copybooks` (exit 1 on a missing COPY member instead of analyzing
+  without it), `-o/--output FILE`.
 * **+prof** — also `--profile`, `--profile-top-n N` (default 20; implies
   `--profile`), `--profile-output PATH` (implies `--profile`).
 * **dl** — `--debug-lines`/`--no-debug-lines` without `--source-format`.
@@ -371,9 +372,14 @@ Default `collect-all` (`ErrorRecoveryMode` via `_add_error_recovery_arg()` /
 
 `parse` and every analyzer go through `_do_parse()`. With copybook paths:
 `parse_cobol_with_expansion(..., process_conditionals=True,
-defined_symbols=...)`, so `--define` reaches `>>IF`s inside members; a
-missing or circular copybook is `error: Copybook expansion failed ...`
-(exit 1). Without: `--define` runs `preprocess_conditional_compilation()` on
+defined_symbols=...)`, so `--define` reaches `>>IF`s inside members. Unless
+`--strict-copybooks` (added by `_add_copybook_args(p, strict_flag=True)`), the
+parse is lenient: the IBM stand-ins (`DFHAID`, `DFHBMSCA`) are searched last
+and `skip_missing_copybooks=True`, so a missing member stays as written and
+`_hint_unexpanded_copybooks` names it on stderr ("N copybook(s) not expanded
+(...); not found on the copybook path ..."), exit 0. A circular COPY, or any
+missing member under `--strict-copybooks`, is `error: Copybook expansion
+failed ...` (exit 1). Without: `--define` runs `preprocess_conditional_compilation()` on
 the raw source (keeping `>>SOURCE FORMAT` directives for the normalizer),
 then `parse_cobol`. Conditional-compilation diagnostics (unknown `>>IF`
 conditions, stray `>>ELSE`/`>>END-IF`, malformed `>>DEFINE`, unclosed `>>IF`)
@@ -761,8 +767,8 @@ parse, one severity-graded finding list.
   severity filter, `_write_lint_baseline` records every file's findings
   (`baseline_document`, paths relative to FILE's folder) and then trims the
   reports for display; the run exits 0 whatever `--fail-on` says.
-* **Copybooks lint leniently** (`args._lenient_copybooks`, set by `_lint_one`
-  unless `--strict-copybooks`): `_do_parse` appends the IBM stand-ins
+* **Copybooks lint leniently** (as every `_do_parse` subcommand does unless
+  `--strict-copybooks`): `_do_parse` appends the IBM stand-ins
   (`preprocess/_system_copybooks.py`: `DFHAID`, `DFHBMSCA`, searched last)
   and passes `skip_missing_copybooks=True`; each member still missing is a
   caveat (`... the COPY was left as written; no rule saw what it declares`)

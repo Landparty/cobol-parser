@@ -142,7 +142,11 @@ def _add_error_recovery_arg(parser: argparse.ArgumentParser) -> None:
     )
 
 
-def _add_copybook_args(parser: argparse.ArgumentParser) -> None:
+def _add_copybook_args(
+    parser: argparse.ArgumentParser, strict_flag: bool = False
+) -> None:
+    """``--copybook-path``; with *strict_flag* also ``--strict-copybooks``,
+    for the subcommands that parse one file through :func:`_do_parse`."""
     parser.add_argument(
         "--copybook-path",
         action="append",
@@ -150,6 +154,15 @@ def _add_copybook_args(parser: argparse.ArgumentParser) -> None:
         metavar="DIR",
         help="Directory to search for copybooks (repeatable)",
     )
+    if strict_flag:
+        parser.add_argument(
+            "--strict-copybooks",
+            action="store_true",
+            help=(
+                "Fail (exit 1) when a COPY member cannot be found, instead of "
+                "analyzing the program without that member and warning"
+            ),
+        )
 
 
 def _add_program_arg(
@@ -458,12 +471,12 @@ def _do_parse(args: argparse.Namespace) -> tuple[Any, Any]:
     error_recovery = _get_error_recovery(args)
 
     copybook_paths = getattr(args, "copybook_path", [])
-    # lint finishes what it can rather than failing a file on one COPY: the
-    # IBM-supplied CICS members (DFHAID, DFHBMSCA) come from stand-ins when
-    # the search path lacks them, and any other missing member is left as
-    # written and named in the report's caveats (`--strict-copybooks` keeps
-    # the old exit-1 behaviour).
-    lenient_copybooks = bool(getattr(args, "_lenient_copybooks", False))
+    # Every single-file subcommand finishes what it can rather than failing
+    # a file on one COPY: the IBM-supplied CICS members (DFHAID, DFHBMSCA)
+    # come from stand-ins when the search path lacks them, and any other
+    # missing member is left as written and named on stderr (lint also names
+    # it in the report's caveats). `--strict-copybooks` keeps the old exit 1.
+    lenient_copybooks = not getattr(args, "strict_copybooks", False)
     if lenient_copybooks:
         from ..preprocess._system_copybooks import with_system_copybooks
 
@@ -583,15 +596,13 @@ _UNEXPANDED_COPY = re.compile(r"^COPY (\S+) was not expanded")
 
 
 def _hint_unexpanded_copybooks(args: argparse.Namespace, result: Any) -> None:
-    """Say on stderr when COPY statements were left out for want of a
-    copybook path.
+    """Say on stderr when COPY statements were left out, for want of a
+    copybook path or because the member is not on it.
 
-    Without ``--copybook-path`` the parse still succeeds, so the only trace
-    of the missing copybooks was a warning inside the JSON, and an analyzer
-    report silently covered less of the program than the user expected.
+    The parse still succeeds either way, so the only trace of the missing
+    copybooks was a warning inside the JSON, and an analyzer report silently
+    covered less of the program than the user expected.
     """
-    if getattr(args, "copybook_path", None):
-        return
     names = []
     for warning in getattr(result, "warnings", None) or []:
         match = _UNEXPANDED_COPY.match(str(warning))
@@ -602,9 +613,16 @@ def _hint_unexpanded_copybooks(args: argparse.Namespace, result: Any) -> None:
     shown = ", ".join(names[:5]) + (
         f" and {len(names) - 5} more" if len(names) > 5 else ""
     )
+    if getattr(args, "copybook_path", None):
+        advice = (
+            "not found on the copybook path; the analysis covers the program "
+            "without them (--strict-copybooks fails instead)"
+        )
+    else:
+        advice = "pass --copybook-path DIR or set project.copybook_path in cobol.yml"
     print(
-        f"warning: {args.file}: {len(names)} copybook(s) not expanded ({shown}); "
-        "pass --copybook-path DIR or set project.copybook_path in cobol.yml",
+        f"warning: {args.file}: {len(names)} copybook(s) not expanded "
+        f"({shown}); {advice}",
         file=sys.stderr,
     )
 

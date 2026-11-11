@@ -300,7 +300,7 @@ def _build_diff_parser(subparsers: argparse._SubParsersAction) -> None:
     _add_source_format_args(p)
     _add_dialect_arg(p)
     _add_error_recovery_arg(p)
-    _add_copybook_args(p)
+    _add_copybook_args(p, strict_flag=True)
     _add_define_args(p)
     _add_output_arg(p)
     p.set_defaults(func=_cmd_diff)

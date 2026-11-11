@@ -111,7 +111,9 @@ results into one graph with two kinds of edge:
   the expander, which skips *every* unresolvable INCLUDE silently: here a COPY
   of either, or an INCLUDE of any other missing member (a DCLGEN), is still
   reported -- once per member and referrer, even when one file both COPYs and
-  INCLUDEs it.
+  INCLUDEs it. A COPY of `DFHAID` / `DFHBMSCA` (`_CICS_SUPPLIED_MEMBERS`, the
+  bundled stand-ins) missing from the path is not reported either; the batch
+  parse expands it from the stand-in (`skip_missing_copybooks=True`).
 
 ```python
 from cobolparser.analysis.codebase import CodebaseGraphBuilder, CopybookImpactAnalyzer
