@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+* **`COPY LGCMAREA` finds `lgcmarea.cpy` on Linux.** Copybook lookup followed
+  the operating system's case sensitivity, so a checkout that keeps members in
+  lower case (IBM's GenApp and DBB samples) resolved on Windows and macOS but
+  failed on Linux and in CI: every analyzer exited 1 there, and field-impact
+  on GenApp found 2 of 21 programs. When nothing matches the member as written
+  or upper-cased, a file that differs only in letter case is now accepted
+  (`CopybookSearchPath.case_fallback`, default on; an exact match still wins).
 * **COPY and `EXEC SQL INCLUDE` find `.copy` and `.dcl` members.** The
   default copybook extensions stopped at `.cpy`, `.cbl` and `.cob`, so DCLGEN
   members kept as `.dcl` (CardDemo `dcl/DCLTRTYP.dcl`) and `.copy` files were
