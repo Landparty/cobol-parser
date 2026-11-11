@@ -877,7 +877,7 @@ def _build_gen_fixtures_parser(
         ),
     )
     p.add_argument("file", help="Path to the COBOL source file")
-    _add_copybook_args(p)
+    _add_copybook_args(p, strict_flag=True)
     p.add_argument(
         "--callee-path",
         action="append",
@@ -954,6 +954,24 @@ def _verification_reasons(verification: dict[str, Any]) -> list[str]:
     ] + list(verification.get("gaps", []))
 
 
+def _warn_unexpanded_copybooks(args: argparse.Namespace, unresolved: list[str]) -> None:
+    """One stderr line saying how many COPY members the layout was built
+    without (the bundle's `unresolved` names each one)."""
+    missing = [n for n in unresolved if " was not expanded; fields it declares" in n]
+    if not missing:
+        return
+    advice = (
+        "--strict-copybooks fails instead"
+        if args.copybook_path
+        else "pass --copybook-path DIR or set project.copybook_path in cobol.yml"
+    )
+    print(
+        f"warning: {args.file}: {len(missing)} copybook(s) not expanded; the "
+        f"fixtures cover the program without them (see unresolved; {advice})",
+        file=sys.stderr,
+    )
+
+
 def _cmd_gen_fixtures(args: argparse.Namespace) -> None:
     from ...generators.program_fixtures import ProgramFixtureGenerator
     from ...layout.errors import ProgramLayoutError
@@ -963,6 +981,10 @@ def _cmd_gen_fixtures(args: argparse.Namespace) -> None:
     copybook_paths = args.copybook_path or None
     callee_paths = args.callee_path or None
     debug_lines = bool(getattr(args, "debug_lines", False))
+    # Lenient by default, as the analyzers are: a missing COPY member is
+    # left out of the layout and named in the bundle's `unresolved` (so
+    # --strict still exits 2 on it); --strict-copybooks keeps the old exit 1.
+    strict_copybooks = bool(getattr(args, "strict_copybooks", False))
 
     if args.list_boundaries:
         try:
@@ -971,11 +993,13 @@ def _cmd_gen_fixtures(args: argparse.Namespace) -> None:
                 copybook_paths=copybook_paths,
                 callee_paths=callee_paths,
                 debug_lines=debug_lines,
+                strict_copybooks=strict_copybooks,
             )
         except ProgramLayoutError as exc:
             _fail(str(exc))
         except PreprocessingError as exc:
             _fail(f"Copybook expansion failed for {args.file}: {exc}")
+        _warn_unexpanded_copybooks(args, report.unresolved)
         _json_out(
             {
                 "source_file": args.file,
@@ -1014,6 +1038,7 @@ def _cmd_gen_fixtures(args: argparse.Namespace) -> None:
             copybook_paths=copybook_paths,
             callee_paths=callee_paths,
             debug_lines=debug_lines,
+            strict_copybooks=strict_copybooks,
         )
         bundle = generator.generate_with_scenarios(
             ast, index, report, mode=args.scenarios, seed=args.seed
@@ -1025,6 +1050,8 @@ def _cmd_gen_fixtures(args: argparse.Namespace) -> None:
         # found or expands circularly: one line and exit 1, as `parse` says
         # it, not a traceback.
         _fail(f"Copybook expansion failed for {args.file}: {exc}")
+
+    _warn_unexpanded_copybooks(args, bundle.unresolved)
 
     # Self-verification summary on stderr (stdout stays JSON-only -- see
     # mockymock's `fixtures` contract). A scenario named for a branch arm

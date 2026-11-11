@@ -59,6 +59,15 @@ _DIVISION_HEADER_RE = re.compile(
 )
 
 
+#: A compiler-directing statement opening an Area B line ends a comment-entry:
+#: IBM processes COPY, EJECT, SKIP1-3 and TITLE wherever they are written, so
+#: ``DATE-COMPILED.`` followed by an indented ``COPY E1MDFRE1.`` copies the
+#: member rather than documenting it.
+_COMMENT_ENTRY_END_RE = re.compile(
+    r"(?:COPY|EJECT|SKIP[123]|TITLE)(?=[ \t.]|$)", re.IGNORECASE
+)
+
+
 def _comment_entry_starts(source: str, lines: list[str]) -> dict[int, int]:
     """Map each free-form line index holding comment-entry text to the
     offset in that line where the text starts.
@@ -70,7 +79,9 @@ def _comment_entry_starts(source: str, lines: list[str]) -> dict[int, int]:
     Area A/B split ``normalize_fixed_format`` preserves) every following
     line indented into Area B is comment text too, up to the next Area A
     line. That includes division-header-shaped text: NIST OBNC1M embeds an
-    entire phony program inside a SECURITY comment-entry. A paragraph name
+    entire phony program inside a SECURITY comment-entry. A line opening
+    with ``COPY``, ``EJECT``, ``SKIP1-3`` or ``TITLE`` ends the entry too
+    (:data:`_COMMENT_ENTRY_END_RE`). A paragraph name
     indented deeper than the header (a loosely indented free-form source)
     contributes only its own line, exactly as the IDENTIFICATION DIVISION
     parser treats it.
@@ -88,7 +99,7 @@ def _comment_entry_starts(source: str, lines: list[str]) -> dict[int, int]:
             continue
         indent = len(body) - len(text)
         if in_area_b_entry:
-            if indent > header_indent:
+            if indent > header_indent and not _COMMENT_ENTRY_END_RE.match(text):
                 starts[index] = indent
                 continue
             in_area_b_entry = False
