@@ -235,7 +235,10 @@ what the outer ones leave, divided by the elementary items one occurrence
 holds (`_occurrence_weight`, each counted once) (`OCCURS 99999999` around
 `OCCURS 9999` is 10,000 x 10, not 10,000 x 9,999; `OCCURS 10` around
 `OCCURS 2200` of a 47-field group is 10 x 212, not the million FieldSpecs a
-per-item count allowed). `occurs_expansion_caveats(record, opts)` walks the
+per-item count allowed). The weight applies only inside another table: an
+outermost table answers to the per-table cap alone, so a single-level
+`OCCURS 4000` of 30 fields still expands whole and its record image keeps the
+length data-items reports. `occurs_expansion_caveats(record, opts)` walks the
 declarations (never the expansion) and names every table either ceiling
 cuts; a cut the caller asked for with `max_occurs` is not reported. It feeds
 `GeneratedDataset.caveats` (gen-data `warning:` lines),

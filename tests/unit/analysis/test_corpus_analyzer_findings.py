@@ -77,15 +77,19 @@ def test_perform_varying_without_by_implies_by_one() -> None:
     data = perform.to_dict()
     assert data["varying_clause"]["by_value"] == "1"
     assert data["after_clauses"][0]["by_value"] == "1"
-    assert perform.get_metadata("by_implied") is True
+    assert data["varying_clause"]["by_implied"] is True
+    assert data["after_clauses"][0]["by_implied"] is True
     unused = UnusedVariableAnalyzer().analyze(result.ast).to_dict()
     assert not unused["unused_variables"]
 
 
 def test_perform_varying_with_by_is_not_marked_implied() -> None:
     ast = _ast(VARYING_WITHOUT_BY.replace("FROM 1 UNTIL K", "FROM 1 BY 2 UNTIL K"))
-    perform = ast.find_all_by_type("PerformStatement")[0]
-    assert perform.to_dict()["varying_clause"]["by_value"] == "2"
+    data = ast.find_all_by_type("PerformStatement")[0].to_dict()
+    assert data["varying_clause"]["by_value"] == "2"
+    assert "by_implied" not in data["varying_clause"]
+    # Only the AFTER phrase omitted BY, and only it says so.
+    assert data["after_clauses"][0]["by_implied"] is True
 
 
 QUALIFIED_ALTER = """\
@@ -162,4 +166,20 @@ def test_occurs_budget_leaves_small_tables_whole() -> None:
     copybook = NESTED_TABLES.format(fields=fields).replace("2200", "20")
     record = parse_copybook_records(copybook)[0]
     assert len(flatten_record(record)) == 10 * 20 * 3
+    assert occurs_expansion_caveats(record) == []
+
+
+def test_a_single_level_table_is_not_weighted_by_its_fields() -> None:
+    """4,000 occurrences of 30 fields is 120,000 FieldSpecs, over the
+    nested-table budget, but an outermost table answers only to the
+    per-table cap: the record image keeps the length data-items reports."""
+    fields = "\n".join(f"          10 F{i} PIC X(2)." for i in range(30))
+    record = parse_copybook_records(
+        "01 REC.\n   05 HDR PIC X(4).\n   05 T OCCURS 4000.\n"
+        + fields
+        + "\n   05 TRL PIC X(4).\n"
+    )[0]
+    specs = flatten_record(record)
+    assert len(specs) == 4000 * 30 + 2
+    assert sum(spec.storage_size for spec in specs) == 4 + 4000 * 60 + 4
     assert occurs_expansion_caveats(record) == []

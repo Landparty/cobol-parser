@@ -163,7 +163,8 @@ arm.
   `consume_value_operand` (signed literals such as `BY -1`, which lex as two
   tokens, and subscripted / qualified references such as `FROM WS-TBL (2)`).
   `BY` is optional (COBOL 2002, GnuCOBOL; `_consume_by_phrase`): omitted, the
-  value is `"1"` and the statement's metadata gets `by_implied: True`.
+  value is `"1"` and that phrase's clause dict (`varying_clause` or its
+  `after_clauses` entry) gets `"by_implied": True`.
 - **UNTIL collection.** `_collect_until_condition_tokens` stops (without
   consuming) at `AFTER` only when `for_varying=True` -- a plain `PERFORM UNTIL`
   condition may contain an `AFTER` token. Both UNTIL loops
