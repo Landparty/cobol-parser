@@ -84,7 +84,9 @@ def test_mcp_impact_of_change_resolves_the_member(root: Path) -> None:
 @case_sensitive_fs
 def test_not_found_never_suggests_the_name_it_looked_up(tmp_path: Path) -> None:
     (tmp_path / "ordrec.cpy").write_text("       01 ORD-REC PIC X.\n")
-    resolver = PathResolver(CopybookSearchPath(directories=[str(tmp_path)]))
+    resolver = PathResolver(
+        CopybookSearchPath(directories=[str(tmp_path)], case_fallback=False)
+    )
     with pytest.raises(CopybookNotFoundError) as caught:
         resolver.resolve("ORDREC")
     assert "ORDREC" not in caught.value.suggestions

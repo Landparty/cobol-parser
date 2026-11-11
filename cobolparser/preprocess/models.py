@@ -227,6 +227,12 @@ class CopybookSearchPath:
         directories: Ordered list of directory paths to search for copybooks
         extensions: File extensions to try when resolving copybook names
         case_sensitive: Whether file matching should be case-sensitive (auto-detected by default)
+        case_fallback: On a case-sensitive search, when no file matches the
+            member as written or upper-cased, accept one whose name differs
+            only in letter case (``COPY LGCMAREA`` finds ``lgcmarea.cpy``, the
+            layout IBM's DBB samples use). This makes Linux resolve what
+            Windows and macOS already resolve. False restores strict
+            matching.
         max_nesting_depth: Maximum allowed nesting depth for copybooks
         max_file_size: Maximum size in bytes for a single copybook file
         max_total_size: Maximum total size in bytes for all expanded content
@@ -247,6 +253,7 @@ class CopybookSearchPath:
         default_factory=lambda: [".cpy", ".CPY", ".cbl", ".CBL", ".cob", ".COB", ""]
     )
     case_sensitive: bool = field(default_factory=get_default_case_sensitivity)
+    case_fallback: bool = True
     max_nesting_depth: int = 100
     max_file_size: int = MAX_COPYBOOK_SIZE_BYTES
     max_total_size: int = MAX_TOTAL_EXPANSION_BYTES
@@ -260,6 +267,7 @@ class CopybookSearchPath:
             "directories": self.directories,
             "extensions": self.extensions,
             "case_sensitive": self.case_sensitive,
+            "case_fallback": self.case_fallback,
             "max_nesting_depth": self.max_nesting_depth,
             "max_file_size": self.max_file_size,
             "max_total_size": self.max_total_size,

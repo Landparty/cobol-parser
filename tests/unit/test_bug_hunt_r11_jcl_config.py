@@ -205,9 +205,16 @@ def test_library_directory_matches_case_insensitively_when_search_does(
     )
     from cobolparser.preprocess import CopybookNotFoundError
 
-    sensitive = CopybookSearchPath(directories=[str(root)], case_sensitive=True)
+    strict = CopybookSearchPath(
+        directories=[str(root)], case_sensitive=True, case_fallback=False
+    )
     with pytest.raises(CopybookNotFoundError):
-        find_copybook_file("MEM", sensitive, "MYLIB")
+        find_copybook_file("MEM", strict, "MYLIB")
+    # The default case fallback finds it on a case-sensitive search too.
+    sensitive = CopybookSearchPath(directories=[str(root)], case_sensitive=True)
+    assert find_copybook_file("MEM", sensitive, "MYLIB") == str(
+        root / "mylib" / "MEM.cpy"
+    )
 
 
 # -- scan -------------------------------------------------------------------
