@@ -247,9 +247,10 @@ def _add_binding_args(p: argparse.ArgumentParser) -> None:
 
 def _lineage_reports(
     args: argparse.Namespace, targets: list[str]
-) -> tuple[list[dict[str, Any]], list[str]]:
-    """Every lineage report under *targets* and the problems (files that
-    produced none); exits when there is no report at all."""
+) -> tuple[list[dict[str, Any]], list[str], str | None]:
+    """Every lineage report under *targets*, the problems (files that
+    produced none) and the unresolved-copybook caveat (``None`` when every
+    COPY expanded); exits when there is no report at all."""
     from ...analysis.lineage_graph import reports_from_scan
     from ...scan import ScanOptions, scan_files
 
@@ -272,7 +273,54 @@ def _lineage_reports(
         for problem in problems:
             print(problem, file=sys.stderr)
         _fail("no COBOL program under the given paths produced a lineage report")
-    return reports, problems
+    return reports, problems, _unresolved_copybook_caveat(scan)
+
+
+def _unresolved_copybook_caveat(scan: Any) -> str | None:
+    """One caveat naming the program files whose copybooks did not all
+    expand, or ``None``.
+
+    A field declared in a member that was not expanded is invisible to the
+    lineage graph, so field-impact and widen-check silently covered fewer
+    programs (GenApp: 2 of the 21 that COPY LGCMAREA) with ``problems: []``.
+    The MCP ``impact_of_change`` tool already says this; so does the CLI now.
+    """
+    files: list[str] = []
+    members: list[str] = []
+    for file_scan in scan.files:
+        if file_scan.error is not None:
+            continue  # already a problem of its own
+        names = list(getattr(file_scan, "unexpanded_copybooks", None) or [])
+        if not names and file_scan.copybook_error is None:
+            continue
+        files.append(os.path.basename(file_scan.path))
+        for name in names:
+            if name not in members:
+                members.append(name)
+    if not files:
+        return None
+
+    def _shown(items: list[str], limit: int) -> str:
+        head = ", ".join(items[:limit])
+        return head + (f", and {len(items) - limit} more" if len(items) > limit else "")
+
+    named = f" (members: {_shown(members, 8)})" if members else ""
+    return (
+        f"copybooks not expanded in {len(files)} program file(s): "
+        f"{_shown(files, 5)}{named}; field flows in those members are missing, "
+        "so programs that use the field only through them are not reported -- "
+        "pass --copybook-path DIR for the folders that hold them"
+    )
+
+
+def _missing_field_hint(copybook_caveat: str | None) -> str:
+    """The "no such field" error's tail when copybooks went unexpanded: the
+    field may well be declared in one of them."""
+    if copybook_caveat is None:
+        return ""
+    return (
+        "; it may be declared in a copybook that was not expanded -- " + copybook_caveat
+    )
 
 
 def _cobol_files(paths: list[str]) -> list[str]:
@@ -391,7 +439,7 @@ def _cmd_field_impact(args: argparse.Namespace) -> None:
     if args.depth is not None and args.depth < 0:
         _fail("--depth must be >= 0")
 
-    reports, problems = _lineage_reports(args, targets)
+    reports, problems, copybook_caveat = _lineage_reports(args, targets)
     bindings, passthroughs, jcl_problems, jcl_caveats = _load_bindings(args)
     graph = LineageGraph(reports, bindings, passthroughs, join_caveats=jcl_caveats)
 
@@ -402,6 +450,8 @@ def _cmd_field_impact(args: argparse.Namespace) -> None:
     else:
         assert field_name is not None
         result = graph.impact(field_name, args.program, args.direction, args.depth)
+    if copybook_caveat is not None:
+        result.caveats.insert(0, copybook_caveat)
 
     relationships = graph.key_relationships() if args.key_relationships else []
     all_problems = problems + jcl_problems
@@ -426,7 +476,10 @@ def _cmd_field_impact(args: argparse.Namespace) -> None:
         _json_out(output, args.compact, getattr(args, "output", None))
     if not result.start_found:
         # The report above says so too; the exit code is for scripts.
-        _fail(f"{', '.join(result.start)}: no such field in any report")
+        _fail(
+            f"{', '.join(result.start)}: no such field in any report"
+            + _missing_field_hint(copybook_caveat)
+        )
 
 
 # -- Subcommand: widen-check --------------------------------------------------
@@ -535,7 +588,7 @@ def _cmd_widen_check(args: argparse.Namespace) -> None:
         _fail("--workers must be >= 1")
     if args.depth is not None and args.depth < 0:
         _fail("--depth must be >= 0")
-    reports, problems = _lineage_reports(args, targets)
+    reports, problems, copybook_caveat = _lineage_reports(args, targets)
     bindings, passthroughs, jcl_problems, jcl_caveats = _load_bindings(args)
     graph = LineageGraph(reports, bindings, passthroughs, join_caveats=jcl_caveats)
     report = FieldWideningAnalyzer(graph).analyze(
@@ -545,6 +598,8 @@ def _cmd_widen_check(args: argparse.Namespace) -> None:
         new_usage=args.new_usage,
         depth=args.depth,
     )
+    if copybook_caveat is not None:
+        report.caveats.insert(0, copybook_caveat)
     report.findings = [
         f for f in report.findings if _severity_at_least(f.severity, args.min_severity)
     ]
@@ -559,7 +614,10 @@ def _cmd_widen_check(args: argparse.Namespace) -> None:
         output["problems"] = all_problems
         _json_out(output, args.compact, getattr(args, "output", None))
     if not report.start_found:
-        _fail(f"{field_name.upper()}: no such field in any report")
+        _fail(
+            f"{field_name.upper()}: no such field in any report"
+            + _missing_field_hint(copybook_caveat)
+        )
     if not report.starts:
         _fail(f"{field_name.upper()}: nothing to check (see caveats)")
     worst = report.worst_severity()

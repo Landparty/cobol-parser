@@ -39,6 +39,7 @@ same reason ``batch.py`` says so: Windows spawn has to pickle them.
 from __future__ import annotations
 
 import os
+import re
 from collections.abc import Iterable, Sequence
 from concurrent.futures import ProcessPoolExecutor
 from dataclasses import dataclass, field
@@ -205,6 +206,11 @@ class FileScan:
     #: parses fine without its member -- so without this the report would be
     #: graded against a record layout it never saw, with nothing to say so.
     copybook_error: str | None = None
+    #: COPY / EXEC SQL INCLUDE members the parse left unexpanded (the
+    #: parser's "... was not expanded" warnings), in source order. A file
+    #: scanned with no copybook path lists every member it COPYs. Serialized
+    #: only when non-empty.
+    unexpanded_copybooks: list[str] = field(default_factory=list)
     #: Lossy-decode warnings: bytes of the source its encoding could not
     #: map, replaced with U+FFFD (#522). Serialized only when non-empty.
     decode_warnings: list[str] = field(default_factory=list)
@@ -225,6 +231,7 @@ class FileScan:
             error=data.get("error"),
             parse_error_count=int(data.get("parse_error_count") or 0),
             copybook_error=data.get("copybook_error"),
+            unexpanded_copybooks=list(data.get("unexpanded_copybooks") or []),
             decode_warnings=list(data.get("decode_warnings") or []),
             reports=dict(data.get("reports") or {}),
         )
@@ -239,6 +246,8 @@ class FileScan:
             out["parse_error_count"] = self.parse_error_count
         if self.copybook_error is not None:
             out["copybook_error"] = self.copybook_error
+        if self.unexpanded_copybooks:
+            out["unexpanded_copybooks"] = list(self.unexpanded_copybooks)
         if self.decode_warnings:
             out["decode_warnings"] = list(self.decode_warnings)
         if self.reports:
@@ -486,6 +495,7 @@ def _scan_one(
         path=path,
         parse_error_count=len(result.errors),
         copybook_error=expansion_failures[0] if expansion_failures else None,
+        unexpanded_copybooks=_unexpanded_members(result),
         decode_warnings=decode_warnings,
     )
     source_map = getattr(result, "expansion_source_map", None)
@@ -512,6 +522,21 @@ def _scan_one(
             path, result, options, source_map, copybook_names
         )
     return scan
+
+
+_UNEXPANDED_MEMBER_RE = re.compile(
+    r"^(?:COPY|EXEC SQL INCLUDE) (\S+?)[;:,]? was not expanded"
+)
+
+
+def _unexpanded_members(result: Any) -> list[str]:
+    """The members the parser reports as not expanded, once each."""
+    names: list[str] = []
+    for warning in getattr(result, "warnings", None) or []:
+        match = _UNEXPANDED_MEMBER_RE.match(str(warning))
+        if match and match.group(1) not in names:
+            names.append(match.group(1))
+    return names
 
 
 def _copybook_names(
