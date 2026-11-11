@@ -332,7 +332,15 @@ the [history](../history/analysis.md).
 * **ALTER references only its target.** `ALTER p TO PROCEED TO t` modifies a
   GO TO inside `p`; only `t` is an incoming jump (matching
   `edges.py::process_alter`). Pinned by
-  `TestAlterReferences.test_alter_never_called_paragraph_is_dead`.
+  `TestAlterReferences.test_alter_never_called_paragraph_is_dead`. A section
+  qualifier on either name (`ALTER P IN S1 TO PROCEED TO T OF S2`) is kept on
+  the alteration as `from_qualifier` / `to_qualifier` (present only when
+  written) and both analyzers resolve through it, so a paragraph name two
+  sections share lands on the named one (NIST OBNC2M).
+* **Clone digests ignore call-target annotations.** `RedundancyAnalyzer`
+  skips `possible_values` and `possible_values_incomplete`, which
+  `DynamicCallAnalyzer` writes onto CALL and EXEC CICS LINK / XCTL / LOAD
+  nodes, so a digest does not depend on what ran first on the same AST.
 * **Computed GO TO targets come from `GoStatement.target_paragraphs`**, never
   from `operands` minus the DEPENDING ON variable: operands are deduplicated,
   so a target sharing its name with the variable would vanish. Same rule in
@@ -895,7 +903,10 @@ Its clause-outcome bodies are the statement models' `HANDLER_CLAUSE_ATTRS`
   condition naming one subject twice) and literals longer than their item
   never are. Up to 16 states per (node, return stack), then the new state
   merges into the nearest one, a byte some condition reads weighing 1000x.
-  Gives up (claims nothing) past 400,000 steps, on a recursive PERFORM, or
+  Gives up (claims nothing) past 400,000 steps (`MAX_STEPS`) or 200M state
+  comparisons where paths meet (`MAX_COMPARISONS`, which bounds the time a
+  large WORKING-STORAGE takes: an 8,000-line program now stops in ~4 s, not
+  40), on a recursive PERFORM, or
   when the program has ENTRY points. `report.unreachable(...)` with
   `executed_lines` (a run from the entry point) also prunes these
   outcomes, reason `REASON_VALUES`.

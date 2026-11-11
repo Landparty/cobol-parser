@@ -70,6 +70,12 @@ MAX_STATES_PER_POINT = 16
 _TESTED_WEIGHT = 1000
 #: State transitions before the pass gives up and claims nothing.
 MAX_STEPS = 400_000
+#: State comparisons (records compared where paths meet) before the pass
+#: gives up and claims nothing. Steps alone do not bound the time: a large
+#: WORKING-STORAGE makes each comparison costly, and an 8,000-line program
+#: spent 40 seconds under the step limit. The NIST suite's heaviest
+#: programs need under a tenth of this.
+MAX_COMPARISONS = 200_000_000
 #: Return-stack depth past which the pass gives up (recursive PERFORMs).
 MAX_DEPTH = 64
 
@@ -544,6 +550,7 @@ class ValuePass:
             if root not in self.untracked and value.count(UNKNOWN) != len(value)
         }
         self.steps = 0
+        self.comparisons = 0
         taken: dict[int, set[int]] = {}
         reached: set[int] = set()
         points: dict[tuple[int, tuple[int, ...]], list[_Kept]] = {}
@@ -567,7 +574,11 @@ class ValuePass:
                     return None
                 work.extend(nxt)
                 continue
-            admitted = _admit(points.setdefault((node, stack), []), env, self.tested)
+            known = points.setdefault((node, stack), [])
+            self.comparisons += len(known) * 2 * len(env)
+            if self.comparisons > MAX_COMPARISONS:
+                return None
+            admitted = _admit(known, env, self.tested)
             if admitted is None:
                 continue
             env = admitted

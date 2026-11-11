@@ -228,11 +228,14 @@ hard ceiling, `_MAX_OCCURS_HARD_CAP = 10_000` in `layout/fields.py`
 — applied on top of (never widened by) a caller's own `max_occurs`, so a
 pathological `OCCURS 5000000 TIMES` in the source cannot materialize
 millions of `FieldSpec`s. A second ceiling bounds nested tables
-(#376): `_MAX_EXPANDED_OCCURRENCES = 100_000` occurrences per elementary item
+(#376): `_MAX_EXPANDED_OCCURRENCES = 100_000` FieldSpecs per table
 across *all* its enclosing tables -- `_flatten_into` carries
-`occurs_product` down and `_occurrence_cap()` cuts an inner table to what the
-outer ones leave (`OCCURS 99999999` around `OCCURS 9999` is 10,000 x 10, not
-10,000 x 9,999). `occurs_expansion_caveats(record, opts)` walks the
+`occurs_product` down and `_occurrence_cap(product, weight)` cuts a table to
+what the outer ones leave, divided by the elementary items one occurrence
+holds (`_occurrence_weight`, each counted once) (`OCCURS 99999999` around
+`OCCURS 9999` is 10,000 x 10, not 10,000 x 9,999; `OCCURS 10` around
+`OCCURS 2200` of a 47-field group is 10 x 212, not the million FieldSpecs a
+per-item count allowed). `occurs_expansion_caveats(record, opts)` walks the
 declarations (never the expansion) and names every table either ceiling
 cuts; a cut the caller asked for with `max_occurs` is not reported. It feeds
 `GeneratedDataset.caveats` (gen-data `warning:` lines),

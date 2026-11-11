@@ -683,7 +683,11 @@ class DeadCodeAnalyzer:
         is not itself a reference to that paragraph.
         """
         for alteration in stmt.alterations:
-            for key in self._keys(stmt, alteration["to_paragraph"]):
+            for key in self._index.resolve(
+                alteration["to_paragraph"],
+                alteration.get("to_qualifier"),
+                enclosing_section(stmt),
+            ):
                 self._add_goto_ref(key)
 
     def _collect_entry_refs(self, stmt: EntryStatement) -> None:

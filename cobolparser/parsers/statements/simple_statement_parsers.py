@@ -379,8 +379,9 @@ class AlterStatementParser(IStatementParser):
             token_stream.consume()
             skip_whitespace(token_stream)
             # ``ALTER PARA-5A IN QUAL-SECTION-1 TO ...`` (NIST OBNC2M):
-            # a section-qualified paragraph name -- consume the qualifier.
-            consume_procedure_qualifier(token_stream)
+            # a section-qualified paragraph name, kept so analyzers resolve
+            # the right one when sections reuse a paragraph name.
+            from_qualifier = consume_procedure_qualifier(token_stream)
 
             # Expect TO
             nxt = token_stream.peek()
@@ -405,9 +406,9 @@ class AlterStatementParser(IStatementParser):
                 break
             to_para = nxt.value or ""
             token_stream.consume()
-            stmt.add_alteration(from_para, to_para)
             skip_whitespace(token_stream)
-            consume_procedure_qualifier(token_stream)
+            to_qualifier = consume_procedure_qualifier(token_stream)
+            stmt.add_alteration(from_para, to_para, from_qualifier, to_qualifier)
 
         return stmt
 

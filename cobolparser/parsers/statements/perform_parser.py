@@ -680,18 +680,10 @@ class PerformStatementParser(IStatementParser):
             return
         skip_whitespace(stream)
 
-        # Expect BY
-        token = stream.peek()
-        if not token or not token.value or token.value.upper() != "BY":
-            return
-        stream.consume()
-        skip_whitespace(stream)
-
-        # Get BY value (may be sign-prefixed: BY -1 is every countdown loop)
-        by_value = consume_value_operand(stream)
+        # BY is optional in COBOL 2002 and GnuCOBOL; omitted, it is BY 1.
+        by_value = self._consume_by_phrase(stream, stmt)
         if by_value is None:
             return
-        skip_whitespace(stream)
 
         # Check for WITH TEST clause (before UNTIL) -- see the
         # newline-tolerance note in _parse_test_phrase.
@@ -711,6 +703,25 @@ class PerformStatementParser(IStatementParser):
         # Parse AFTER dimensions (PERFORM VARYING ... AFTER ... — 2-D/3-D
         # table loops). Each AFTER phrase repeats var FROM x BY y [UNTIL c].
         self._parse_after_clauses(stream, stmt)
+
+    def _consume_by_phrase(
+        self, stream: ITokenStream, stmt: PerformStatement
+    ) -> str | None:
+        """The ``BY`` value of a VARYING/AFTER phrase, or ``None`` when BY is
+        present but its operand is not. COBOL 2002 and GnuCOBOL make the
+        phrase optional, with ``BY 1`` implied: that case returns ``"1"``
+        and records ``by_implied`` on *stmt*'s metadata."""
+        token = stream.peek()
+        if not token or not token.value or token.value.upper() != "BY":
+            stmt.set_metadata("by_implied", True)
+            return "1"
+        stream.consume()
+        skip_whitespace(stream)
+        # May be sign-prefixed: BY -1 is every countdown loop.
+        by_value = consume_value_operand(stream)
+        if by_value is not None:
+            skip_whitespace(stream)
+        return by_value
 
     def _parse_after_clauses(
         self, stream: ITokenStream, stmt: PerformStatement
@@ -752,18 +763,10 @@ class PerformStatementParser(IStatementParser):
                 return
             skip_whitespace(stream)
 
-            # Expect BY
-            token = stream.peek()
-            if not token or not token.value or token.value.upper() != "BY":
-                stmt.add_after_clause(variable_name, from_value, "")
-                return
-            stream.consume()
-            skip_whitespace(stream)
-            by_value = consume_value_operand(stream)
+            by_value = self._consume_by_phrase(stream, stmt)
             if by_value is None:
                 stmt.add_after_clause(variable_name, from_value, "")
                 return
-            skip_whitespace(stream)
 
             # Optional UNTIL condition for this dimension
             until_condition = None
