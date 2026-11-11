@@ -11,6 +11,7 @@ import os
 import re
 
 from .._lines import split_source_lines
+from .._source_text.source_format import detect_member_fixed_format
 from ..models.data_items import CobolDataItem
 from ..models.program import CobolProgram
 from ..parser import parse_cobol, parse_cobol_with_expansion
@@ -34,10 +35,6 @@ _WRAPPER_TAIL = "       PROCEDURE DIVISION.\n           CONTINUE.\n"
 
 _PROGRAM_RE = re.compile(r"^\s*IDENTIFICATION\s+DIVISION\s*\.", re.IGNORECASE | re.M)
 _PROGRAM_ID_RE = re.compile(r"^\s*PROGRAM-ID\s*\.", re.IGNORECASE | re.M)
-# A one- or two-digit level number inside the sequence area (columns 1-6),
-# followed by a separator -- the decisive free-form signal. Six-digit sequence
-# numbers cannot match, and fixed-format code cannot start before column 8.
-_FREE_FORM_LEVEL_RE = re.compile(r"^ {0,5}\d{1,2}[ .]")
 
 
 def _looks_like_program(source: str) -> bool:
@@ -45,51 +42,22 @@ def _looks_like_program(source: str) -> bool:
     return bool(_PROGRAM_RE.search(source) or _PROGRAM_ID_RE.search(source))
 
 
-def _looks_fixed_format(source: str) -> bool:
-    """Heuristically detect fixed-format column layout in a copybook fragment.
-
-    A fixed-format line keeps columns 1-6 for the sequence number and column 7
-    for the indicator, so real code never starts before column 8.  A free-form
-    copybook, by contrast, starts its level numbers in column 1.
-
-    A **short level number in the sequence area** (``01 REC.``, ``05 FLD``) is
-    decisive: one or two digits followed by a space or period cannot be a
-    six-digit sequence number, and cannot be fixed-format code, which starts
-    at column 8.  Only one such line is needed -- a copybook that puts its 01
-    in column 1 but indents subordinate items past column 8 is common, and
-    majority-scoring it as fixed would slice the ``01`` line away entirely.
-
-    Absent that signal, lines are scored on their sequence area: a blank one
-    (indented code) or an all-digit one (a real sequence number, as in the
-    NIST corpus) is fixed-shaped; anything else is code starting too early to
-    be fixed format.  Scoring rather than requiring agreement keeps real
-    copybooks -- which mix blank lines, comments, and continuations -- from
-    being decided by a single odd line.
-
-    When the two are tied the verdict is *fixed*: mis-indenting a fixed-format
-    copybook pushes real code past column 72 and truncates it, which is worse
-    than leaving an already-indented free-form copybook alone.
-    """
-    fixed = 0
-    free = 0
-    for raw in split_source_lines(source):
-        line = raw.expandtabs(8)
-        if not line.strip():
-            continue
-        if _FREE_FORM_LEVEL_RE.match(line):
-            return False
-        sequence_area = line[:6].strip()
-        if not sequence_area or sequence_area.isdigit():
-            fixed += 1
-        else:
-            free += 1
-    return fixed >= free
-
-
 def _wrap_fragment(source: str) -> str:
-    """Embed a copybook fragment in a minimal, parseable program skeleton."""
-    if _looks_fixed_format(source):
-        body = source
+    """Embed a copybook fragment in a minimal, parseable program skeleton.
+
+    The fragment's format comes from the one member detector copybook
+    expansion uses (:func:`detect_member_fixed_format`), so a copybook reads
+    the same through gen-data, decode, data-items and the MCP server as it
+    does when a program copies it. A fixed-format fragment keeps its columns
+    but has its sequence area (columns 1-6) blanked: IBM never reads it, and
+    a change tag left there (``CGOGP1``, ``CR 12``) would otherwise make the
+    wrapped program look free-form to the parse's own detector.
+    """
+    if detect_member_fixed_format(source.expandtabs(8)):
+        body = "\n".join(
+            " " * 6 + line[6:] if len(line) > 6 else ""
+            for line in split_source_lines(source.expandtabs(8))
+        )
     else:
         # Free-form fragment: shift into Area B so the fixed-format wrapper and
         # the fragment agree on a single column convention.

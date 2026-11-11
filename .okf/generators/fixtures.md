@@ -153,8 +153,16 @@ nonexistent path (checked explicitly — `parse_cobol()` otherwise treats a bad
 path string as literal, unparseable source text), a program that does not
 parse to an AST at all, or — in the default `strict_copybooks=True` mode — a
 COPY member `copybook_paths` cannot resolve (a layout with a hole in it is
-wrong, not partial). `strict_copybooks=False` downgrades the last case to an
-`unresolved` entry and falls back to parsing without expansion.
+wrong, not partial). `strict_copybooks=False` skips just the missing member
+(`skip_missing_copybooks`, DFHAID/DFHBMSCA stand-ins searched last) and keeps
+every other one; only a circular COPY still falls back to parsing without
+expansion. In every mode, each COPY / `EXEC SQL INCLUDE` the parse left out
+(read off its "was not expanded" warnings, so also with no `copybook_paths`)
+is an `unresolved` entry `COPY X was not expanded; fields it declares are
+missing from the layout`, which `BoundaryInventoryAnalyzer` copies into the
+bundle. `ProgramFixtureGenerator.analyze_from_file(strict_copybooks=...)`
+passes it through (default True; the CLI passes False unless
+`--strict-copybooks`).
 `build()`/`from_file()` also stamp `index.ast` with the `CobolProgram` the
 index was built from, so a caller that kept only the index can reach the AST
 without re-parsing (`ProgramFixtureGenerator.generate_from_file` depends on

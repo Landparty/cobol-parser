@@ -269,6 +269,48 @@ class TestTargets:
         )
         assert (KIND_ARGUMENT_COUNT, "error", None) in _kinds(report)
 
+    def test_one_target_dynamic_call_keeps_its_severity(self):
+        data = "       01 WS-PGM PIC X(8) VALUE 'CALLEE'.\n"
+        report = _check(
+            ("CALLEE.cbl", CALLEE),
+            (
+                "CALLER.cbl",
+                _caller("           CALL WS-PGM USING WS-REC WS-COUNT\n", data),
+            ),
+        )
+        finding = next(f for f in report.findings if f.kind == KIND_ARGUMENT_COUNT)
+        assert finding.possible_targets == ()
+        assert "possible_targets" not in finding.to_dict()
+
+    def test_several_target_dynamic_call_is_a_possible_mismatch(self):
+        # The value set is flow-insensitive: WS-PGM holds 'OTHER' when it is
+        # CALLed here, but 'CALLEE' is in the set from the earlier MOVE, so
+        # a mismatch with CALLEE is a "may" (C5 of the 2026-11 corpus review).
+        other = CALLEE.replace("PROGRAM-ID. CALLEE.", "PROGRAM-ID. OTHER.")
+        data = "       01 WS-PGM PIC X(8).\n"
+        report = _check(
+            ("CALLEE.cbl", CALLEE),
+            ("OTHER.cbl", other),
+            (
+                "CALLER.cbl",
+                _caller(
+                    "           MOVE 'CALLEE' TO WS-PGM\n"
+                    "           MOVE 'OTHER' TO WS-PGM\n"
+                    "           CALL WS-PGM USING WS-REC WS-COUNT\n",
+                    data,
+                ),
+            ),
+        )
+        counts = [f for f in report.findings if f.kind == KIND_ARGUMENT_COUNT]
+        assert {f.callee for f in counts} == {"CALLEE", "OTHER"}
+        for finding in counts:
+            assert finding.severity == "warning"
+            assert finding.possible_targets == ("CALLEE", "OTHER")
+            assert finding.message.startswith(
+                f"dynamic CALL (possible target '{finding.callee}', one of 2)"
+            )
+            assert finding.to_dict()["possible_targets"] == ["CALLEE", "OTHER"]
+
     def test_entry_statement_interface(self):
         callee = """\
        IDENTIFICATION DIVISION.

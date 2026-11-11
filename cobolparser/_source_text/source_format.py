@@ -300,6 +300,114 @@ def detect_fixed_format(source: str) -> bool:
     )
 
 
+#: A level number in the sequence area whose data name also starts before
+#: column 8 (``01 REC.``, ``05  WS-A``): code a fixed-format reader would cut
+#: in half, so a positive free-form signal. A left-justified sequence number
+#: followed by blanks up to column 7 (``10     01  REC.``) does not match.
+_FREE_FORM_LEVEL_RE = re.compile(r"^ {0,5}\d{1,2}[ .]")
+
+
+def _member_line_vote(line: str) -> int:
+    """+1 for a fixed-format line, -1 for a free-format one, 0 for neither.
+
+    IBM never reads columns 1-6, so any line with a valid indicator in
+    column 7 is a fixed-format line, whatever the sequence area holds: a
+    change tag (``CGOGP1``, ``CR 12``), a banner typed one column early, a
+    stray quote. Only a positive free-form signal votes the other way: a
+    ``*>`` comment opening before column 7, a level number whose data name
+    starts in the sequence area, code shorter than the sequence area, or a
+    character that is no indicator in column 7.
+    """
+    if _is_numbered_blank_line(line):
+        return 1
+    stripped = line.lstrip()
+    if stripped.startswith(">>"):
+        return 0
+    if stripped.startswith("*>") and len(line) - len(stripped) < INDICATOR_COL - 1:
+        return -1
+    match = _FREE_FORM_LEVEL_RE.match(line)
+    if match and line[match.end() : INDICATOR_COL].strip():
+        return -1
+    if len(line) < INDICATOR_COL:
+        return -1
+    indicator = line[INDICATOR_COL - 1]
+    if indicator in (" ", "-") or indicator in ALL_COMMENT_INDICATORS:
+        return 1
+    return -1
+
+
+def _is_fixed_only_line(line: str) -> bool:
+    """A line no free-format source can hold: a column-7 ``*``/``/``
+    comment, or a six-digit sequence number (alone or before code)."""
+    return (
+        _is_column7_comment(line)
+        or _is_numbered_blank_line(line)
+        or (len(line) >= INDICATOR_COL and line[:6].isdigit())
+    )
+
+
+def member_format_votes(source: str) -> tuple[int, int, bool, bool]:
+    """Line votes over every non-blank line of *source*.
+
+    Returns ``(fixed, free, fixed_only, level_in_sequence_area)``: the two
+    vote counts, whether any line can only be fixed-format
+    (:func:`_is_fixed_only_line`), and whether any line puts a level number
+    and the start of its data name in columns 1-7.
+    """
+    fixed = free = 0
+    fixed_only = level_signal = False
+    for raw in split_source_lines(source):
+        line = raw.expandtabs(8)
+        if not line.strip():
+            continue
+        vote = _member_line_vote(line)
+        if vote > 0:
+            fixed += 1
+            fixed_only = fixed_only or _is_fixed_only_line(line)
+        elif vote < 0:
+            free += 1
+            match = _FREE_FORM_LEVEL_RE.match(line)
+            level_signal = level_signal or bool(
+                match and line[match.end() : INDICATOR_COL].strip()
+            )
+    return fixed, free, fixed_only, level_signal
+
+
+def detect_member_fixed_format(source: str, *, default: bool = True) -> bool:
+    """Whether a copybook member uses the fixed-format column layout.
+
+    The one detector for COPY members, shared by copybook expansion and the
+    standalone-copybook tools (gen-data, decode, data-items, the MCP server).
+    Unlike :func:`detect_fixed_format`, which samples the first ten lines of
+    a program, it scores the whole member (:func:`member_format_votes`): a
+    member is short, and its first lines are the banner, exactly where a
+    ``*`` typed in column 6 or a change note in columns 1-6 sits. Judged on
+    those alone, a fixed-format member was read as free-form and its comment
+    lines were parsed as code.
+
+    A level number whose data name starts in columns 1-7 decides free-form
+    on its own unless some line is fixed-only (a column-7 comment, a numeric
+    sequence area). A tie goes to *default* -- the including program's format, so a member
+    with no evidence either way is read the way its parent is. A member that
+    switches format with ``>>SOURCE`` is left to :func:`detect_fixed_format`,
+    which follows the directive.
+    """
+    lines = split_source_lines(source)
+    if any(">>" in line and source_format_directive(line) for line in lines):
+        if sum(1 for line in lines if line.strip()) >= 3:
+            return detect_fixed_format(source)
+    fixed, free, fixed_only, level_signal = member_format_votes(source)
+    if level_signal and not fixed_only:
+        # ``01 REC.`` typed from column 1 over subordinates indented past
+        # column 8: a common free-form shape, which a majority would read as
+        # fixed and cut the 01 line in half. Nothing in the member says
+        # fixed-only, so the level number in the sequence area decides.
+        return False
+    if fixed == free:
+        return default
+    return fixed > free
+
+
 def normalize_with_recovery(
     source_lines: list[str],
     warnings: list[str],

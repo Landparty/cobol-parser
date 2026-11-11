@@ -164,25 +164,19 @@ source names any division or a `PROGRAM-ID`. The fragment's line n is line
 `n + WRAPPER_HEAD_LINES` of the result; the MCP workspace maps it back.
 Without it both parsed a copybook as a program with no divisions: an empty
 `items` list with exit 0, `found: false` (#536).
-* **Free-form fragment** — `_looks_fixed_format` decides the column
-  convention; a free-form fragment is indented into Area B so the wrapper and
-  the fragment agree. Without this, `normalize_fixed_format` would chop the
-  first 7 characters off a copybook whose level numbers start in column 1.
-
-  The verdict is **decisively free-form** when any line matches
-  `_FREE_FORM_LEVEL_RE` (`^ {0,5}\d{1,2}[ .]`) — a one- or two-digit level
-  number inside the sequence area. That cannot be a six-digit sequence
-  number, and fixed-format code cannot start before column 8. One such line
-  is enough, deliberately: a copybook that puts its `01` in column 1 but
-  indents subordinate items past column 8 is common, and majority-scoring it
-  would slice the `01` line away and lose the record root.
-
-  Otherwise each non-blank line is scored on its **sequence area**
-  (`line[:6]`): blank (indented code) or all-digit (a real sequence number,
-  the NIST convention) is fixed-shaped; anything else is code starting too
-  early to be fixed format. Ties resolve to **fixed** — mis-indenting a
-  fixed-format copybook pushes real code past column 72 and truncates it,
-  which is worse than leaving an already-indented free-form copybook alone.
+* **Fragment format** — decided by the one member detector copybook
+  expansion uses, `detect_member_fixed_format`
+  ([preprocessing.md](../preprocessing.md#fixed-format-detection)): every
+  line votes, a valid column-7 indicator is fixed whatever columns 1-6 hold,
+  a level number whose name starts in columns 1-7 decides free-form unless a
+  line is fixed-only, a tie is fixed. A fixed-format fragment keeps its
+  columns with columns 1-6 blanked (a change tag there would otherwise make
+  the wrapped program look free-form to the parse); a free-form fragment is
+  indented into Area B so the wrapper and the fragment agree. The layout
+  package's own `_looks_fixed_format`, which counted every change-tagged
+  sequence area (`CGOGP1`, `JR5295`) as a free-form vote and so shifted
+  tagged fixed-format members seven columns (commented-out fields became
+  junk fields, record sizes changed), was deleted on 2026-11-11.
 
 **`COPY` inside the layout** (#592) — a copybook nesting another (`COPY
 INNER.` inside the 01), or a whole program whose FD record is `COPY CUSTREC.`.

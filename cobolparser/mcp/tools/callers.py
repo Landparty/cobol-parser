@@ -109,6 +109,12 @@ class CallersTools(BaseTools):
             # paragraph, carrying the whole range) and a ``*_THRU`` closer to
             # the last. One statement is one caller, so only openers count;
             # a paragraph inside the range is run without being named.
+            # Each THRU range end, for the note on a fall-through out of one.
+            range_ends = {
+                edge.target.upper()
+                for edge in flow.edges
+                if edge.edge_type.value.endswith("_THRU")
+            }
             callers = []
             for edge in flow.edges:
                 kind = edge.edge_type.value
@@ -126,7 +132,10 @@ class CallersTools(BaseTools):
                     # never runs on along this edge.
                     continue
                 if edge.target.upper() == key:
-                    callers.append(_edge_caller(edge, parsed, response))
+                    caller = _edge_caller(edge, parsed, response)
+                    if kind == "FALL_THROUGH" and edge.source.upper() in range_ends:
+                        _note_range_end_run_on(caller, edge, flow, parsed, response)
+                    callers.append(caller)
                 elif key in (m.upper() for m in edge.range_members):
                     caller = _edge_caller(edge, parsed, response)
                     caller["via_range"] = [edge.target, edge.thru_target]
@@ -503,6 +512,43 @@ def _edge_caller(
     if edge.thru_target:
         caller["thru"] = edge.thru_target
     return caller
+
+
+def _note_range_end_run_on(
+    caller: dict[str, Any],
+    edge: Any,
+    flow: Any,
+    parsed: ParsedProgram,
+    response: Response,
+) -> None:
+    """Say why control runs on past a ``PERFORM ... THRU`` range end.
+
+    Under a PERFORM of the range the end returns, so this fall-through is
+    only real when the end is reached some other way: a GO TO onto it from
+    outside the range (often a paragraph PERFORMed without THRU that jumps
+    to its exit), a longer range that runs through it, or the main line.
+    DeadCodeAnalyzer has already decided that one of those can happen (the
+    edge is kept only then); the note names the GO TOs, the usual cause,
+    so the caller can be checked against the source.
+    """
+    source = edge.source.upper()
+    gotos = [
+        {
+            "from": other.source,
+            "location": parsed.locate(other.location.line, None, response),
+        }
+        for other in flow.edges
+        if other.edge_type.value in ("GOTO", "GOTO_DEPENDING")
+        and other.target.upper() == source
+    ]
+    caller["note"] = (
+        f"{edge.source} ends a PERFORM ... THRU range, where control returns; "
+        f"it runs on into {edge.target} only when {edge.source} is reached "
+        "outside a PERFORM of that range (a GO TO from outside it, a longer "
+        "range that passes through it, or the main line)"
+    )
+    if gotos:
+        caller["entered_by_goto"] = gotos
 
 
 def _install_note(path: Path) -> str:
