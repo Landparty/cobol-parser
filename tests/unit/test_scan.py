@@ -815,16 +815,17 @@ class TestCopybookExpansion:
         assert len(scan.units) == 1
         assert scan.units[0].reports
 
-    def test_the_fallback_says_why_expansion_failed(self, tmp_path: Path) -> None:
+    def test_a_missing_member_is_named_not_silent(self, tmp_path: Path) -> None:
         """The fallback used to be a bare `pass`: the unexpanded parse is
         error-free (a COPY statement parses without its member), so the
         file's reports were indistinguishable from an expanded scan's while
-        grading a record layout the scan never saw."""
+        grading a record layout the scan never saw. A missing member is now
+        skipped (the rest still expand) and named in unexpanded_copybooks."""
         path = _write(tmp_path, "COPYUSER.cbl", self.PROGRAM)
         scan = scan_one(path, ScanOptions(copybook_paths=(str(tmp_path / "nowhere"),)))
-        assert scan.copybook_error is not None
-        assert "TESTCPY" in scan.copybook_error
-        assert scan.to_dict()["copybook_error"] == scan.copybook_error
+        assert scan.copybook_error is None
+        assert scan.unexpanded_copybooks == ["TESTCPY"]
+        assert scan.to_dict()["unexpanded_copybooks"] == ["TESTCPY"]
 
     def test_no_copybook_error_when_expansion_succeeds(self, tmp_path: Path) -> None:
         (tmp_path / "TESTCPY.cpy").write_text(self.COPYBOOK)

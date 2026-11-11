@@ -682,6 +682,7 @@ SHARED_CLI_FLAGS = {
     "--profile",
     "--profile-top-n",
     "--profile-output",
+    "--strict-copybooks",
 }
 CLI_TABLE_HEADING = "## Subcommand reference"
 

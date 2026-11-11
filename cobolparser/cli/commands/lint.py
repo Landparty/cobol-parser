@@ -170,7 +170,7 @@ def _build_lint_parser(subparsers: argparse._SubParsersAction) -> None:
     _add_source_format_args(p)
     _add_dialect_arg(p)
     _add_error_recovery_arg(p)
-    _add_copybook_args(p)
+    _add_copybook_args(p, strict_flag=True)
     # Lint is the one command that covers every unit by default: it is the
     # file's diagnostics, and a contained program left unexamined would read
     # as a clean one.
@@ -258,14 +258,6 @@ def _build_lint_parser(subparsers: argparse._SubParsersAction) -> None:
         help=(
             "Record every current finding in FILE (before --min-severity) and "
             "exit 0, so a later --baseline run reports only new ones"
-        ),
-    )
-    p.add_argument(
-        "--strict-copybooks",
-        action="store_true",
-        help=(
-            "Fail a file whose COPY member cannot be found, instead of linting "
-            "it without that member and saying so in the caveats"
         ),
     )
     p.add_argument(
@@ -515,7 +507,6 @@ def _lint_one(args: argparse.Namespace) -> tuple[Any, Any, Any]:
         filter_by_severity,
     )
 
-    args._lenient_copybooks = not getattr(args, "strict_copybooks", False)
     result, prof = _parse_result_or_fail(args)
     ast = result.ast
 

@@ -469,6 +469,7 @@ class CallInterfaceChecker:
                     copybook_paths=self.copybook_paths,
                     workers=workers,
                     debug_lines=self.debug_lines,
+                    skip_missing_copybooks=True,
                 )
             else:
                 yield from parse_files(
@@ -868,6 +869,7 @@ class CalleeResolver:
                     copybook_paths=self.copybook_paths,
                     workers=1,
                     debug_lines=self.debug_lines,
+                    skip_missing_copybooks=True,
                 )
                 if self.copybook_paths
                 else parse_files([path], workers=1, debug_lines=self.debug_lines)

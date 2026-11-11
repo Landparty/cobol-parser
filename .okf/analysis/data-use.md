@@ -361,7 +361,10 @@ Known gap, shared with the GLOBAL path: a method-local item that shadows an
 instance item still credits the instance item. See
 `TestObjectOrientedUnitData`.
 
-CLI: `unused-variables` subcommand — see [cli.md](../cli.md).
+CLI: `unused-variables` subcommand — see [cli.md](../cli.md). Like every single-file
+analyzer it analyzes a program whose COPY member is missing without that
+member (named on stderr; `--strict-copybooks` fails instead), so items such a
+member declares are simply absent from the report.
 
 ## XrefAnalyzer
 

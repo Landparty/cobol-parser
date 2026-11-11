@@ -9,6 +9,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+* **One missing copybook no longer stops the analysis.** `parse` and every
+  single-file analyzer (`dead-code`, `xref`, `lineage`, `diff`, ...) now
+  behave the way `lint` already did: the IBM-supplied CICS members DFHAID and
+  DFHBMSCA come from the bundled stand-ins when the search path lacks them,
+  any other missing member is left as written and named on stderr, and the
+  command exits 0 with the rest of the program expanded. Before, giving
+  `--copybook-path` with one member missing was exit 1 with no output (82 of
+  1,804 corpus programs), stricter than giving no path at all.
+  `--strict-copybooks` on each of them restores exit 1. `scan` and
+  `parse_files_with_copybooks(skip_missing_copybooks=True)` (used by
+  codebase-graph, copybook-impact and call-check) skip just the missing member
+  instead of expanding nothing for that file; scan lists it in
+  `unexpanded_copybooks`, and `copybook_error` is left for real failures such
+  as a circular COPY. codebase-graph no longer reports DFHAID or DFHBMSCA as
+  unresolved.
 * **field-impact and widen-check say when copybooks were not expanded.** A
   field reached only through a member that did not resolve was invisible, and
   the report said nothing: on GenApp, `field-impact CA-CUSTOMER-NUM` listed 2

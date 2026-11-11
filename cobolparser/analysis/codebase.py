@@ -29,7 +29,8 @@ and aggregates the results into a single graph with two kinds of edge:
   leaving it out made "what uses this DCLGEN?" answer nothing (#295). The
   output does not say which of the two produced an edge. An INCLUDE of
   ``SQLCA`` or ``SQLDA`` that is not on the path is not reported unresolved,
-  since the precompiler supplies those. These are collected by re-scanning each
+  since the precompiler supplies those, and neither is a ``COPY`` of the CICS
+  members ``DFHAID`` or ``DFHBMSCA``. These are collected by re-scanning each
   source with :func:`~cobolparser.preprocess.copy_statement_parser.extract_copy_statements`
   rather than from an expanded parse, because expansion *consumes* the COPY
   statement and discards exactly the edge we are after. Members are resolved
@@ -88,6 +89,7 @@ from ..models.statements.call import CallStatement, EntryStatement
 from ..models.walk import own_statements
 from ..parsers.statements.ibm_exec_statements import ExecCicsStatement
 from ..preprocess import PreprocessingError
+from ..preprocess._system_copybooks import SYSTEM_COPYBOOKS
 from ..preprocess.copy_statement_parser import extract_copy_statements
 from ..preprocess.copybook_expander import read_program_source
 from ..preprocess.models import CopybookSearchPath
@@ -112,6 +114,11 @@ __all__ = [
 #: expander, which lets *every* unresolvable INCLUDE through silently: here a
 #: missing DCLGEN is still a gap worth reporting, and so is a COPY of either.
 _PRECOMPILER_MEMBERS = frozenset({"SQLCA", "SQLDA"})
+
+#: Members the CICS libraries supply (DFHAID, DFHBMSCA): a ``COPY`` of one
+#: that is not on the path is normal too -- it gets its edge, no note -- and
+#: the parse expands it from the bundled stand-in.
+_CICS_SUPPLIED_MEMBERS = SYSTEM_COPYBOOKS
 
 #: File extensions :meth:`CodebaseGraphBuilder.build_from_directory` treats as
 #: COBOL program source. Matched case-insensitively.
@@ -1137,6 +1144,9 @@ class CodebaseGraphBuilder:
                 copybook_paths=list(self.copybook_paths),
                 encoding=self.encoding,
                 debug_lines=self.debug_lines,
+                # One missing member must not cost the file every other
+                # expansion; the graph reports the member itself.
+                skip_missing_copybooks=True,
             )
         workers = self.workers
         if workers is None and len(chunk) < _PARALLEL_THRESHOLD:
@@ -1537,7 +1547,8 @@ class CodebaseGraphBuilder:
         through *written* and would be missed through *member*.
 
         A failure is reported for every reference that is not an INCLUDE of
-        a precompiler-supplied member (:data:`_PRECOMPILER_MEMBERS`), so a
+        a precompiler-supplied member (:data:`_PRECOMPILER_MEMBERS`) or a
+        COPY of a CICS-supplied one (:data:`_CICS_SUPPLIED_MEMBERS`), so a
         quiet ``INCLUDE SQLCA`` seen first cannot silence a later ``COPY
         SQLCA``. One note per (member, referrer): whichever of COPY / INCLUDE
         is seen first names it.
@@ -1557,6 +1568,7 @@ class CodebaseGraphBuilder:
         if (
             resolved is None
             and not (sql_include and member in _PRECOMPILER_MEMBERS)
+            and not (not sql_include and member in _CICS_SUPPLIED_MEMBERS)
             and (member, referrer) not in self._reported_failures
         ):
             self._reported_failures.add((member, referrer))
