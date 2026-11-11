@@ -906,7 +906,7 @@ parse, one severity-graded finding list.
   (fixed-format columns 8-72, 7 short of an editor). `_lint_column_offset`
   judges the program as `CobolParser` does (`--source-format`, else
   `detect_fixed_format`), each copybook as the expander did
-  (`_looks_fixed_format`), and gives a line after `>>SOURCE FORMAT FREE`
+  (`_looks_fixed_format`, which follows the program's format on a tie), and gives a line after `>>SOURCE FORMAT FREE`
   (`free_format_flags`) no shift. `analysis.lint.fixed_format_column_offset`:
   fixed listing + fixed file 7, fixed listing + free member 0 (re-padded by
   7), free listing + fixed member 6 (only the sequence area is cut), free

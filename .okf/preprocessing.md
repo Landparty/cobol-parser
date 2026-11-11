@@ -382,7 +382,32 @@ multi-line fast/pure parity) and
 
 ## Fixed-format detection
 
-`source_format.detect_fixed_format(source)` decides whether to normalize at
+**Copybook members** have their own detector,
+`source_format.detect_member_fixed_format(text, *, default=True)` (behind
+`copybook_expander._looks_fixed_format(text, default)`; the standalone
+copybook tools -- gen-data, decode, compare, data-items, the MCP record tools
+-- reach it through `layout.copybook._wrap_fragment`, whose own detector was
+deleted in 2026-11). Every non-blank line votes (`member_format_votes`): a
+valid column-7 indicator counts as fixed whatever columns 1-6 hold (IBM
+never reads them: change tags `CGOGP1`, `CR 12`, a `"` in column 3, a banner
+typed from column 6); a `*>` opening before column 7, a level number whose
+data name starts in columns 1-7 (`01 REC.`), a line shorter than 7 or a
+non-indicator in column 7 count as free. A level number in the sequence area
+decides free-form on its own unless some line is fixed-only (a column-7
+comment, a numeric sequence area). A tie goes to `default`, the including
+program's format. A member with a `>>SOURCE` directive is left to
+`detect_fixed_format`. `expand_copybooks(source_format="fixed")` (from
+`parse_cobol_with_expansion(..., preprocess_fixed=True)`, i.e.
+`--source-format fixed` / `source_format: fixed`) reads every member as
+fixed; a member read as free-form under a fixed-format program draws "Copybook
+X was read as free-form ..." in `statistics.warnings`. A fixed-format
+standalone fragment keeps its columns but has columns 1-6 blanked inside the
+wrapper, so the parse's own detector agrees. Before 2026-11-11 members were
+judged on the first ten lines and the layout tools counted every tagged
+sequence area as a free-form vote (comments became code, records gained junk
+fields; `tests/regression/test_review_2026_11_11_source_format.py`).
+
+**Programs:** `source_format.detect_fixed_format(source)` decides whether to normalize at
 all (alias: `cobolparser.parser._detect_fixed_format`). It samples the first
 10 non-blank lines against a 60% threshold. The `--source-format` escape
 hatch is in [cli.md](cli.md).

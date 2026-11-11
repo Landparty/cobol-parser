@@ -51,8 +51,12 @@ _DATA_DEF_RE = re.compile(
 # ``>>`` compiler directive (``>>IF`` / ``>>ELSE`` / ``>>END-IF`` wrapping
 # alternative entries of a copybook -- the validator runs before the
 # directives are evaluated, and an entry that "ran on" into ``>>ELSE`` read
-# as one missing its period).
-_NON_ENTRY_LINE_RE = re.compile(r"^[ \t]*(?:EXEC\b|>>)", re.IGNORECASE)
+# as one missing its period), or a listing-control statement (``EJECT``,
+# ``SKIP1``-``SKIP3``, ``TITLE``) written between two entries: an entry
+# followed by one used to read as running on into it, unterminated.
+_NON_ENTRY_LINE_RE = re.compile(
+    r"^[ \t]*(?:EXEC\b|>>|(?:EJECT|SKIP[123]|TITLE)(?=[ \t.]|$))", re.IGNORECASE
+)
 
 #: An IDENTIFICATION (or ID) DIVISION header line, raw or normalized. A
 #: fixed-format record's columns 1-6 may hold *anything* -- sequence digits,

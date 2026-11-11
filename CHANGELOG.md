@@ -9,6 +9,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+* **Fixed-format copybooks are no longer read as free-form.** A member was
+  judged on its first ten lines, so a banner with something odd in columns
+  1-6 (a `"` in column 3, a change note with blanks, a `*` in column 6) made
+  it free-form and its comment lines were parsed as code. Every line now
+  votes, any valid column-7 indicator counts as fixed whatever columns 1-6
+  hold, a tie follows the including program, `--source-format fixed` /
+  `source_format: fixed` now applies to the copybooks too, and a member read
+  as free-form under a fixed-format program draws a warning.
+* **gen-data, decode, compare, data-items and the MCP record tools read a
+  copybook the way the program parse does.** Their own format detector,
+  which counted every change-tagged sequence area (`CGOGP1`, `JR5295`) as a
+  free-form vote and shifted every line seven columns, is gone: records no
+  longer gain junk fields from commented-out lines or change the size.
+* **A COPY indented under `DATE-COMPILED.` is expanded.** It was swallowed as
+  part of the comment-entry, so the member's ENVIRONMENT and DATA DIVISIONs
+  were never parsed and `parse` exited 0 with no data items. `COPY`,
+  `EJECT`, `SKIP1-3` and `TITLE` now end a comment-entry, and a program whose
+  comment-entry holds DATA DIVISION text while it has none draws a warning.
+* **No "missing terminating period" for `EJECT`, `SKIP1-3` or `TITLE`
+  between two data entries in a copybook.**
+
 * **NUL and control bytes in a copybook no longer stop expansion.** A member
   with raw bytes typed into its VALUE literals (low-values, printer control
   codes that survived the EBCDIC transfer) was refused as "Binary content

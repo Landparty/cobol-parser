@@ -22,7 +22,6 @@ from typing import Any
 from .._lines import split_source_lines
 from .._source_directive import free_format_flags
 from .._source_text.normalize import (
-    ALL_COMMENT_INDICATORS,
     CircularReferenceError,
     CopybookNotFoundError,
     EncodingError,
@@ -878,42 +877,34 @@ def _split_open_literal(line: str, content_start: int) -> tuple[str, str] | None
 LineOrigin = tuple[str, int]
 
 
-def _looks_fixed_format(text: str) -> bool:
+def _looks_fixed_format(text: str, default: bool = True) -> bool:
     """Whether *text* uses the fixed-format column layout.
 
-    Defers to :func:`~.source_format.detect_fixed_format` (the same verdict the
-    final parse will reach), which declines to judge fewer than three
-    non-blank lines; a short member is then judged directly -- fixed when
-    every non-blank line carries a valid indicator column and a blank/numeric
-    sequence area (or a change tag that a comment line or data entry after a
-    tag corroborates, see :func:`_has_tagged_line_anchor`), and by default when it has no lines at all (nothing
-    to strip either way).
+    The single member detector,
+    :func:`~.._source_text.source_format.detect_member_fixed_format`: every
+    non-blank line votes, a valid column-7 indicator counts as fixed whatever
+    columns 1-6 hold, and a tie goes to *default* (the including program's
+    format; fixed when there is none). Tabs are expanded first, as every
+    column-sensitive step here does.
     """
-    from .._source_text.source_format import (
-        _has_tagged_line_anchor,
-        _is_column7_comment,
-        _is_numbered_blank_line,
-        _sequence_area_is_fixed_like,
-        detect_fixed_format,
-    )
+    from .._source_text.source_format import detect_member_fixed_format
 
-    # Tabs are expanded first, as every column-sensitive step here does.
+    return detect_member_fixed_format(text.expandtabs(8), default=default)
+
+
+def _looks_program_fixed(text: str) -> bool:
+    """Whether a *program* uses the fixed-format column layout.
+
+    The verdict the final parse reaches (:func:`detect_fixed_format`), so
+    expansion and parse agree; that sampler declines to judge fewer than
+    three non-blank lines, which are left to the member detector instead.
+    """
+    from .._source_text.source_format import detect_fixed_format
+
     text = text.expandtabs(8)
-    non_blank = [line for line in split_source_lines(text) if line.strip()]
-    if len(non_blank) >= 3:
+    if sum(1 for line in split_source_lines(text) if line.strip()) >= 3:
         return detect_fixed_format(text)
-    for line in non_blank:
-        if _is_numbered_blank_line(line) or _is_column7_comment(line):
-            continue
-        if len(line) < 7:
-            return False
-        indicator = line[6]
-        if indicator not in (" ", "-") and indicator not in ALL_COMMENT_INDICATORS:
-            return False
-        strict, relaxed = _sequence_area_is_fixed_like(line[:6])
-        if not strict and not (relaxed and _has_tagged_line_anchor(non_blank)):
-            return False
-    return True
+    return _looks_fixed_format(text)
 
 
 def _identity_origins(source_file: str, text: str) -> list[LineOrigin]:
@@ -1045,6 +1036,7 @@ def expand_copybooks(
     preserve_comments: bool = False,
     debug_lines: bool = False,
     skip_missing_copybooks: bool = False,
+    source_format: str = "auto",
 ) -> CopybookExpansion:
     """
     Expand all COPY statements in COBOL source code by inlining copybook content.
@@ -1088,6 +1080,11 @@ def expand_copybooks(
             raising ``CopybookNotFoundError`` (default False). Every member
             that *can* be found is still expanded; the parser then reports
             the one left behind as not expanded.
+        source_format: ``"auto"`` (default) detects the format of the
+            program and of each member on its own; ``"fixed"`` reads them
+            all as fixed format, whatever their columns 1-6 hold -- the
+            ``--source-format fixed`` / cobol.yml ``source_format: fixed``
+            setting, which used to reach the main program only.
         encoding_errors: Decode strictness for copybook files — "replace"
             (default, backward compatible) substitutes undecodable bytes with
             U+FFFD and records a lossy-decode warning in
@@ -1159,6 +1156,7 @@ def expand_copybooks(
         defined_symbols=dict(defined_symbols) if defined_symbols else {},
         debug_lines=debug_lines,
         skip_missing=skip_missing_copybooks,
+        source_format=source_format,
     )
 
     # Initialize LRU size from search config
@@ -1459,7 +1457,9 @@ def _expand_source_recursive(
     # by construction (both blank in place), so nothing else has to be tracked.
     merged_from: list[int] = []
     if free_form is None:
-        free_form = not _looks_fixed_format(source_code)
+        free_form = context.source_format != "fixed" and not _looks_program_fixed(
+            source_code
+        )
     if free_form:
         # Free-form source has no sequence/indicator/identification columns
         # to strip and no column-7 continuation records to merge; slicing
@@ -1628,7 +1628,17 @@ def _expand_source_recursive(
             # text into the kept window, and a growing one silently
             # truncated real code (including its terminating period).
             raw_copybook_content = copybook_content
-            member_free_form = not _looks_fixed_format(copybook_content)
+            member_free_form = context.source_format != "fixed" and not (
+                _looks_fixed_format(copybook_content, default=not free_form)
+            )
+            if member_free_form and not free_form and stats is not None:
+                stats.warnings.append(
+                    f"Copybook {statement.member_name} was read as free-form although "
+                    f"the program that copies it is fixed-format: most of its "
+                    f"lines have no valid column-7 indicator. If it is fixed "
+                    f"format, pass --source-format fixed (cobol.yml: "
+                    f"source_format: fixed)"
+                )
             if not member_free_form:
                 copybook_content = strip_sequence_area(
                     remove_comment_lines(
