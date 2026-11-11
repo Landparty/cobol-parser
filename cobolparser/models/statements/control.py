@@ -328,14 +328,20 @@ class PerformStatement(CobolStatement):
         from_value: str,
         by_value: str,
         until_condition: "CobolExpression",
+        *,
+        by_implied: bool = False,
     ) -> None:
-        """Set VARYING clause for the PERFORM."""
+        """Set VARYING clause for the PERFORM. *by_implied* marks a phrase
+        written without BY (COBOL 2002 / GnuCOBOL), whose *by_value* is the
+        implied ``"1"``: the clause then carries ``"by_implied": True``."""
         self.perform_type = "VARYING"
         self.varying_clause = {
             "variable": variable,
             "from_value": from_value,
             "by_value": by_value,
         }
+        if by_implied:
+            self.varying_clause["by_implied"] = True
         self.until_condition = until_condition
         self.add_child(until_condition)
 
@@ -345,16 +351,20 @@ class PerformStatement(CobolStatement):
         from_value: str,
         by_value: str,
         until_condition: "CobolExpression | None" = None,
+        *,
+        by_implied: bool = False,
     ) -> None:
-        """Add an AFTER dimension of a PERFORM VARYING ... AFTER ... loop."""
-        self.after_clauses.append(
-            {
-                "variable": variable,
-                "from_value": from_value,
-                "by_value": by_value,
-                "until_condition": until_condition,
-            }
-        )
+        """Add an AFTER dimension of a PERFORM VARYING ... AFTER ... loop.
+        *by_implied* as for :meth:`set_varying_clause`."""
+        clause: dict[str, Any] = {
+            "variable": variable,
+            "from_value": from_value,
+            "by_value": by_value,
+            "until_condition": until_condition,
+        }
+        if by_implied:
+            clause["by_implied"] = True
+        self.after_clauses.append(clause)
         if until_condition is not None:
             self.add_child(until_condition)
 

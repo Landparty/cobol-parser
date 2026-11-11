@@ -207,6 +207,59 @@ def _case_variant_exists(member_name: str, search_config: CopybookSearchPath) ->
     return member_name.upper() in get_available_copybooks(suggestion_config)
 
 
+def _find_case_variant(
+    member_name: str,
+    search_config: CopybookSearchPath,
+    library_qualifier: str | None,
+) -> str | None:
+    """The file whose name differs from *member_name* + an extension only in
+    letter case, or None.
+
+    The last resort of a case-sensitive search (``case_fallback``): DBB and
+    IBM's sample repositories keep member ``LGCMAREA`` as ``lgcmarea.cpy``,
+    which Windows and macOS resolve and Linux did not, so the same checkout
+    gave different answers by operating system. Directory order decides
+    first (the SYSLIB concatenation), then extension order; two files in one
+    directory that differ only in case are taken in sorted order, so the
+    pick does not depend on ``os.scandir()``. A path literal
+    (``COPY "sub/mem.cpy"``) names a file and is never folded.
+    """
+    if not (search_config.case_sensitive and search_config.case_fallback):
+        return None
+    if _is_path_literal(member_name):
+        return None
+    wanted = [f"{member_name}{ext}".casefold() for ext in search_config.extensions]
+    for configured_dir in search_config.directories:
+        search_dir = os.path.abspath(configured_dir)
+        candidate_dirs = [search_dir]
+        if library_qualifier:
+            candidate_dirs[:0] = _library_directories(
+                search_dir, library_qualifier, case_sensitive=False
+            )
+        for actual_dir in candidate_dirs:
+            try:
+                with os.scandir(actual_dir) as entries:
+                    files = sorted(e.name for e in entries if e.is_file())
+            except OSError:
+                continue
+            by_fold: dict[str, str] = {}
+            for entry_name in files:
+                by_fold.setdefault(entry_name.casefold(), entry_name)
+            for target in wanted:
+                hit = by_fold.get(target)
+                if hit is None:
+                    continue
+                file_path = os.path.join(actual_dir, hit)
+                validate_path_within_directory(file_path, search_dir)
+                file_size = os.path.getsize(file_path)
+                if file_size > search_config.max_file_size:
+                    raise CopybookSizeExceededError(
+                        file_path, file_size, search_config.max_file_size
+                    )
+                return os.path.abspath(file_path)
+    return None
+
+
 def _on_disk_casing(file_path: str) -> str:
     """Return ``file_path`` with its basename replaced by the on-disk casing.
 
@@ -387,6 +440,10 @@ def find_copybook_file(
                         )
 
                     return _on_disk_casing(os.path.abspath(file_path))
+
+    folded_hit = _find_case_variant(member_name, search_config, library_qualifier)
+    if folded_hit is not None:
+        return folded_hit
 
     # Copybook not found - get suggestions
     suggestions = suggest_similar_copybooks(member_name, search_config)
