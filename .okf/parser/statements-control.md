@@ -162,6 +162,8 @@ arm.
   The VARYING variable may be subscripted; `FROM` / `BY` values go through
   `consume_value_operand` (signed literals such as `BY -1`, which lex as two
   tokens, and subscripted / qualified references such as `FROM WS-TBL (2)`).
+  `BY` is optional (COBOL 2002, GnuCOBOL; `_consume_by_phrase`): omitted, the
+  value is `"1"` and the statement's metadata gets `by_implied: True`.
 - **UNTIL collection.** `_collect_until_condition_tokens` stops (without
   consuming) at `AFTER` only when `for_varying=True` -- a plain `PERFORM UNTIL`
   condition may contain an `AFTER` token. Both UNTIL loops
@@ -207,8 +209,9 @@ arm.
   `tests/regression/test_go_depending_without_on.py`.
 - **ALTER** (`simple_statement_parsers.py::AlterStatementParser`): the
   from-paragraph may be all-digit (`ALTER 1000 TO PROCEED TO 2000`); several
-  clauses separated by commas (`ALTER a TO ..., b TO ...`); `ALTER P IN S TO ...`
-  keeps the qualifier as metadata.
+  clauses separated by commas (`ALTER a TO ..., b TO ...`); a section qualifier
+  on either name (`ALTER P IN S1 TO PROCEED TO T OF S2`) is kept on that
+  alteration as `from_qualifier` / `to_qualifier`, present only when written.
 
 ## SEARCH
 

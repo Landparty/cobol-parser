@@ -398,10 +398,22 @@ class AlterStatement(CobolStatement):
         super().__init__("ALTER", location)
         self.alterations: list[dict[str, str]] = []
 
-    def add_alteration(self, from_paragraph: str, to_paragraph: str) -> None:
-        self.alterations.append(
-            {"from_paragraph": from_paragraph, "to_paragraph": to_paragraph}
-        )
+    def add_alteration(
+        self,
+        from_paragraph: str,
+        to_paragraph: str,
+        from_qualifier: str | None = None,
+        to_qualifier: str | None = None,
+    ) -> None:
+        """Record one ``from TO [PROCEED TO] to`` pair. A section qualifier
+        (``P-X OF S2``) is kept under ``from_qualifier`` / ``to_qualifier``,
+        present only when written."""
+        alteration = {"from_paragraph": from_paragraph, "to_paragraph": to_paragraph}
+        if from_qualifier:
+            alteration["from_qualifier"] = from_qualifier
+        if to_qualifier:
+            alteration["to_qualifier"] = to_qualifier
+        self.alterations.append(alteration)
 
     def to_dict(self) -> dict[str, Any]:
         result = super().to_dict()

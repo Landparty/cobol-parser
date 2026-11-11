@@ -462,13 +462,16 @@ _MAX_RANGE_EXPANSION = 64
 # otherwise materialize one FieldSpec per occurrence per field, exhausting
 # memory well before any caller-supplied cap kicks in.
 _MAX_OCCURS_HARD_CAP = 10_000
-# Hard ceiling on the occurrences one elementary item is expanded into across
-# *all* its enclosing tables (#376). The per-table cap alone still let nested
-# tables multiply: ``OCCURS 1000`` inside ``OCCURS 1000`` is a million
-# FieldSpecs, and a mistyped ``OCCURS 99999999`` around ``OCCURS 9999``
-# capped at 10,000 x 10,000 ran gen-fixtures, lineage and field-impact for
-# minutes. An inner table is cut to what the enclosing ones leave of this
-# budget; :func:`occurs_expansion_caveats` names every table either cap cuts.
+# Hard ceiling on the FieldSpecs one table expands into across *all* its
+# enclosing tables (#376). The per-table cap alone still let nested tables
+# multiply: ``OCCURS 1000`` inside ``OCCURS 1000`` is a million FieldSpecs,
+# and a mistyped ``OCCURS 99999999`` around ``OCCURS 9999`` capped at
+# 10,000 x 10,000 ran gen-fixtures, lineage and field-impact for minutes.
+# A table is cut to what the enclosing ones leave of this budget, divided by
+# the elementary items one of its occurrences holds: counting occurrences per
+# elementary item alone let ``OCCURS 10`` around ``OCCURS 2200`` of a
+# 47-field group reach a million FieldSpecs. :func:`occurs_expansion_caveats`
+# names every table either cap cuts.
 _MAX_EXPANDED_OCCURRENCES = 100_000
 
 _REPEAT_COUNT_RE = re.compile(r"\(\d+\)")
@@ -1445,7 +1448,9 @@ def _occurrence_indexes(
         return [None]
     times = _requested_occurrences(item, opts)
     if opts.expand_occurs:
-        times = min(times, _occurrence_cap(occurs_product))
+        times = min(
+            times, _occurrence_cap(occurs_product, _occurrence_weight(item, opts))
+        )
     return list(range(1, max(1, times) + 1))
 
 
@@ -1463,12 +1468,32 @@ def _requested_occurrences(item: CobolDataItem, opts: DataGeneratorOptions) -> i
     return max(1, times)
 
 
-def _occurrence_cap(occurs_product: int) -> int:
+def _occurrence_cap(occurs_product: int, weight: int = 1) -> int:
     """The most occurrences a table inside *occurs_product* enclosing
-    occurrences may expand to (see ``_MAX_EXPANDED_OCCURRENCES``)."""
+    occurrences may expand to, when one occurrence holds *weight* fields
+    (see ``_MAX_EXPANDED_OCCURRENCES``)."""
     return max(
-        1, min(_MAX_OCCURS_HARD_CAP, _MAX_EXPANDED_OCCURRENCES // occurs_product)
+        1,
+        min(
+            _MAX_OCCURS_HARD_CAP,
+            _MAX_EXPANDED_OCCURRENCES // (occurs_product * max(1, weight)),
+        ),
     )
+
+
+def _occurrence_weight(item: CobolDataItem, opts: DataGeneratorOptions) -> int:
+    """How many elementary items one occurrence of *item* holds, each
+    counted once: the occurrences of a nested table are its own cap's
+    business, through the product its enclosing tables pass down."""
+    children = [
+        child
+        for child in _child_items(item)
+        if child.level not in (66, 88)
+        and not (child.redefines and not opts.include_redefines)
+    ]
+    if not children:
+        return 1
+    return sum(_occurrence_weight(child, opts) for child in children)
 
 
 def occurs_expansion_caveats(
@@ -1495,13 +1520,15 @@ def occurs_expansion_caveats(
         times = 1
         if item.occurs_clause is not None:
             requested = _requested_occurrences(item, opts)
-            times = min(requested, _occurrence_cap(product))
+            times = min(
+                requested, _occurrence_cap(product, _occurrence_weight(item, opts))
+            )
             if times < requested:
                 caveats.append(
                     f"OCCURS table {item.name} expanded to {times} of its "
                     f"{requested} occurrences: the layout caps expansion at "
-                    f"{_MAX_OCCURS_HARD_CAP:,} per table and "
-                    f"{_MAX_EXPANDED_OCCURRENCES:,} across nested tables"
+                    f"{_MAX_OCCURS_HARD_CAP:,} occurrences per table and "
+                    f"{_MAX_EXPANDED_OCCURRENCES:,} fields across nested tables"
                 )
         for child in _child_items(item):
             walk(child, product * times, False)

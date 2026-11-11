@@ -79,8 +79,8 @@ _WHITESPACE_RUN_RE = re.compile(r"\s+")
 
 # ``to_dict()`` keys that are not behaviour: where the statement sits, the
 # node bookkeeping, what the fingerprint already holds (type, operands,
-# clause bodies), and ``possible_values`` -- an annotation
-# ``DynamicCallAnalyzer`` writes onto the AST, which would otherwise make a
+# clause bodies), and ``possible_values`` / ``possible_values_incomplete``
+# -- annotations ``DynamicCallAnalyzer`` writes onto the AST, which would otherwise make a
 # digest depend on which analyzers happened to run first.
 _DETAIL_SKIP_KEYS = frozenset(
     {
@@ -91,6 +91,7 @@ _DETAIL_SKIP_KEYS = frozenset(
         "statement_type",
         "operands",
         "possible_values",
+        "possible_values_incomplete",
         *HANDLER_CLAUSE_ATTRS,
     }
 )

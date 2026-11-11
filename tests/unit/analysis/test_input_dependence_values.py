@@ -351,7 +351,16 @@ def test_digits_survive_arithmetic_on_unknown_values() -> None:
 
 @pytest.mark.parametrize(
     "case",
-    ["entry", "declaratives", "address", "external", "extra", "budget", "sync"],
+    [
+        "entry",
+        "declaratives",
+        "address",
+        "external",
+        "extra",
+        "budget",
+        "comparisons",
+        "sync",
+    ],
 )
 def test_what_the_pass_does_not_trust(
     case: str, monkeypatch: pytest.MonkeyPatch
@@ -394,6 +403,8 @@ def test_what_the_pass_does_not_trust(
         kwargs["extra_inputs"] = ["FLAG"]
     elif case == "budget":
         monkeypatch.setattr(_values, "MAX_STEPS", 1)
+    elif case == "comparisons":
+        monkeypatch.setattr(_values, "MAX_COMPARISONS", -1)
     elif case == "sync":
         working = "       01  REC.\n           02 FLAG PIC X VALUE 'N' SYNC.\n"
     source = _program(procedure, working, extra)

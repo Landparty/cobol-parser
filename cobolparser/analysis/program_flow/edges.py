@@ -112,18 +112,25 @@ class EdgeCollector:
         self._index = index
 
     def resolve(
-        self, stmt: Any, name: str | None, qualifier_key: str | None = None
+        self,
+        stmt: Any,
+        name: str | None,
+        qualifier_key: str | None = None,
+        qualifier: str | None = None,
     ) -> list[str]:
         """The node key(s) *name*, referenced from *stmt*, means.
 
-        Without an index (a collector built on its own) a reference is its
+        The section qualifier is *qualifier* when given, else the one the
+        parser recorded under *qualifier_key* in *stmt*'s metadata. Without
+        an index (a collector built on its own) a reference is its
         upper-cased bare name, as before procedures were qualified.
         """
         if not name:
             return []
         if self._index is None:
             return [name.upper()]
-        qualifier = statement_qualifier(stmt, qualifier_key) if qualifier_key else None
+        if qualifier is None and qualifier_key:
+            qualifier = statement_qualifier(stmt, qualifier_key)
         return self._index.resolve(name, qualifier, enclosing_section(stmt))
 
     def resolve_one(
@@ -448,8 +455,18 @@ class EdgeCollector:
     def process_alter(self, stmt: AlterStatement, source: str) -> None:
         """Create edges for ALTER statement procedure redirections."""
         for alteration in stmt.alterations:
-            for altered in self.resolve(stmt, alteration["from_paragraph"]):
-                for target in self.resolve(stmt, alteration["to_paragraph"]):
+            altered_keys = self.resolve(
+                stmt,
+                alteration["from_paragraph"],
+                qualifier=alteration.get("from_qualifier"),
+            )
+            target_keys = self.resolve(
+                stmt,
+                alteration["to_paragraph"],
+                qualifier=alteration.get("to_qualifier"),
+            )
+            for altered in altered_keys:
+                for target in target_keys:
                     self._edges.append(
                         FlowEdge(
                             source=altered,
