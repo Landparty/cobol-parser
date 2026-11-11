@@ -467,8 +467,9 @@ _MAX_OCCURS_HARD_CAP = 10_000
 # multiply: ``OCCURS 1000`` inside ``OCCURS 1000`` is a million FieldSpecs,
 # and a mistyped ``OCCURS 99999999`` around ``OCCURS 9999`` capped at
 # 10,000 x 10,000 ran gen-fixtures, lineage and field-impact for minutes.
-# A table is cut to what the enclosing ones leave of this budget, divided by
-# the elementary items one of its occurrences holds: counting occurrences per
+# A nested table is cut to what the enclosing ones leave of this budget,
+# divided by the elementary items one of its occurrences holds (an outermost
+# table only by the per-table cap): counting occurrences per
 # elementary item alone let ``OCCURS 10`` around ``OCCURS 2200`` of a
 # 47-field group reach a million FieldSpecs. :func:`occurs_expansion_caveats`
 # names every table either cap cuts.
@@ -1471,7 +1472,14 @@ def _requested_occurrences(item: CobolDataItem, opts: DataGeneratorOptions) -> i
 def _occurrence_cap(occurs_product: int, weight: int = 1) -> int:
     """The most occurrences a table inside *occurs_product* enclosing
     occurrences may expand to, when one occurrence holds *weight* fields
-    (see ``_MAX_EXPANDED_OCCURRENCES``)."""
+    (see ``_MAX_EXPANDED_OCCURRENCES``).
+
+    *weight* counts only inside another table: an outermost table is bounded
+    by the per-table cap alone, as before the weighting, so a single-level
+    ``OCCURS 4000`` of a 30-field group still expands whole and its record
+    image keeps the length data-items reports."""
+    if occurs_product <= 1:
+        weight = 1
     return max(
         1,
         min(

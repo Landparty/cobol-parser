@@ -681,7 +681,7 @@ class PerformStatementParser(IStatementParser):
         skip_whitespace(stream)
 
         # BY is optional in COBOL 2002 and GnuCOBOL; omitted, it is BY 1.
-        by_value = self._consume_by_phrase(stream, stmt)
+        by_value, by_implied = self._consume_by_phrase(stream)
         if by_value is None:
             return
 
@@ -697,31 +697,32 @@ class PerformStatementParser(IStatementParser):
             until_condition = self._collect_until_expression(stream, _verb_column(stmt))
             if until_condition:
                 stmt.set_varying_clause(
-                    variable_name, from_value, by_value, until_condition
+                    variable_name,
+                    from_value,
+                    by_value,
+                    until_condition,
+                    by_implied=by_implied,
                 )
 
         # Parse AFTER dimensions (PERFORM VARYING ... AFTER ... — 2-D/3-D
         # table loops). Each AFTER phrase repeats var FROM x BY y [UNTIL c].
         self._parse_after_clauses(stream, stmt)
 
-    def _consume_by_phrase(
-        self, stream: ITokenStream, stmt: PerformStatement
-    ) -> str | None:
-        """The ``BY`` value of a VARYING/AFTER phrase, or ``None`` when BY is
-        present but its operand is not. COBOL 2002 and GnuCOBOL make the
-        phrase optional, with ``BY 1`` implied: that case returns ``"1"``
-        and records ``by_implied`` on *stmt*'s metadata."""
+    def _consume_by_phrase(self, stream: ITokenStream) -> tuple[str | None, bool]:
+        """The ``BY`` value of a VARYING/AFTER phrase and whether it was
+        implied; the value is ``None`` when BY is present but its operand is
+        not. COBOL 2002 and GnuCOBOL make the phrase optional, with ``BY 1``
+        implied: that case returns ``("1", True)``."""
         token = stream.peek()
         if not token or not token.value or token.value.upper() != "BY":
-            stmt.set_metadata("by_implied", True)
-            return "1"
+            return "1", True
         stream.consume()
         skip_whitespace(stream)
         # May be sign-prefixed: BY -1 is every countdown loop.
         by_value = consume_value_operand(stream)
         if by_value is not None:
             skip_whitespace(stream)
-        return by_value
+        return by_value, False
 
     def _parse_after_clauses(
         self, stream: ITokenStream, stmt: PerformStatement
@@ -763,7 +764,7 @@ class PerformStatementParser(IStatementParser):
                 return
             skip_whitespace(stream)
 
-            by_value = self._consume_by_phrase(stream, stmt)
+            by_value, by_implied = self._consume_by_phrase(stream)
             if by_value is None:
                 stmt.add_after_clause(variable_name, from_value, "")
                 return
@@ -775,7 +776,13 @@ class PerformStatementParser(IStatementParser):
                 until_condition = self._collect_until_expression(
                     stream, _verb_column(stmt)
                 )
-            stmt.add_after_clause(variable_name, from_value, by_value, until_condition)
+            stmt.add_after_clause(
+                variable_name,
+                from_value,
+                by_value,
+                until_condition,
+                by_implied=by_implied,
+            )
 
     def _collect_until_condition_tokens(
         self,
