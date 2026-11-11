@@ -32,6 +32,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   showed the top-level overview), progress notifications are sent while
   the cross-program facts are read, and `find_statements` no longer keeps
   the sequence area of a fixed-format line.
+* **Fixed-format copybooks are no longer read as free-form.** A member was
+  judged on its first ten lines, so a banner with something odd in columns
+  1-6 (a `"` in column 3, a change note with blanks, a `*` in column 6) made
+  it free-form and its comment lines were parsed as code. Every line now
+  votes, any valid column-7 indicator counts as fixed whatever columns 1-6
+  hold, a tie follows the including program, `--source-format fixed` /
+  `source_format: fixed` now applies to the copybooks too, and a member read
+  as free-form under a fixed-format program draws a warning.
+* **gen-data, decode, compare, data-items and the MCP record tools read a
+  copybook the way the program parse does.** Their own format detector,
+  which counted every change-tagged sequence area (`CGOGP1`, `JR5295`) as a
+  free-form vote and shifted every line seven columns, is gone: records no
+  longer gain junk fields from commented-out lines or change the size.
+* **A COPY indented under `DATE-COMPILED.` is expanded.** It was swallowed as
+  part of the comment-entry, so the member's ENVIRONMENT and DATA DIVISIONs
+  were never parsed and `parse` exited 0 with no data items. `COPY`,
+  `EJECT`, `SKIP1-3` and `TITLE` now end a comment-entry, and a program whose
+  comment-entry holds DATA DIVISION text while it has none draws a warning.
+* **No "missing terminating period" for `EJECT`, `SKIP1-3` or `TITLE`
+  between two data entries in a copybook.**
 
 * **NUL and control bytes in a copybook no longer stop expansion.** A member
   with raw bytes typed into its VALUE literals (low-values, printer control
@@ -121,6 +141,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `cobolparser.analysis.unused_variables.copybook_item_names`.
 
 ### Added
+
+* **`batch --copybook-path`.** `batch` took no copybook path, so every COPY
+  of a multi-file run went unexpanded (over a thousand warnings on one real
+  codebase). It now takes `--copybook-path` (and `project.copybook_path` from
+  `cobol.yml`) and expands through `parse_files_with_copybooks`. A missing
+  member is left as written; `--strict-copybooks` fails that file instead
+  (`copybook_error`, exit 2). Each entry lists `unexpanded_copybooks`, with
+  or without `--errors`, and stderr says how many files have them.
+* **`gen-fixtures` and `expand` finish without a missing copybook.** Both
+  failed the whole program (exit 1) on one missing member. They now work like
+  the analyzers: the member is left out, and `--strict-copybooks` restores
+  exit 1. `gen-fixtures` names each one in the bundle's `unresolved`, so
+  `--strict` still exits 2 on it; `expand` lists them in
+  `unexpanded_copybooks`. Both print a warning on stderr.
+  `ProgramFixtureGenerator.analyze_from_file()` gains `strict_copybooks`
+  (default True). `ProgramLayoutIndex.from_file(strict_copybooks=False)`
+  skips only the missing member instead of expanding nothing. Any COPY
+  missing from the layout, including when no copybook path is given, is now
+  an `unresolved` entry.
+* **`callers_of` explains a fall-through out of a THRU range end.** When the
+  exit paragraph of a `PERFORM ... THRU` range is listed as a caller of the
+  next paragraph, the caller now has a `note` saying why control can run on
+  (the exit is reached outside a PERFORM of the range). It also has
+  `entered_by_goto`, naming the GO TOs that land on the exit. The usual cause
+  is a paragraph PERFORMed without THRU that does `GO TO its-EXIT`.
 
 * **A written public API and one analyzer interface.** `docs/public-api.md`
   says what is semver-stable (the facade, whose list a test keeps equal to
@@ -406,6 +451,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `MCP_SURFACE_VERSION` stays "1".
 
 ### Changed
+
+* **Multi-file `lint` exits 2 when a file could not be linted.** That is the
+  code `scan`, `batch`, `codebase-graph` and `call-check` use when one file
+  of a multi-file run fails. It was 1, which elsewhere means "the CLI never
+  ran". One FILE that cannot be linted still exits 1, and `--fail-on` still
+  exits 3.
+* **`call-check` caps findings against a possible dynamic target at warning.**
+  The value set behind a dynamic `CALL identifier` includes every MOVE to the
+  identifier anywhere in the program. When that set names several programs,
+  a mismatch with any one of them is only possible: the finding now reads
+  `dynamic CALL (possible target 'X', one of N)`, carries `possible_targets`,
+  and is a warning instead of an error. Static and one-target CALLs are
+  unchanged.
 
 * **Record layout moved to `cobolparser.layout` (breaking).** Field specs,
   byte offsets, `ProgramLayoutIndex`, copybook record parsing, `ValueFactory`,

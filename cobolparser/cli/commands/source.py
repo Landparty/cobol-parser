@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import re
 import sys
 from typing import Any
 
@@ -193,10 +194,12 @@ def _build_batch_parser(
         epilog=(
             "Examples:\n"
             "  cobol-parser batch a.cbl b.cbl c.cbl\n"
-            "  cobol-parser batch --glob 'src/**/*.cbl' --workers 4"
+            "  cobol-parser batch --glob 'src/**/*.cbl' --workers 4\n"
+            "  cobol-parser batch --glob 'src/**/*.cbl' --copybook-path copy/"
         ),
     )
     p.add_argument("files", nargs="*", help="Paths to COBOL source files")
+    _add_copybook_args(p, strict_flag=True)
     p.add_argument(
         "--glob",
         action="append",
@@ -237,6 +240,20 @@ def _build_batch_parser(
     _add_profiling_args(p)
     _add_debug_lines_arg(p)
     p.set_defaults(func=_cmd_batch)
+
+
+_UNEXPANDED_MEMBER = re.compile(r"^(?:COPY|EXEC SQL INCLUDE) (\S+) was not expanded")
+
+
+def _unexpanded_members(warnings: list[str] | None) -> list[str]:
+    """The COPY / ``EXEC SQL INCLUDE`` members a parse left out, by name,
+    in first-seen order (read off the parser's "was not expanded" warnings)."""
+    names: list[str] = []
+    for warning in warnings or []:
+        match = _UNEXPANDED_MEMBER.match(str(warning))
+        if match and match.group(1) not in names:
+            names.append(match.group(1))
+    return names
 
 
 def _cmd_batch(args: argparse.Namespace) -> None:
@@ -296,26 +313,51 @@ def _cmd_batch(args: argparse.Namespace) -> None:
         _fail("--workers must be >= 1")
 
     limits = _limit_kwargs(args)
-    results = parse_files(
-        unique_files,
-        workers=args.workers,
+    common: dict[str, Any] = {
+        "workers": args.workers,
         **limits,
-        error_recovery=error_recovery,
-        dialect=dialect,
-        encoding=args.encoding,
-        enable_profiling=enable_profiling,
-        top_n=top_n,
-        prof_output=prof_output,
-        debug_lines=bool(getattr(args, "debug_lines", False)),
-    )
+        "error_recovery": error_recovery,
+        "dialect": dialect,
+        "encoding": args.encoding,
+        "enable_profiling": enable_profiling,
+        "top_n": top_n,
+        "prof_output": prof_output,
+        "debug_lines": bool(getattr(args, "debug_lines", False)),
+    }
+    copybook_paths = list(getattr(args, "copybook_path", None) or [])
+    strict_copybooks = bool(getattr(args, "strict_copybooks", False))
+    if copybook_paths:
+        # As the single-file subcommands do (`_do_parse`): a missing member
+        # is left as written and named in the file's entry, and every other
+        # member is expanded. --strict-copybooks makes it a failed file.
+        from ...batch import parse_files_with_copybooks
+
+        results = parse_files_with_copybooks(
+            unique_files,
+            copybook_paths,
+            skip_missing_copybooks=not strict_copybooks,
+            **common,
+        )
+    else:
+        results = parse_files(unique_files, **common)
 
     output = []
+    files_with_unexpanded = 0
     for br in results:
         entry: dict[str, Any] = {"path": str(br.path)}
         if br.read_error:
             entry["read_error"] = br.read_error
         elif br.result is not None:
             entry["success"] = br.result.success
+            if br.copybook_error:
+                entry["copybook_error"] = br.copybook_error
+            unexpanded = _unexpanded_members(br.result.warnings)
+            if unexpanded:
+                # Always present (not only with --errors): the AST covers
+                # the program without these members, and a consumer reading
+                # only `ast` would not otherwise know.
+                entry["unexpanded_copybooks"] = unexpanded
+                files_with_unexpanded += 1
             if br.result.ast is not None:
                 entry["program_id"] = br.result.ast.program_name or None
                 entry["ast"] = br.result.ast.to_dict()
@@ -333,10 +375,30 @@ def _cmd_batch(args: argparse.Namespace) -> None:
     # Surface per-file failures in the process exit code — the batch JSON
     # already records them, but scripts gating on $? previously saw 0 even
     # when every file failed.
+    if files_with_unexpanded:
+        if not copybook_paths:
+            advice = (
+                "pass --copybook-path DIR or set project.copybook_path in cobol.yml"
+            )
+        elif strict_copybooks:
+            advice = (
+                "with --strict-copybooks a file with a missing member is parsed "
+                "with no COPY expanded and counts as failed (see copybook_error)"
+            )
+        else:
+            advice = "not found on the copybook path; each file was parsed without them"
+        print(
+            f"warning: {files_with_unexpanded} of {len(results)} file(s) have "
+            f"copybooks that were not expanded (see unexpanded_copybooks); "
+            f"{advice}",
+            file=sys.stderr,
+        )
     failed = [
         br
         for br in results
-        if br.read_error or (br.result is not None and not br.result.success)
+        if br.read_error
+        or (br.result is not None and not br.result.success)
+        or (strict_copybooks and br.copybook_error)
     ]
     if failed:
         print(
@@ -512,7 +574,7 @@ def _build_expand_parser(
     )
     p.add_argument("file", help="Path to the COBOL source file")
     _add_encoding_arg(p)
-    _add_copybook_args(p)
+    _add_copybook_args(p, strict_flag=True)
     _add_compact_arg(p)
     p.add_argument(
         "--keep-comments",
@@ -559,10 +621,22 @@ def _cmd_expand(args: argparse.Namespace) -> None:
     # and ignored the program's own >>DEFINE (#583, as #271 for preprocess).
     defines = _parse_defines(args.define)
 
+    # Lenient by default, as the analyzers are (`_do_parse`): a member that
+    # is not on the copybook path stays as written, every other member is
+    # expanded, and the missing ones are listed in `unexpanded_copybooks`
+    # and on stderr. --strict-copybooks keeps the old exit 1.
+    strict_copybooks = bool(getattr(args, "strict_copybooks", False))
+    copybook_paths = list(args.copybook_path or [])
+    if not strict_copybooks:
+        from ...preprocess._system_copybooks import with_system_copybooks
+
+        copybook_paths = with_system_copybooks(copybook_paths)
+
     try:
         result = expand_copybooks(
             source,
-            copybook_paths=args.copybook_path,
+            copybook_paths=copybook_paths,
+            skip_missing_copybooks=not strict_copybooks,
             max_nesting_depth=args.max_depth,
             process_conditionals=True,
             defined_symbols=defines or {},
@@ -577,11 +651,38 @@ def _cmd_expand(args: argparse.Namespace) -> None:
         # error, not a crash, and a traceback hid the one line that says so.
         _fail(f"Copybook expansion failed for {args.file}: {exc}")
 
-    _json_out(
-        {"source_file": args.file, **result.to_dict()},
-        args.compact,
-        getattr(args, "output", None),
-    )
+    unexpanded = _missing_members(result.statistics.warnings)
+    output: dict[str, Any] = {"source_file": args.file, **result.to_dict()}
+    if unexpanded:
+        output["unexpanded_copybooks"] = unexpanded
+        shown = ", ".join(unexpanded[:5]) + (
+            f" and {len(unexpanded) - 5} more" if len(unexpanded) > 5 else ""
+        )
+        print(
+            f"warning: {args.file}: {len(unexpanded)} copybook(s) not found on "
+            f"the copybook path ({shown}); left as written "
+            "(--strict-copybooks fails instead)",
+            file=sys.stderr,
+        )
+    _json_out(output, args.compact, getattr(args, "output", None))
+
+
+_MISSING_MEMBER = re.compile(
+    r"^(?:Copybook '([^']+)' not found|EXEC SQL INCLUDE (\S+) was not expanded)"
+)
+
+
+def _missing_members(warnings: list[str] | None) -> list[str]:
+    """The members an expansion left as written, by name, first-seen order
+    (read off ``expand_copybooks``'s skip-missing warnings)."""
+    names: list[str] = []
+    for warning in warnings or []:
+        match = _MISSING_MEMBER.match(str(warning))
+        if match:
+            name = match.group(1) or match.group(2)
+            if name not in names:
+                names.append(name)
+    return names
 
 
 # -- Path resolution ---------------------------------------------------------

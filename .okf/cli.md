@@ -148,14 +148,14 @@ Verified against `python -m cobolparser <cmd> --help` on 2026-10-15. Order is
 | Subcommand | Positionals | Own flags (default) | Shared flags | Output |
 |---|---|---|---|---|
 | `parse` | `file [path]` | `--errors`, `--stats`, `--find-type NODE_TYPE` | A without `--program`; +prof | AST JSON; exit 2 on a recovered-but-errored parse |
-| `batch` | `[files ...]` | `--glob PATTERN`..., `--workers N` (CPU count), `--timeout SECONDS` (none), `--max-file-bytes N` (none), `--encoding` (detected), `--errors`, `--stats` | `--compact`, `--dialect`, `--error-recovery`, `-o`, dl; +prof | JSON list, one entry per file |
+| `batch` | `[files ...]` | `--glob PATTERN`..., `--copybook-path DIR`... (none: no COPY expanded), `--strict-copybooks`, `--workers N` (CPU count), `--timeout SECONDS` (none), `--max-file-bytes N` (none), `--encoding` (detected), `--errors`, `--stats` | `--compact`, `--dialect`, `--error-recovery`, `-o`, dl; +prof | JSON list, one entry per file |
 | `tokenize` | `file` | — | `--compact`, `--source-format`/`--free-form`, dl, `--dialect`, `--encoding`, `-o` | `{source_file, tokens}` |
 | `preprocess` | `file` | `--strip-directives` | `--source-format`/`--free-form`, dl, `--define`, `--encoding` (no `--compact`, no `-o`) | free-form source text |
-| `expand` | `file` | `--keep-comments`, `--source-map`, `--max-depth N` (100) | `--copybook-path`, `--compact`, `--define`, `--encoding`, `-o`, dl | expansion JSON |
+| `expand` | `file` | `--keep-comments`, `--source-map`, `--max-depth N` (100), `--strict-copybooks` | `--copybook-path`, `--compact`, `--define`, `--encoding`, `-o`, dl | expansion JSON |
 | `gen-data` | `file` (copybook or program) | `--rows/-n` (10), `--seed`, `--record`, `--list-records`, `--describe`, `--header-style {short,path}`, `--include-filler`, `--include-redefines`, `--no-expand-occurs`, `--max-occurs`, `--no-semantic`, `--ignore-values`, `--unique FIELD`, `--blank-rate`, `--format {csv,json,record,hex}` (csv), `--charset` (ascii), `--endian` (auto), `--record-format` (fixed), `--record-varying MIN:MAX`, `--record-separator` (none) | `--copybook-path`, `--compact`, `--encoding`, `-o` | CSV / JSON / record bytes / hex |
 | `decode` | `[file]` | `--copybook FILE` (required), `--record`, `--view`, `--list-views`, `--format {csv,json,hex}` (csv), `--charset`, `--endian`, `--record-format`, `--record-length N`, `--record-separator`, `--max-records N` (all), `--skip N` (0), `--strict` | `--copybook-path`, `--compact`, `-o` | CSV / JSON / hex |
 | `compare` | `expected actual` | `--copybook FILE` (required), `--record`, `--view`, `--key FIELD`..., `--ignore FIELD`..., `--compare-bytes`, `--max-differences N`, `--format {text,json}` (text), the decode file-format flags (`--charset`, `--endian`, `--record-format`, `--record-length N`, `--record-separator`) | `--copybook-path`, `--compact`, `-o` | report; exit 0/1/2 like `cmp` |
-| `gen-fixtures` | `file` | `--callee-path DIR`..., `--rows/-n` (10), `--seed`, `--max-occurs N`, `--scenarios {happy,branches,all}` (happy), `--format {json,csv-dir}` (json), `--list-boundaries`, `--strict` | `--copybook-path`, `--compact`, `-o`, dl | `FixtureBundle` JSON or CSV dir |
+| `gen-fixtures` | `file` | `--callee-path DIR`..., `--rows/-n` (10), `--seed`, `--max-occurs N`, `--scenarios {happy,branches,all}` (happy), `--format {json,csv-dir}` (json), `--list-boundaries`, `--strict`, `--strict-copybooks` | `--copybook-path`, `--compact`, `-o`, dl | `FixtureBundle` JSON or CSV dir |
 | `analyze` | `file` | — | A; +prof | dynamic CALL targets |
 | `dead-code` | `file` | — | A; +prof | `DeadCodeAnalyzer` |
 | `unused-variables` | `file` | `--exclude-copybook-variables` | A; +prof | `UnusedVariableAnalyzer` |
@@ -171,7 +171,7 @@ Verified against `python -m cobolparser <cmd> --help` on 2026-10-15. Order is
 | `dclgen-check` | `file` | — | A; +prof | `DclgenChecker` |
 | `redundancy` | `file` | `--min-clone-statements N` (3) | A; +prof | `RedundancyAnalyzer` |
 | `scan` | `[files ...]` | `--glob`..., `--files-from FILE`, `--analyzer NAME`... (`health,redundancy`), `--clones`, `--min-clone-members N` (2), `--min-clone-statements N` (3), `--workers N` (CPU count), `--timeout SECONDS` (none), `--max-file-bytes N` (none), `--encoding` (detected), `--cache-dir DIR` (off), `--format {json,sarif}` (json; sarif runs `lint`) | A without `--program` | `scan_version` report, or a SARIF log of every file's lint findings |
-| `lint` | `[FILE ...]` | `--glob PATTERN`..., `--files-from FILE`, `--changed-since REF`, `--extension EXT`... (`.cbl .cob .cobol`), `--rule RULE`... (all, incl. `line-length`; `call-check` only with `--callee-path`), `--callee-path DIR`... (off; config `callee_path`), `--disable RULE`..., `--severity RULE[/KIND]=LEVEL`..., `--min-severity {error,warning,info}` (warning for text/github, info for json/sarif), `--fail-on {error,warning,info,never}` (never), `--format {json,text,sarif,github}` (json), `--exclude PATTERN`..., `--baseline FILE`, `--write-baseline FILE`, `--strict-copybooks`, `--workers N` (CPU count), `--new-code-since REF`, `--scope [RULE=]new\|all`... (new; config `lint.scope`), `--summary-file FILE` | A (`--program` default: every unit); +prof (one file only) | findings (or a SARIF 2.1.0 log, or GitHub workflow commands); several files: `{files, failures, summary}`; exit 3 on `--fail-on`, 1 when a file could not be linted |
+| `lint` | `[FILE ...]` | `--glob PATTERN`..., `--files-from FILE`, `--changed-since REF`, `--extension EXT`... (`.cbl .cob .cobol`), `--rule RULE`... (all, incl. `line-length`; `call-check` only with `--callee-path`), `--callee-path DIR`... (off; config `callee_path`), `--disable RULE`..., `--severity RULE[/KIND]=LEVEL`..., `--min-severity {error,warning,info}` (warning for text/github, info for json/sarif), `--fail-on {error,warning,info,never}` (never), `--format {json,text,sarif,github}` (json), `--exclude PATTERN`..., `--baseline FILE`, `--write-baseline FILE`, `--strict-copybooks`, `--workers N` (CPU count), `--new-code-since REF`, `--scope [RULE=]new\|all`... (new; config `lint.scope`), `--summary-file FILE` | A (`--program` default: every unit); +prof (one file only) | findings (or a SARIF 2.1.0 log, or GitHub workflow commands); several files: `{files, failures, summary}`; exit 3 on `--fail-on`; 1 when a single FILE could not be linted, 2 when a file of a multi-file run could not (as `scan`) |
 | `data-items` | `file` | — | A; +prof | `compute_program_data_items()` |
 | `program-signature` | `file` | — | A (`--program` default: every unit); +prof | `{"signatures": [...]}` |
 | `xref` | `file` | — | A; +prof | `XrefReport` |
@@ -200,8 +200,8 @@ Subcommands that take none of the COBOL parse flags (`--source-format`,
 |------|---------|
 | `0` | Ran to completion; findings alone never change it. Analyzer subcommands exit 0 on a partial parse too, printing `warning: <file> parsed with N error(s); analysis may be incomplete` to stderr (`_parse_result_or_fail`) |
 | `1` | The CLI failed (`_fail()`): unreadable file, `ast is None`, unwritable output, a `cobol.yml` error, a missing extra, an invalid option value |
-| `2` | Argparse rejected the arguments; `parse` (incl. `--find-type`) got a recovered-but-errored parse — JSON still printed, summary on stderr (`_exit_if_partial_parse`; with `--errors` it says the errors are in the JSON instead of the re-run hint, #745); `batch` had a file with a `read_error` or `success=false`; `scan` had a file in `failures`, and `codebase-graph` / `copybook-impact` a file in the graph's `errors` (missing, unreadable or parsed with errors) -- output still written, a `warning:` on stderr, plus `error: no such file or directory: X` per missing path (`_exit_on_graph_errors`, #325, owner's option (a): any failed file, as `batch`); `gen-fixtures --strict` found unresolved items; `call-check` had a missing file (before any parse) or a file that failed to parse (after the report) |
-| `3` | `lint --fail-on` (any file of a multi-file run; a file that could not be linted makes it 1 instead) / `call-check --fail-on` / `widen-check --fail-on` threshold hit; `jcl --strict` hit an unparseable card |
+| `2` | Argparse rejected the arguments; `parse` (incl. `--find-type`) got a recovered-but-errored parse — JSON still printed, summary on stderr (`_exit_if_partial_parse`; with `--errors` it says the errors are in the JSON instead of the re-run hint, #745); `batch` had a file with a `read_error` or `success=false`; `scan` had a file in `failures`, and `codebase-graph` / `copybook-impact` a file in the graph's `errors` (missing, unreadable or parsed with errors) -- output still written, a `warning:` on stderr, plus `error: no such file or directory: X` per missing path (`_exit_on_graph_errors`, #325, owner's option (a): any failed file, as `batch`); `gen-fixtures --strict` found unresolved items; a multi-file `lint` had a file in `failures` (as `scan`); `batch --strict-copybooks` had a file with a `copybook_error`; `call-check` had a missing file (before any parse) or a file that failed to parse (after the report) |
+| `3` | `lint --fail-on` (any file of a multi-file run; a file that could not be linted makes it 2 instead) / `call-check --fail-on` / `widen-check --fail-on` threshold hit; `jcl --strict` hit an unparseable card |
 | `141` | stdout closed (128 + SIGPIPE) |
 
 Exit 2 on a partial parse lets scripts gating on `$?` tell a partial parse
@@ -510,6 +510,15 @@ start.
   and/or via repeatable `--glob 'src/**/*.cbl'`; `--workers` (CPU count),
   `--encoding` (detected); one JSON result per file, `--errors` / `--stats`
   per file. Exit 2 when any file has a `read_error` or `success=false`.
+  `--copybook-path` (repeatable; `project.copybook_path`) switches to
+  `parse_files_with_copybooks(skip_missing_copybooks=True)`: a missing member
+  stays as written and the rest expand. `--strict-copybooks` passes False, so
+  such a file is parsed with no COPY expanded, gets `copybook_error` and
+  counts as failed (exit 2). That path runs in one process unless `--timeout`
+  is given (the resolver cache is shared). Each entry has
+  `unexpanded_copybooks` (from the parse's "was not expanded" warnings) when
+  any COPY was left out, with or without `--errors`, and stderr has one
+  `warning: N of M file(s) have copybooks that were not expanded` line.
 * **`tokenize`** prints `{"source_file", "tokens": [{"type", "value", "line",
   "column"}]}` (`type` is the `TokenType` name) through
   `lexer._tokenize_source`, the same normalize-then-lex path as `parse`, with
@@ -546,6 +555,12 @@ Conditional compilation always runs in the expander, `--define` or not
 copybooks and only one arm of each `>>IF` survives; diagnostics go to
 `statistics.warnings`. Gating it on `--define` printed both arms (#583, the
 `expand` twin of #271).
+
+Missing members are lenient by default, as in `_do_parse`: `expand_copybooks(
+skip_missing_copybooks=True)` over `with_system_copybooks(paths)`, so a member
+not on the path stays as written (with no path, every COPY does). The names go
+in `unexpanded_copybooks` (`_missing_members()`, from `statistics.warnings`)
+and a `warning:` line on stderr. `--strict-copybooks` restores the exit 1 below.
 
 * `--keep-comments` puts each comment line's text back, in the program and in
   every inlined member. Expansion always blanks comments first (a `COPY`
@@ -702,6 +717,11 @@ numbers below are that initiative's) and `docs/fixture-bundle-schema.md`.
   against a consumer's own walk.
 * `--strict` exits **2** (1 stays "could not run") when `bundle.unresolved` is
   non-empty, including any arm whose scenario data *violates* it (#244).
+* A missing COPY member is lenient by default
+  (`analyze_from_file(strict_copybooks=False)`): it is left out of the layout,
+  each one is an `unresolved` entry (so `--strict` exits 2 on it) and stderr
+  says how many. `--strict-copybooks` restores the `ProgramLayoutError`,
+  exit 1. `--list-boundaries` works the same way.
 
 ## Single-file analyzers
 
@@ -821,8 +841,8 @@ parse, one severity-graded finding list.
   ...`); json is `{files: [{source_file, program_id, ...report}], failures:
   [{source_file, error}], summary: {file_count, linted, failed, total, error,
   warning, info, suppressed, baselined}}` plus `changed_since: {ref, changed_files, via_copybook}`;
-  sarif is one log with a notification per failure. Exit 1 if any file
-  failed, else 3 if any file hit `--fail-on`. `--profile` is ignored with a
+  sarif is one log with a notification per failure. Exit 2 if any file
+  failed (the code `scan` uses), else 3 if any file hit `--fail-on`. `--profile` is ignored with a
   warning. One FILE alone keeps the single-file shapes above unchanged.
 * **`--changed-since REF`** (`cli/_changed_files.py`): files changed between
   `git merge-base REF HEAD` and the working tree (committed, staged,
@@ -892,7 +912,7 @@ parse, one severity-graded finding list.
   (fixed-format columns 8-72, 7 short of an editor). `_lint_column_offset`
   judges the program as `CobolParser` does (`--source-format`, else
   `detect_fixed_format`), each copybook as the expander did
-  (`_looks_fixed_format`), and gives a line after `>>SOURCE FORMAT FREE`
+  (`_looks_fixed_format`, which follows the program's format on a tie), and gives a line after `>>SOURCE FORMAT FREE`
   (`free_format_flags`) no shift. `analysis.lint.fixed_format_column_offset`:
   fixed listing + fixed file 7, fixed listing + free member 0 (re-padded by
   7), free listing + fixed member 6 (only the sequence area is cut), free

@@ -8,6 +8,7 @@ This module provides delegating CobolParser that orchestrates parsing through:
 
 import logging
 import os
+import re
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Literal, overload
 
@@ -50,6 +51,24 @@ from .preprocess.replace_statement import (
 from .profiling import ProfilerContext, ProfilingResult
 
 logger = logging.getLogger(__name__)
+
+
+#: IDENTIFICATION DIVISION comment-entry paragraphs, as the AST's metadata
+#: keys them.
+_COMMENT_ENTRY_KEYS = (
+    "author",
+    "installation",
+    "date_written",
+    "date_compiled",
+    "security",
+    "remarks",
+)
+#: DATA DIVISION text where a comment-entry should hold prose.
+_SWALLOWED_DATA_RE = re.compile(
+    r"\b(?:DATA\s+DIVISION|(?:WORKING-STORAGE|LINKAGE|LOCAL-STORAGE|FILE)"
+    r"\s+SECTION)\b",
+    re.IGNORECASE,
+)
 
 
 def _debugging_mode_on(unit: CobolProgram) -> bool:
@@ -371,6 +390,7 @@ class CobolParser:
                     unit.serialization_config = self.serialization_config
                     unit.omitted_copy_lines = tuple(self._omitted_copy_lines)
                 self._warn_dropped_debug_lines(program)
+                self._warn_data_without_data_division(program)
 
             logger.info(
                 "Finished parsing %s: success=%s, errors=%d, warnings=%d, "
@@ -543,6 +563,34 @@ class CobolParser:
                 len(self._dropped_debug_lines),
             )
         )
+
+    def _warn_data_without_data_division(self, program: CobolProgram) -> None:
+        """Warn when a comment-entry swallowed the program's DATA DIVISION.
+
+        A program with no DATA DIVISION whose IDENTIFICATION DIVISION
+        comment-entry (``DATE-COMPILED.``, ``REMARKS.``, ...) holds DATA
+        DIVISION or storage-section text has lost its declarations into the
+        entry -- an indented ``COPY`` of a member holding the ENVIRONMENT and
+        DATA DIVISIONs did exactly that. The parse used to succeed with zero
+        data items and nothing said so; xref then reported every name the
+        PROCEDURE DIVISION uses as undefined.
+        """
+        for unit in program.program_units():
+            if unit.data_division is not None:
+                continue
+            identification = unit.identification_division
+            metadata = getattr(identification, "metadata", None) or {}
+            for key in _COMMENT_ENTRY_KEYS:
+                text = metadata.get(key)
+                if isinstance(text, str) and _SWALLOWED_DATA_RE.search(text):
+                    paragraph = key.upper().replace("_", "-")
+                    self.add_warning(
+                        f"Program {unit.program_name or '?'} has no DATA "
+                        f"DIVISION, but its {paragraph} comment-entry holds "
+                        f"data-division text ('{text[:60]}'); its "
+                        "declarations were read as part of the comment-entry"
+                    )
+                    break
 
     def _tokenize(self, cleaned_source: str, filename: str, free_form: bool) -> bool:
         """Lex *cleaned_source* into ``self.tokens`` and ``self.stream``.
@@ -1397,6 +1445,11 @@ def parse_cobol_with_expansion(
         # debugging lines compiled as code have to survive it.
         debug_lines=debug_lines,
         skip_missing_copybooks=skip_missing_copybooks,
+        # ``preprocess_fixed=True`` (``--source-format fixed``) is a statement
+        # about every file of the program, members included.
+        source_format=(
+            "fixed" if parser_kwargs.get("preprocess_fixed") is True else "auto"
+        ),
     )
 
     # Parse the expanded source

@@ -35,7 +35,10 @@ twice) is compared by count and mode only and listed in
 files is counted in :attr:`CallInterfaceReport.external_calls`, not
 reported as a problem; a dynamic CALL is checked against every target its
 :class:`~.value_tracker.DynamicCallAnalyzer` value set names, and an
-incomplete set says so.
+incomplete set says so. That value set is flow-insensitive (every MOVE to
+the identifier, wherever it is), so when it names more than one program a
+finding is against a *possible* target: it carries ``possible_targets`` and
+its severity is capped at warning.
 
 Memory stays flat: each file is reduced to its interfaces and call sites
 (small dataclasses) as it is parsed, so only one AST is live at a time.
@@ -171,6 +174,11 @@ class CallInterfaceFinding:
     position: int | None = None
     argument: OperandShape | None = None
     parameter: OperandShape | None = None
+    #: A dynamic CALL whose value set names more than one program: every
+    #: name in it. The finding is against one *possible* target (the value
+    #: set is flow-insensitive: any MOVE to the identifier anywhere), so its
+    #: severity is capped at warning. Empty for a static or one-target CALL.
+    possible_targets: tuple[str, ...] = ()
 
     def to_dict(self) -> dict[str, Any]:
         out: dict[str, Any] = {
@@ -189,6 +197,8 @@ class CallInterfaceFinding:
             out["argument"] = self.argument.to_dict()
         if self.parameter is not None:
             out["parameter"] = self.parameter.to_dict()
+        if self.possible_targets:
+            out["possible_targets"] = list(self.possible_targets)
         return out
 
 
@@ -659,6 +669,11 @@ def _compare_one(
     report: CallInterfaceReport,
     unknown_notes: set[str],
 ) -> None:
+    # A dynamic CALL with several candidate targets reaches one of them at
+    # run time, which one depends on flow the value set does not track: a
+    # mismatch with one candidate is a "may", not an "is".
+    possible = site.targets if site.is_dynamic and len(site.targets) > 1 else ()
+
     def add(
         kind: str,
         severity: str,
@@ -667,6 +682,8 @@ def _compare_one(
         argument: OperandShape | None = None,
         parameter: OperandShape | None = None,
     ) -> None:
+        if possible:
+            severity = "warning" if severity == "error" else severity
         report.findings.append(
             CallInterfaceFinding(
                 kind=kind,
@@ -680,10 +697,15 @@ def _compare_one(
                 position=position,
                 argument=argument,
                 parameter=parameter,
+                possible_targets=possible,
             )
         )
 
-    call = f"CALL '{target}'"
+    call = (
+        f"dynamic CALL (possible target '{target}', one of {len(possible)})"
+        if possible
+        else f"CALL '{target}'"
+    )
     passed, declared = len(site.arguments), len(callee.parameters)
     if passed != declared:
         add(

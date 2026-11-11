@@ -1125,7 +1125,10 @@ def _lint_many(args: argparse.Namespace) -> None:
     if fmt not in ("text", "github"):
         print(summary_line, file=sys.stderr)
     if failures:
-        sys.exit(1)
+        # 2, as scan / batch / codebase-graph / call-check exit when one
+        # file of a multi-file run failed: the report was still written.
+        # 1 stays "the CLI never ran" (a single FILE that cannot be linted).
+        sys.exit(2)
     fail_on = getattr(args, "fail_on", "never")
     if any(_lint_fails(report, fail_on) for _, report, _ in linted):
         sys.exit(3)
