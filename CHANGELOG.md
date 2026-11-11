@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+* **A missing `EXEC SQL INCLUDE` member is reported.** The expander leaves an
+  INCLUDE it cannot find as written, which is right for SQLCA and SQLDA (the
+  precompiler supplies them) but hid every other member: a DCLGEN or a shared
+  COMMAREA layout vanished with no warning, and the analyzers read the program
+  without its declarations (GenApp `lgapdb01`: 54 undefined names in xref).
+  Such a member now adds a "was not expanded" warning to the parse result, and
+  the analyzer subcommands name it on stderr.
 * **Analyzer fixes from running every analyzer over the open-source
   corpus.** Clone digests no longer change when `DynamicCallAnalyzer` has
   annotated an EXEC CICS XCTL / LINK / LOAD first (`possible_values_incomplete`
