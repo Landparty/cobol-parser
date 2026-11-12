@@ -99,7 +99,7 @@ tests/
     test_public_api_list.py     # docs/public-api.md's facade list == cobolparser.__all__
     test_fixture_bundle_contract.py  # FixtureBundle: exported names, bundle_version, generator signatures, to_dict() key sets, reproducibility, scenario-mode contract (see docs/fixture-bundle-schema.md)
     io_statements/             # 1 file (`io` too)
-  regression/                  # 283 files: pinned bug fixes, typically named for the issue/finding, e.g.
+  regression/                  # 284 files: pinned bug fixes, typically named for the issue/finding, e.g.
                                #   test_swallow_sweep.py: one period-less snippet per registered statement
                                #     parser x a DISPLAY 'MARKER'. sentinel; fails if a new parser is
                                #     registered without a fixture (see parser.md)
@@ -333,6 +333,7 @@ regression files are named for their issue (`test_issue_NNN_*.py`) or audit
 | Program units / models | `regression/test_issue_508_program_metadata.py` (`procedure_count` skips DATA DIVISION sections; `parser_version` is the package version; no `created_at`), `regression/test_nested_program_units.py`, `test_issue_532_nested_program_scope.py` (nesting vs stacking, CALL scope in codebase-graph / MCP / scan depth), `regression/test_issue_504_global_items_in_contained_programs.py` (GLOBAL items in contained programs: xref, MCP explain_symbol, lineage, move-type-check), `unit/test_models.py` (`from_json` lossy warning, `TestNodeEquality`) |
 | Scenario path conditions | `regression/test_issue_310_cross_paragraph_path.py` (a paragraph PERFORMed from one guarded arm takes its guard; several guarded sites make the scenario unverified; a guarded `PERFORM` of a SECTION folds its guard, a section fallen into needs none, #310) |
 | OCCURS expansion caps | `regression/test_issue_376_occurs_expansion_budget.py` (nested tables bounded at 100,000 FieldSpecs per table, weighted by the fields per occurrence inside another table, an outermost table expanding whole (`unit/analysis/test_corpus_analyzer_findings.py`), every cut table named in gen-data / views / gen-fixtures -- those two tests monkeypatch both caps small to stay fast, #376) |
+| Procedure copybooks, call-check holes, le-info | `regression/test_corpus_rerun_2026_11_12_analysis.py` (a member of PROCEDURE DIVISION code is no record for gen-data / `wrap_copybook_fragment`, a DCLGEN or `COPY`-first member still is; call-check leaves a group around an unexpanded `COPY` unchecked, caller and callee side, and still flags a complete short argument; `le-info` answers known names beside an unknown one) |
 | gen-data `--unique` | `unit/generators/data/test_values.py` (`TestBlankRateAndUniqueFields`), `regression/test_issue_526_unique_narrow_text.py` (narrow VALUE / level-88 text stays distinct, exhausted PICTURE and unknown name become caveats, #526) |
 | VALUE vs JUSTIFIED / BWZ | `regression/test_issue_558_value_ignores_justified_bwz.py` (a VALUE-clause cell is written unjustified and unblanked, level-88 / generated cells are not, decode round-trip, #558) |
 | Dialect tables | `unit/test_ibm_enterprise.py` (intrinsic, LE and DL/I tables), `unit/test_issue_341_dialect_crud.py` |
