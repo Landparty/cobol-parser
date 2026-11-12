@@ -162,7 +162,12 @@ is an `unresolved` entry `COPY X was not expanded; fields it declares are
 missing from the layout`, which `BoundaryInventoryAnalyzer` copies into the
 bundle. `ProgramFixtureGenerator.analyze_from_file(strict_copybooks=...)`
 passes it through (default True; the CLI passes False unless
-`--strict-copybooks`).
+`--strict-copybooks`). Any other
+expansion failure (a member refused by `validate_copybook_content` as
+binary -- `CopybookSyntaxError` -- or a circular COPY in strict mode) still
+propagates as a `PreprocessingError`; the `gen-fixtures` CLI (both paths,
+including `--list-boundaries`) turns it into `error: Copybook expansion
+failed for <file>: ...` and exit 1 rather than a traceback (2026-11-11).
 `build()`/`from_file()` also stamp `index.ast` with the `CobolProgram` the
 index was built from, so a caller that kept only the index can reach the AST
 without re-parsing (`ProgramFixtureGenerator.generate_from_file` depends on

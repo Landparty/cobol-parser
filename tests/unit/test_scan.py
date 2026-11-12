@@ -132,7 +132,7 @@ class TestScanOne:
 
         real = scan_module._run_analyzer
 
-        def explode(name, unit, options, *args):
+        def explode(name, unit, options, *args, **kwargs):
             if name == "health":
                 raise RuntimeError("boom")
             return real(name, unit, options, *args)
