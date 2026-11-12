@@ -624,9 +624,12 @@ version 1 on request for a consumer that has not moved yet.
 Every bundle is reproducible: the same `(program source, seed, mode)` always
 produces byte-identical `to_json()` output, including `scenario_coverage` and
 scenario ordering. Each boundary derives its own sub-seed
-(`zlib.crc32(f"{scenario}|{category}|{key}") ^ bundle_seed`) so that adding an
+(`zlib.crc32(f"{category}|{key}") ^ bundle_seed`) so that adding an
 unrelated boundary never reshuffles another boundary's already-generated
 values — see generators.md's "Determinism: per-boundary sub-seeds" section.
+The scenario is not part of it: a field no scenario pins has the same values
+in every scenario, and a boundary none of its fields are pinned in is one
+`fixtures` entry shared by every scenario.
 An unseeded call draws a seed and reports it on `bundle.seed`, so an
 interesting unseeded run is always replayable after the fact.
 

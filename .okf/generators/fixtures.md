@@ -328,7 +328,7 @@ more boundary, for a called subprogram whose whole interface they are.
 `_attach_entry_parameters` sets `Scenario.entry_parameters`: a
 `BoundaryFixture` with ref `ENTRY:<PROGRAM-ID>`, layout over the items'
 elementary fields (`_fields_for_names`), one row from a
-`_sub_seed(seed, scenario, "ENTRY", program)` `ValueFactory`, witnesses
+`_sub_seed(seed, "ENTRY", program)` `ValueFactory`, witnesses
 pinned through `_value_for` like any fixture; and a `stub` expectation per
 field whose path includes a LINKAGE name xref gives role `write`, plus the
 RETURNING item. `generate_with_scenarios` passes the names to
@@ -604,11 +604,16 @@ cut, writes compact JSON unless `--pretty`, and warns over
 `DataGeneratorOptions.max_occurs` still defaults to `None`.
 
 **Per-boundary sub-seeds.** One `bundle.seed`. Each boundary derives its own
-`zlib.crc32(f"{scenario}|{category}|{key}".encode()) ^ bundle_seed`, feeding
+`zlib.crc32(f"{category}|{key}".encode()) ^ bundle_seed`, feeding
 a fresh `random.Random`/`ValueFactory`. Deliberate: a single shared RNG
 consumed in iteration order would reshuffle every later boundary's values
 the moment an earlier one changed shape (a new field, a resized OCCURS) —
-sub-seeding keeps a bundle stable under unrelated additions. `zlib` is
+sub-seeding keeps a bundle stable under unrelated additions. The scenario is
+not part of the seed (since 2026-11-12), and `_value_for` draws a field's
+value even when a pin replaces it: a boundary a scenario does not pin has the
+same rows in every scenario as in the happy path, so a version 2 bundle
+writes it once (a NIST IX215A `all` bundle went from 32.7 MB to 1.1 MB; with
+a seed per scenario no two fixtures were equal). `zlib` is
 stdlib; the zero-dependency rule holds. Pinned by
 `test_program_fixtures.py::TestDeterminism` and the corpus-wide
 `test_gen_fixtures_corpus.py::test_determinism_across_the_corpus`.

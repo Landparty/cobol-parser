@@ -111,7 +111,12 @@ every 01 of one FD gets the same LRECL) — or `None` when it is not longer
 than `chosen` (no FD/SD, a bare copybook, or `chosen` is the longest).
 `from_copybook_source()` uses it as the default `record_length`
 (`--record-length` still overrides; `from_record()` alone has no siblings to
-look at). `CopybookDataGenerator.generate_from_source()` stores the same
+look at). `RecordDecoder.framing_length` is the stride actually used
+(`record_length or views.framing_length`), and `layout_dict()` -- what
+`decode --list-views` prints -- reports it as `framing_length` plus an `lrecl`
+key when it is longer than the layout; MCP `decode_record` reports the same
+number (2026-11-12: both said the 01's own 2 bytes while the file was cut at
+28). `CopybookDataGenerator.generate_from_source()` stores the same
 number as `GeneratedDataset.lrecl`, and under `RecordFormat.FIXED`
 `to_records()` / `record_lengths()` / `to_hex_dump()` pad each record out to
 it with the charset's space (`encode_record(..., pad_to=)`), the dump showing
@@ -237,9 +242,9 @@ tail.
   same column names, same value rendering, same `"\n"` terminator. The CLI
   test asserts `gen-data | decode` reproduces the generated CSV byte for byte.
   The same seed also gives the same values whether the CSV or the record
-  image is generated (FILLER draws nothing, see
-  [record-data.md](record-data.md)), unless a `--max-occurs` cap cut the
-  CSV's tables.
+  image is generated: every field draws from its own stream (see
+  [record-data.md](record-data.md)), so FILLER, REDEFINES and a
+  `--max-occurs` cap change no other field's values.
 * `DecodeResult.to_dict()` — every field's `offset`, `length`, `hex`,
   `present`, `truncated`, `error`. This is what a UI hex pane binds to.
 * `decoded_hex_dump(result, opts)` — the same shape `encoding.hex_dump()`

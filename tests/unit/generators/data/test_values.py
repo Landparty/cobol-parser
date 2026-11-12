@@ -469,32 +469,33 @@ class TestWideNumericPrecision:
         assert self._values(spec, 20) == self._values(spec, 20)
 
     def test_narrow_fields_are_unchanged(self):
-        # Pinned from the float path's output before the fix: a field a
-        # float64 already held exactly keeps its seeded values.
+        # Pinned output for fields a float64 already held exactly. Re-pinned
+        # when every field moved to its own random stream (values for a seed
+        # changed then; the shapes did not).
         cases = {
             (7, 2, True): [
-                "2254257.57",
-                "1058756.26",
-                "7541208.47",
-                "-3522457.09",
-                "6539906.43",
-                "35333.70",
+                "5441976.47",
+                "6736511.23",
+                "-7089045.57",
+                "4031346.85",
+                "-3488416.14",
+                "-5712730.32",
             ],
             (12, 0, False): [
-                "623347347957",
-                "884107995871",
-                "71999863748",
-                "129944532028",
-                "835351532923",
-                "517326624931",
+                "360370162770",
+                "221073038508",
+                "255009680040",
+                "255127617455",
+                "576857635126",
+                "468011074851",
             ],
             (5, 4, False): [
-                "17611.5692",
-                "8271.2551",
-                "64937.7610",
-                "61898.6516",
-                "27519.0939",
-                "3715.8933",
+                "42515.4726",
+                "49029.2339",
+                "30474.3101",
+                "55383.5728",
+                "18972.2935",
+                "31494.8463",
             ],
         }
         for (whole, decimals, signed), expected in cases.items():
@@ -565,17 +566,21 @@ class TestWideFieldRecordSeedStability:
     def test_fields_after_wide_ones_keep_their_seeded_values(self, tmp_path):
         from cobolparser.generators import CopybookDataGenerator
 
-        path = tmp_path / "W.cpy"
-        path.write_text(self.COPYBOOK)
-        dataset = CopybookDataGenerator(
-            DataGeneratorOptions(rows=4, seed=3)
-        ).generate_from_file(str(path))
-        tail = [line.split(",")[3:] for line in dataset.to_csv().splitlines()]
-        # Pinned from main before the fix (#285): E, G, H are unchanged.
-        assert tail == [
-            ["E", "G", "H"],
-            ["61503", "Q9OM48", "72041.48"],
-            ["8392", "KCTBR4", "77955.72"],
-            ["17821", "5NQ1T0", "66485.83"],
-            ["36658", "KU8GNR", "37349.12"],
-        ]
+        def tail(copybook: str) -> list[list[str]]:
+            path = tmp_path / "W.cpy"
+            path.write_text(copybook)
+            dataset = CopybookDataGenerator(
+                DataGeneratorOptions(rows=4, seed=3)
+            ).generate_from_file(str(path))
+            lines = dataset.to_csv().splitlines()
+            return [line.split(",")[-3:] for line in lines]
+
+        # E, G, H read the same with or without the wide fields before them.
+        without_wide = self.COPYBOOK.replace(
+            "           05 A PIC 9(18).\n"
+            "           05 D PIC 9V9(18).\n"
+            "           05 F PIC S9(13)V9(5).\n",
+            "",
+        )
+        assert without_wide != self.COPYBOOK
+        assert tail(self.COPYBOOK) == tail(without_wide)

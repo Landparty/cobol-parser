@@ -321,9 +321,10 @@ class ValueFactory:
 
     def __init__(self, rng: random.Random, opts: DataGeneratorOptions) -> None:
         self._rng = rng
-        #: Seeds the side streams a FILLER with level-88s draws from (see
+        #: Seeds the per-field streams every value is drawn from (see
         #: :meth:`value_for`); reading the state does not advance *rng*.
         self._side_seed = hash(rng.getstate()[1][:8])
+        self._streams: dict[tuple[str, tuple[int, ...]], random.Random] = {}
         self._opts = opts
         self._unique = {u.upper() for u in opts.unique_fields}
         self._used: dict[str, set[str]] = {}
@@ -333,26 +334,35 @@ class ValueFactory:
         self.duplicate_columns: list[str] = []
 
     def value_for(self, spec: FieldSpec, row: int) -> str:
-        """Generate the CSV cell for *spec* in row *row* (0-based)."""
+        """Generate the CSV cell for *spec* in row *row* (0-based).
+
+        Every field draws from a stream of its own, keyed by its qualified
+        name and subscripts, so which *other* fields are generated never
+        changes its values: the CSV (FILLER and REDEFINES left out, OCCURS
+        capped by ``--max-occurs``) and the record image (every byte) give
+        the same field the same values for the same seed.  One shared
+        stream did not -- a skipped occurrence or an included REDEFINES
+        shifted every value after it.
+        """
         if _filler_without_content(spec):
             # A FILLER whose bytes do not depend on its cell -- no VALUE, or
             # a figurative fill (SPACES, LOW-VALUES) -- is written as that
-            # fill whatever is generated, so it draws nothing: a draw here
-            # shifted every later value, and the record image (which always
-            # includes FILLER) no longer matched the CSV for the same seed.
+            # fill whatever is generated.
             return ""
-        if spec.is_filler:
-            # A FILLER that owns level-88s is in a record image but not, by
-            # default, in the CSV. Its value comes from a stream of its own,
-            # so including it or not leaves every other value unchanged and
-            # the same seed gives the same values in both outputs.
-            main = self._rng
-            self._rng = random.Random(f"{self._side_seed}:{row}:{spec.column}")
-            try:
-                return self._value_for(spec, row)
-            finally:
-                self._rng = main
-        return self._value_for(spec, row)
+        key = (spec.qualified_name, tuple(spec.subscripts))
+        stream = self._streams.get(key)
+        if stream is None:
+            subscripts = ",".join(str(s) for s in spec.subscripts)
+            stream = random.Random(
+                f"{self._side_seed}:{spec.qualified_name}({subscripts})"
+            )
+            self._streams[key] = stream
+        main = self._rng
+        self._rng = stream
+        try:
+            return self._value_for(spec, row)
+        finally:
+            self._rng = main
 
     def _value_for(self, spec: FieldSpec, row: int) -> str:
         if self._opts.blank_rate and self._rng.random() < self._opts.blank_rate:
@@ -933,4 +943,10 @@ class ValueFactory:
         size = size if size > 0 else len(value)
         # A value that fits is returned as is rather than sliced: slicing a
         # LiteralCell (a hex literal's cell) would drop the bytes it carries.
-        return value if len(value) <= size else value[:size]
+        if len(value) <= size:
+            return value
+        # A cut that lands just after a space ("8382 OAK STREET" in 9) would
+        # leave a trailing blank no record image can keep: the bytes pad it
+        # anyway, so decode reads the cell back without it.
+        cut = value[:size]
+        return cut.rstrip(" ") if type(value) is str else cut

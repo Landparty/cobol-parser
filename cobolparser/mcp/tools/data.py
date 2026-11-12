@@ -123,7 +123,7 @@ class DataTools(BaseTools):
             "copybook": self.workspace.display(path),
             "record_name": views.record_name,
             "record_length": views.base.length,
-            "framing_length": views.framing_length,
+            "framing_length": decoder.framing_length,
             "view": chosen.name,
             "views": [
                 {

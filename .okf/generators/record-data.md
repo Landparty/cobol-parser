@@ -310,16 +310,21 @@ RNG*: they are storage, not data, and reach the factory PICTURE-less, where
 the numeric path's 9-digit default would emit a random number that looks like
 data. Not drawing keeps the RNG stream of every other field unchanged.
 
-**FILLER draws nothing either** (`values._filler_without_content`): a FILLER
-with no VALUE, or a figurative fill (`SPACES`, `LOW-VALUES`, ...), returns
-`""` before any draw (`blank_rate` included) -- the record-image encoder
-writes its fill whatever the cell holds. A FILLER that owns level-88s is
-generated, but from a side stream seeded by `(seed state, row, column)`, and
-`encode_field` now writes its cell. Because `for_record_image()` always adds
-FILLER while the CSV defaults leave it out, a draw per FILLER used to shift
-every later value: the same seed gave different values in the CSV and the
-record image (405 of 906 copybooks in one checkout). Only a caller's own
-`--max-occurs` cap (which the record image lifts) still changes the stream.
+**Every field draws from its own stream** (`ValueFactory.value_for`, since
+2026-11-12): a `random.Random` per `(qualified_name, subscripts)`, seeded
+from the factory's seed state, created on first use and kept for the rows
+after. So which *other* fields are generated never changes a field's values:
+the CSV (FILLER and REDEFINES left out, OCCURS cut by `--max-occurs`) and the
+record image (`for_record_image()`: every byte) give one field the same
+values for one seed. One shared stream did not -- a skipped occurrence or an
+included REDEFINES shifted every later value (first FILLER, fixed 2026-11-11
+by a FILLER side stream; then `--max-occurs` / `--include-redefines`). A
+FILLER with no VALUE, or a figurative fill (`SPACES`, `LOW-VALUES`, ...),
+still returns `""` without drawing (`values._filler_without_content`); one
+that owns level-88s is generated and `encode_field` writes its cell.
+`_fit_text` drops the trailing blank a truncation leaves (`"8382 OAK "`),
+which no record image can keep. ASCII record images encode DISPLAY text as
+Latin-1, the codec decode reads them with (plain `ascii` wrote `É` as `?`).
 
 **PICTURE-less elementary items** that no usage sizes (`05 JUNK.` with no
 children, usually a misread line) are 0 bytes, `ALPHANUMERIC`, like
@@ -332,7 +337,11 @@ names them in gen-data's `caveats` and decode's, and
 **Default record:** with no `--record`, gen-data and decode use
 `first_generatable_record(records, options)` -- the first 01 that flattens
 to at least one field -- not the first 01 outright (an all-FILLER header
-failed with "no generatable fields" though later 01s qualified). With none
+failed with "no generatable fields" though later 01s qualified). It judges
+with the column defaults (`DataGeneratorOptions()`, no FILLER) whatever
+*options* say, so `--format record` (which includes FILLER) lands on the
+same 01 as the CSV and decode; only when no 01 has a named field does it
+judge by *options* (`--include-filler` on an all-FILLER copybook). With none
 generatable, gen-data names the records it tried and decode falls back to
 the first 01; a named record with no field lists the ones that have some.
 

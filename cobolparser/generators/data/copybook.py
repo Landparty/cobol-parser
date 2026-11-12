@@ -110,9 +110,16 @@ def first_generatable_record(
         CopybookLayoutError: when no record has a generatable field, naming
             the records it looked at.
     """
-    for candidate in records:
-        if flatten_record(candidate, options):
-            return candidate
+    # Judged by the column-shaped defaults, not by *options*: a record image
+    # includes FILLER, so an all-FILLER header 01 qualified for
+    # ``--format record`` while the CSV and decode (which judge without
+    # FILLER) skipped it, and a round trip generated through one 01 and
+    # decoded through another. Only a copybook where no record has a named
+    # field falls back to *options* (``--include-filler`` on all-FILLER).
+    for judge in (DataGeneratorOptions(), options):
+        for candidate in records:
+            if flatten_record(candidate, judge):
+                return candidate
     names = ", ".join(r.name for r in records[:10])
     raise CopybookLayoutError(
         f"{filename}: no record has generatable fields (all FILLER, REDEFINES, "

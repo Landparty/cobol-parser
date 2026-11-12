@@ -1023,6 +1023,28 @@ class RecordDecoder:
         self.varying = varying
         self.layout_warnings = list(layout_warnings or [])
 
+    @property
+    def framing_length(self) -> int:
+        """Bytes per record the decoder cuts a fixed-length file at: the
+        ``record_length`` it was given (``--record-length``, or a whole
+        program's FD ``LRECL``), else the layout's own framing length."""
+        return self.record_length or self.views.framing_length
+
+    def layout_dict(self) -> dict[str, Any]:
+        """:meth:`RecordViews.to_dict` with ``framing_length`` the stride this
+        decoder actually uses (``decode --list-views``).
+
+        The views alone know only the layout: under an FD whose ``LRECL`` is
+        longer than the chosen 01 (``RECORD CONTAINS 28``, or a longer 01
+        beside it), they said 2 bytes while gen-data wrote, and decode read,
+        28-byte records. ``lrecl`` says where a longer stride came from.
+        """
+        answer = self.views.to_dict()
+        if self.record_length and self.record_length != self.views.framing_length:
+            answer["framing_length"] = self.record_length
+            answer["lrecl"] = self.record_length
+        return answer
+
     # -- construction -------------------------------------------------------
 
     @classmethod

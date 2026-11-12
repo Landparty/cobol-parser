@@ -190,7 +190,7 @@
       ],
       "sequence": [
         {
-          "WS-CUST-NAME": "CHARLES GARCIA",
+          "WS-CUST-NAME": "ROBERT RODRIGUEZ",
           "WS-CUSTOMER-ID": "WS001"
         }
       ],
@@ -234,7 +234,7 @@
       ],
       "sequence": [
         {
-          "WS-ALERT-STATUS": "UJ"
+          "WS-ALERT-STATUS": "T9"
         }
       ],
       "terminal": null,
@@ -299,43 +299,43 @@
       "sequence": [
         {
           "ORDER-ID": "ORD001",
-          "ORDER-QTY": "447"
+          "ORDER-QTY": "206"
         },
         {
           "ORDER-ID": "ORD002",
-          "ORDER-QTY": "732"
+          "ORDER-QTY": "998"
         },
         {
           "ORDER-ID": "ORD003",
-          "ORDER-QTY": "648"
+          "ORDER-QTY": "241"
         },
         {
           "ORDER-ID": "ORD004",
-          "ORDER-QTY": "341"
+          "ORDER-QTY": "510"
         },
         {
           "ORDER-ID": "ORD005",
-          "ORDER-QTY": "738"
+          "ORDER-QTY": "632"
         },
         {
           "ORDER-ID": "ORD006",
-          "ORDER-QTY": "673"
+          "ORDER-QTY": "345"
         },
         {
           "ORDER-ID": "ORD007",
-          "ORDER-QTY": "110"
+          "ORDER-QTY": "143"
         },
         {
           "ORDER-ID": "ORD008",
-          "ORDER-QTY": "568"
+          "ORDER-QTY": "671"
         },
         {
           "ORDER-ID": "ORD009",
-          "ORDER-QTY": "74"
+          "ORDER-QTY": "115"
         },
         {
           "ORDER-ID": "ORD010",
-          "ORDER-QTY": "271"
+          "ORDER-QTY": "626"
         }
       ],
       "terminal": {
