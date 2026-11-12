@@ -41,7 +41,7 @@ SEARCH AT END) with the condition selecting that arm and its actions. It is
 promoted to `validation` when an arm signals rejection (moves or DISPLAYs an
 error-like literal, writes/SETs an item whose name has an ERR / ERROR /
 INVALID / REJECT / ABEND word, PERFORMs or GOes TO such a procedure, CALLs
-CEE3ABD / ILBOABN0) or the condition is a class test. COMPUTE / ADD /
+CEE3ABD / ILBOABN0, or a site routine named by `set_site_abend_programs`) or the condition is a class test. COMPUTE / ADD /
 SUBTRACT / MULTIPLY / DIVIDE at paragraph level (not inside an arm) is a
 `calculation` with `formula` normalized to `target = expression` (`DIVIDE A
 INTO B GIVING C` -> `C = B / A`; each receiver keeps its own `ROUNDED [MODE IS

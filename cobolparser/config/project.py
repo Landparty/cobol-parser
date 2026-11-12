@@ -199,6 +199,8 @@ class ProjectConfig:
     # Normalized to the "SYMBOL=VALUE" spelling `--define` takes, so the CLI
     # merge does not need to know which of the two source shapes was used.
     define: tuple[str, ...] = ()
+    # Site abend routines a static CALL of never returns (`--abend-program`).
+    abend_programs: tuple[str, ...] = ()
     data: DataDefaults = field(default_factory=DataDefaults)
     lint: LintDefaults = field(default_factory=LintDefaults)
     limits: LimitDefaults = field(default_factory=LimitDefaults)
@@ -445,6 +447,7 @@ _PROJECT_KEYS = (
     "seed",
     "extensions",
     "define",
+    "abend_programs",
 )
 _DATA_KEYS = ("charset", "endian", "record_format", "record_separator", "rows")
 _LINT_KEYS = (
@@ -570,6 +573,9 @@ def build_config(document: Any, source: Path) -> ProjectConfig:
             project.get("extensions"), "project.extensions", source
         ),
         define=_defines(project.get("define"), source),
+        abend_programs=_string_list(
+            project.get("abend_programs"), "project.abend_programs", source
+        ),
         data=_build_data(top.get("data"), source),
         lint=_build_lint(top.get("lint"), source),
         limits=_build_limits(top.get("limits"), source),

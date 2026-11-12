@@ -180,13 +180,29 @@ def _add_program_arg(
     )
 
 
-def _add_define_args(parser: argparse.ArgumentParser) -> None:
+def _add_define_args(parser: argparse.ArgumentParser, analysis: bool = True) -> None:
     parser.add_argument(
         "--define",
         action="append",
         default=[],
         metavar="SYMBOL[=VALUE]",
         help="Define a conditional compilation symbol (repeatable)",
+    )
+    if not analysis:
+        return
+    # Carried by every subcommand that parses a program to analyze it (all
+    # that take --define, bar parse / preprocess / expand).
+    parser.add_argument(
+        "--abend-program",
+        dest="abend_programs",
+        action="append",
+        default=[],
+        metavar="NAME",
+        help=(
+            "A site abend routine (e.g. CBLTBNC2): a static CALL of it never "
+            "returns, like CALL 'CEE3ABD' (repeatable; project.abend_programs "
+            "in cobol.yml)"
+        ),
     )
 
 
@@ -482,6 +498,10 @@ def _do_parse(args: argparse.Namespace) -> tuple[Any, Any]:
 
         copybook_paths = with_system_copybooks(list(copybook_paths))
     defines = _parse_defines(getattr(args, "define", []))
+    # Set in the process that analyzes (a --workers child parses here too).
+    from ..analysis._abend import set_site_abend_programs
+
+    set_site_abend_programs(getattr(args, "abend_programs", None))
     enable_profiling = _profiling_requested(args)
     top_n = getattr(args, "profile_top_n", _DEFAULT_PROFILE_TOP_N)
     prof_output = getattr(args, "profile_output", None)

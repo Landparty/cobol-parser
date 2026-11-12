@@ -278,6 +278,7 @@ arguments, so a worker signature cannot drift from its call site):
 | `free_form` | `False` | lexer hint (auto-detection may still normalize) |
 | `preprocess_fixed` | `None` | `None` auto-detects, `True`/`False` force/disable fixed-format normalization (CLI `--source-format fixed\|free`, cobol.yml `source_format:`) |
 | `debug_lines` | `False` | compile `D`-in-column-7 lines (CLI `--debug-lines`, cobol.yml `project.debug_lines`) |
+| `abend_programs` | `()` | site abend routines a static CALL of never returns; `_scan_one` sets them (`using_site_abend_programs`) around each file (CLI `--abend-program`, cobol.yml `project.abend_programs`); part of `cache_settings()` |
 | `defined_symbols` | `()` | conditional-compilation `(name, value)` pairs (CLI `--define`, cobol.yml `project.define`): handed to the expander with copybook paths, else evaluated by `preprocess_conditional_compilation` before `parse_cobol` (#324) |
 | `cache_dir` | `None` | a `FactsCache` directory (CLI `--cache-dir`): see "Incremental cache" below |
 | `timeout_seconds` | `None` | per-file wall-clock limit, enforced by `scan_files` in worker processes ([Per-file resource limits](#per-file-resource-limits)) |

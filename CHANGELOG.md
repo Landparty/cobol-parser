@@ -7,7 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+### Added
+
+* **Name your site's abend routines.** `--abend-program NAME` (repeatable)
+  or `project.abend_programs` in `cobol.yml` declares routines such as
+  `CBLTBNC2` that never return, so a paragraph ending in `CALL 'CBLTBNC2'`
+  no longer reads as falling into the next one. Library callers use
+  `cobolparser.analysis.set_site_abend_programs()`.
+
 ### Fixed
+
+* **EJECT, SKIP1-3 and TITLE lines are no longer statements.** A line
+  holding only one is removed before parsing, as the compiler does: after
+  `STOP RUN.` it made lint report a false fall-through (perform-range), it
+  made an empty paragraph non-empty, and between two operands it was read
+  as one (`MOVE 1 EJECT TO A`).
+* **A level-88 name may start with a digit** (`IF 88-EXP-TXN-AVANCE`). It
+  was parsed as an empty condition, so two different ones were reported as
+  a duplicate branch.
+* **A MOVE into a field of a `FILLER REDEFINES X` counts as setting X**:
+  no more false `uninitialized` findings for the fields it overlays.
+* **An IF / ELSE whose arms all end the run ends the paragraph** even when
+  an arm ends by PERFORMing an abend paragraph (perform-range).
+* **io-sequence no longer assumes every file starts closed.** In a
+  subprogram (`PROCEDURE DIVISION USING`, not `IS INITIAL`) files keep their
+  state between CALLs, and an `FD ... IS EXTERNAL` file may be opened by
+  another program, so a READ or CLOSE with no OPEN in sight, and a GOBACK
+  with the file open, are not reported for them.
 
 * **The same seed gives the same values in the CSV and the record image.**
   The record image always includes FILLER, and every FILLER drew values that

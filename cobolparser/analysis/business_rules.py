@@ -114,6 +114,7 @@ from ..models.statements.data import (
 from ..models.statements.io import IOReadStatement
 from ..models.statements.misc import ReturnStatement, SelectStatement
 from ..models.walk import section_paragraphs
+from ._abend import is_abend_program
 from ._procedures import ProcedureEntry, ProcedureIndex
 from .dead_code import DeadCodeAnalyzer
 from .program_flow.condition_text import render_condition_text
@@ -867,7 +868,7 @@ class BusinessRuleExtractor:
                 return f"validation: {label} {verb} {procedure}"
         if isinstance(stmt, CallStatement):
             program = (stmt.called_program or "").strip("'\"").upper()
-            if program in _ABEND_PROGRAMS:
+            if program in _ABEND_PROGRAMS or is_abend_program(program):
                 return f"validation: {label} calls {program}"
         if isinstance(stmt, DisplayStatement):
             for item in stmt.display_items:

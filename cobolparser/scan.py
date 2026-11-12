@@ -117,6 +117,11 @@ class ScanOptions:
     #: code under ``>>IF DBG DEFINED`` vanished and its PERFORM targets read
     #: as dead (#324).
     defined_symbols: tuple[tuple[str, str], ...] = ()
+    #: The site's own abend routines: a static ``CALL`` of one never returns,
+    #: like ``CALL 'CEE3ABD'`` (CLI ``--abend-program``, cobol.yml
+    #: ``project.abend_programs``). See
+    #: :func:`cobolparser.analysis.set_site_abend_programs`.
+    abend_programs: tuple[str, ...] = ()
     #: A directory for :class:`~cobolparser._facts_cache.FactsCache`: a file
     #: whose source, copybooks and copybook directories are unchanged since
     #: a scan with the same options gets that scan's report back without
@@ -491,6 +496,16 @@ def _scan_one(
 ) -> FileScan:
     """:func:`scan_one` without the cache. Adds every file the parse read
     (the program and the copybooks expanded into it) to *sources*."""
+    from .analysis._abend import using_site_abend_programs
+
+    with using_site_abend_programs(options.abend_programs):
+        return _scan_one_uncached(path, options, sources)
+
+
+def _scan_one_uncached(
+    path: str, options: ScanOptions, sources: set[str] | None
+) -> FileScan:
+    """:func:`_scan_one` with the site's abend routines already set."""
     from .preprocess import PreprocessingError
     from .preprocess.copybook_expander import read_program_source
 

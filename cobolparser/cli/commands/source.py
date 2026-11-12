@@ -67,7 +67,7 @@ def _build_parse_parser(
     _add_dialect_arg(p)
     _add_error_recovery_arg(p)
     _add_copybook_args(p, strict_flag=True)
-    _add_define_args(p)
+    _add_define_args(p, analysis=False)
     _add_output_arg(p)
     p.add_argument(
         "--errors",
@@ -483,7 +483,7 @@ def _build_preprocess_parser(
     p.add_argument("file", help="Path to the COBOL source file")
     _add_encoding_arg(p)
     _add_source_format_args(p)
-    _add_define_args(p)
+    _add_define_args(p, analysis=False)
     p.add_argument(
         "--strip-directives",
         action="store_true",
@@ -600,7 +600,7 @@ def _build_expand_parser(
         metavar="N",
         help="Maximum copybook nesting depth (default: 100)",
     )
-    _add_define_args(p)
+    _add_define_args(p, analysis=False)
     _add_output_arg(p)
     _add_debug_lines_arg(p)
     p.set_defaults(func=_cmd_expand)

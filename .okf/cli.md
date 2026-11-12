@@ -138,7 +138,9 @@ Verified against `python -m cobolparser <cmd> --help` on 2026-10-15. Order is
   `--free-form`, `--debug-lines`/`--no-debug-lines`, `--dialect {ibm-enterprise}`
   (default), `--error-recovery {fail-fast,collect-all}` (default `collect-all`),
   `--copybook-path DIR`..., `--program NAME` (default: the outermost unit),
-  `--define SYMBOL[=VALUE]`..., `--encoding ENC` (default: detected, #522),
+  `--define SYMBOL[=VALUE]`..., `--abend-program NAME`... (site abend
+  routines a static CALL of never returns; config `project.abend_programs`),
+  `--encoding ENC` (default: detected, #522),
   `--strict-copybooks` (exit 1 on a missing COPY member instead of analyzing
   without it), `-o/--output FILE`.
 * **+prof** — also `--profile`, `--profile-top-n N` (default 20; implies

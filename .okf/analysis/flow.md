@@ -178,7 +178,11 @@ Two rules. `cics_exit_kind(stmt)`: the command is `RETURN`, `XCTL` or
 `NOHANDLE` (decision (a) on the issue: a failed command then continues at
 the next statement); `ABEND` always is one. A static `CALL 'CEE3ABD'` or
 `CALL 'ILBOABN0'` (`_abend.abend_call_target`, the non-returning IBM abend
-services; site modules such as `ABEND` / `CKRABEND` are not assumed, #817)
+services; site modules such as `ABEND` / `CKRABEND` are not assumed, #817,
+unless the site names them: `_abend.set_site_abend_programs()` /
+`using_site_abend_programs()`, set per file by the CLI from `--abend-program`
+/ `project.abend_programs` and by `scan_one` from `ScanOptions.abend_programs`;
+process-wide state, so a library caller sets it in the process that analyzes)
 is a terminator in the scanner's `_is_terminator` too, sets
 `FlowNode.has_abend_call`, adds an exit point with `exit_statement_kind`
 `"CALL 'CEE3ABD'"`, and counts as a way out in

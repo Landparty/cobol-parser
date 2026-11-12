@@ -298,14 +298,12 @@ class TestSkipCompilerDirectives:
         statement_types = [type(s).__name__ for s in result.ast.get_all_statements()]
         assert statement_types == [
             "DisplayStatement",
-            "SkipStatement",
-            "SkipStatement",
-            "SkipStatement",
             "DisplayStatement",
             "StopStatement",
         ]
-        skip_stmts = result.ast.find_all_by_type("SkipStatement")
-        assert [s.lines for s in skip_stmts] == [1, 2, 3]
+        # A SKIPn line is listing control, removed before parsing (as IBM
+        # does): it is no statement.
+        assert result.ast.find_all_by_type("SkipStatement") == []
 
 
 class TestAlterNumericProcedureNames:

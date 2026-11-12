@@ -215,16 +215,46 @@ def _shape(expr: Any) -> Any:
     if isinstance(expr, CobolExpression):
         expr = expr.to_dict()
     if isinstance(expr, dict):
-        return {
+        shape = {
             k: _shape(v)
             for k, v in sorted(expr.items())
             if k not in ("location", "metadata", "node_type")
         }
+        raw = (expr.get("metadata") or {}).get("raw_condition")
+        if raw and not _has_structure(expr):
+            # A condition the parser could not structure keeps its text only
+            # in metadata: without it, any two such conditions shared one
+            # empty shape and were reported as duplicates of each other.
+            shape["raw_condition"] = _norm(raw)
+        return shape
     if isinstance(expr, list):
         return [_shape(v) for v in expr]
     if isinstance(expr, str):
         return _norm(expr)
     return expr
+
+
+#: Keys of an expression dict that label it rather than hold its content.
+_LABEL_KEYS = frozenset(
+    {
+        "location",
+        "metadata",
+        "node_type",
+        "operator",
+        "expression_type",
+        "condition_type",
+    }
+)
+
+
+def _has_structure(expr: dict[str, Any]) -> bool:
+    """True if the expression dict *expr* holds any operand or
+    sub-condition, not just its kind and operator."""
+    return any(
+        value not in (None, "", [], {})
+        for key, value in expr.items()
+        if key not in _LABEL_KEYS
+    )
 
 
 def _condition_tree(expr: Any) -> Any:

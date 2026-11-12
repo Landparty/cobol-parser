@@ -782,6 +782,17 @@ report: IOSequenceReport = IOSequenceAnalyzer().analyze(ast)
 Validates that IO operations follow legal COBOL sequencing rules (file must be
 opened before read/write, etc.).
 
+**Files that may be open at entry** (`_carried_files`). An `FD f IS EXTERNAL`
+file (the record's `fd_clauses["external"]`), and every file of a
+subprogram (`PROCEDURE DIVISION USING ...`, not `IS INITIAL`), start in
+`_UNKNOWN_AT_ENTRY` (`unopened`, `open:`, `open:;read`) instead of unopened,
+and are never FILE_LEFT_OPEN: another program of the run unit may have opened
+the external file, and a subprogram's files keep their state between CALLs
+(the OPEN / READ / CLOSE dispatcher, GOBACK with files open). Under the
+every-path rule that means no before-OPEN, never-opened or duplicate-OPEN
+claim until the program's own CLOSE or OPEN settles the state. Pinned by
+`tests/regression/test_lint_false_positives_2026_11_12.py`.
+
 **Execution order, not source order.** `analyze()` linearizes the PROCEDURE
 DIVISION (sections and top-level paragraphs interleaved by source line) and
 runs an execution-order chain from the entry procedure: fall-through, a

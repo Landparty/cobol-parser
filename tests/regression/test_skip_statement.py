@@ -52,7 +52,6 @@ class TestSkipWithTrailingPeriod:
         main_para = paras[0]
         assert [s["statement_type"] for s in main_para["statements"]] == [
             "DISPLAY",
-            "SKIP",
         ]
 
         second_para = paras[1]
@@ -82,7 +81,7 @@ class TestSkipWithTrailingPeriod:
         # it is followed by a period like any paragraph name) and must
         # survive distinctly from a bare SKIP2 statement.
         assert names == ["FIRST-PARA", "SKIP-PARA", "LAST-PARA"], names
-        assert [s["statement_type"] for s in paras[1]["statements"]] == ["SKIP"]
+        assert [s["statement_type"] for s in paras[1]["statements"]] == []
 
 
 class TestSkipWithoutTrailingPeriod:
@@ -104,7 +103,6 @@ class TestSkipWithoutTrailingPeriod:
         [main_para] = _paragraphs(result)
         assert [s["statement_type"] for s in main_para["statements"]] == [
             "DISPLAY",
-            "SKIP",
             "DISPLAY",
             "STOP",
         ]
@@ -127,9 +125,6 @@ class TestSkipWithoutTrailingPeriod:
         [main_para] = _paragraphs(result)
         assert [s["statement_type"] for s in main_para["statements"]] == [
             "DISPLAY",
-            "SKIP",
-            "SKIP",
-            "SKIP",
             "DISPLAY",
             "STOP",
         ]
@@ -142,23 +137,23 @@ class TestSkipAstShape:
     def test_skip_statement_to_dict_shape(self):
         source = _HEADER + textwrap.dedent("""\
             MAIN-PARA.
-                SKIP1.
+                CONTINUE SKIP1.
                 STOP RUN.
             """)
         result = parse_cobol(source, filename="skip_shape.cbl")
 
         assert result.success
         [main_para] = _paragraphs(result)
-        skip_stmt = main_para["statements"][0]
+        skip_stmt = main_para["statements"][1]
         assert skip_stmt["statement_type"] == "SKIP"
         assert skip_stmt["node_type"] == "Statement"
 
     def test_each_variant_records_its_own_line_count(self):
         source = _HEADER + textwrap.dedent("""\
             MAIN-PARA.
-                SKIP1
-                SKIP2
-                SKIP3
+                CONTINUE SKIP1
+                CONTINUE SKIP2
+                CONTINUE SKIP3
                 STOP RUN.
             """)
         result = parse_cobol(source, filename="skip_lines.cbl")
@@ -212,5 +207,4 @@ class TestSkipInCopybook:
         common_one = paras[1]
         assert [s["statement_type"] for s in common_one["statements"]] == [
             "DISPLAY",
-            "SKIP",
         ]

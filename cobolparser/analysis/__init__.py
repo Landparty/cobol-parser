@@ -9,6 +9,14 @@ detection, and I/O logging.
 
 # Lazy import to avoid circular dependency with cobolparser.plugins
 def __getattr__(name: str) -> object:
+    if name in (
+        "set_site_abend_programs",
+        "site_abend_programs",
+        "using_site_abend_programs",
+    ):
+        from . import _abend
+
+        return getattr(_abend, name)
     if name == "ProgramContext":
         from .context import ProgramContext
 
@@ -349,6 +357,9 @@ def __getattr__(name: str) -> object:
 
 
 __all__ = [
+    "set_site_abend_programs",
+    "site_abend_programs",
+    "using_site_abend_programs",
     "ProgramAnalyzer",
     "ProgramContext",
     "Report",

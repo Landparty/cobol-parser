@@ -101,6 +101,7 @@ Report origins after copybook expansion: [analysis/lint.md](analysis/lint.md).
 | `protocol.py` | `ProgramAnalyzer`, `Report` (the shared analyzer interface) | [analysis](#calling-conventions) |
 | `context.py` | `ProgramContext` (memoized xref, flow graph, procedure index) | [analysis](#calling-conventions) |
 | `_procedures.py` | `ProcedureIndex`, `enclosing_section`, `qualify` | [flow](analysis/flow.md) |
+| `_abend.py` | `abend_call_target`, `is_abend_program`, `set_site_abend_programs` / `site_abend_programs` / `using_site_abend_programs` (exported from `cobolparser.analysis`) | [flow](analysis/flow.md) |
 | `_cics.py` | `cics_exit_kind`, `cics_terminator_kind`, `cics_identifier_options` | [flow](analysis/flow.md), [data-use](analysis/data-use.md) |
 | `_sql_whenever.py` | `whenever_coverage` | [flow](analysis/flow.md) |
 | `unused_variables.py` | `UnusedVariableAnalyzer`, `collect_declared_items`, `qualified_data_name` | [data-use](analysis/data-use.md) |

@@ -75,6 +75,7 @@ _BINDINGS: dict[str, Callable[[ProjectConfig], Any]] = {
     # name; these keys are argparse dests, not flag spellings.
     "extensions": lambda c: list(c.extensions) or None,
     "define": lambda c: list(c.define) or None,
+    "abend_programs": lambda c: list(c.abend_programs) or None,
     "charset": lambda c: c.data.charset,
     "endian": lambda c: c.data.endian,
     "record_format": lambda c: c.data.record_format,
