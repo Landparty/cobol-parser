@@ -200,7 +200,13 @@ only subordinate items (level 02-49, no 01 — a real idiom for copybooks
 meant to be `COPY`d *inside* an existing record, e.g. NIST `K101A.CPY`)
 gets a **synthesised** `<STEM>-RECORD` root rather than being rejected.
 Anything else — procedure text, `SELECT` clauses, an empty file — raises
-`CopybookLayoutError`.
+`CopybookLayoutError`. A member holding PROCEDURE DIVISION code is caught
+before it is wrapped (`procedure_code_start`: the first code line, after
+comments, listing directives, `COPY` / `REPLACE` and `EXEC ... END-EXEC`, is
+a paragraph or section header or a statement verb): wrapped as data,
+`MOVE 8 TO RETURN-CODE` became a level-08 item with no PICTURE and the member
+a zero-byte record with a "no PICTURE" warning. `wrap_copybook_fragment`
+returns `None` for one, so data-items treats it as a program too.
 
 ## Flattening rules
 

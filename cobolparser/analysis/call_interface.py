@@ -55,6 +55,7 @@ from ..batch import BatchResult, parse_files, parse_files_with_copybooks
 from ..models.data_items import CobolDataItem
 from ..models.program import CobolProgram
 from ..models.statements.call import CallStatement
+from ._copy_holes import items_with_copy_holes
 from ._names import callee_names
 from .codebase import (
     _PARALLEL_THRESHOLD,
@@ -306,6 +307,8 @@ class _DataIndex:
     """Name -> declarations of one program unit, for argument lookup."""
 
     def __init__(self, unit: CobolProgram) -> None:
+        #: Groups whose layout misses a COPY member that was not expanded.
+        self.holed = items_with_copy_holes(unit)
         self._by_name: dict[str, list[CobolDataItem]] = {}
         for item in unit.get_data_items():
             if isinstance(item, CobolDataItem) and item.name and not item.is_filler:
@@ -395,6 +398,12 @@ def _argument_shape(text: str, index: _DataIndex) -> OperandShape:
         return OperandShape(
             text=stripped,
             unknown_reason="its reference modification has no literal length",
+        )
+    if id(item) in index.holed:
+        return OperandShape(
+            text=stripped,
+            unknown_reason="its layout holds a COPY that was not expanded "
+            "(pass --copybook-path)",
         )
     occurs = item.occurs_clause
     if occurs is not None and not groups:
