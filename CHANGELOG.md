@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+* **A REMARKS line that starts with `TITLE` stays in the remarks.** A line of
+  prose such as `TITLE PAGE IS PRINTED FIRST.` ended the comment-entry as if
+  it were the `TITLE` listing directive, and the rest of the remarks was
+  dropped. `TITLE` ends a comment-entry only when a literal follows it.
 * **`scan` no longer grades files that failed to parse.** Its `health` report
   never received the parse-error count or the copybook expansion failure, so
   a file the `health` subcommand leaves ungraded got a B, and one whose
