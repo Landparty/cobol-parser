@@ -82,7 +82,8 @@ def test_record_image_round_trips_and_has_no_caveat() -> None:
     opts = DataGeneratorOptions(rows=3, seed=1).for_record_image()
     dataset = CopybookDataGenerator(opts).generate_from_record(_record(SINGLE))
     image = dataset.to_records(EncodingOptions())
-    assert image[:1] == b"#" and image[10:11] == b"#"
+    # C1's sign floats (leading blanks for a short value); C2's is fixed.
+    assert b"#" in image[:10] and image[10:11] == b"#"
     assert not any("not modelled" in c for c in encoding_caveats(dataset.fields))
     decoded = RecordDecoder.from_record(
         _record(SINGLE), opts=EncodingOptions()

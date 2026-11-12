@@ -642,7 +642,7 @@ def _cmd_decode(args: argparse.Namespace) -> None:
         # asks for to draw a record map, and what a user runs to find out
         # what --view will accept.
         _json_out(
-            {"copybook": args.copybook, **decoder.views.to_dict()},
+            {"copybook": args.copybook, **decoder.layout_dict()},
             args.compact,
             output_path,
         )

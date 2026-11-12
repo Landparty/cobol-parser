@@ -632,6 +632,8 @@ copybook, back into a table**.
 * Data file positional, copybook `--copybook`; the data file is optional only
   with `--list-views` (layout and every REDEFINES overlay with offsets,
   `length` / `overlay_length` — also how to learn what `--view` accepts).
+  Its `framing_length` is the stride decode cuts the file at, a whole
+  program's FD LRECL when longer than the record (then also as `lrecl`).
   `--record` goes through the same `select_record()` as `gen-data`.
 * `--view` reads the bytes through an overlay, by short name
   (`ADDR-OVERSEAS`) or path (`CUST-REC.ADDR-OVERSEAS`); output is the whole

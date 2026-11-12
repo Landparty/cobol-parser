@@ -65,11 +65,17 @@ _SCENARIO_MODES = ("happy", "branches", "all")
 _CALLEE_EXTENSIONS = ("", ".cbl", ".CBL", ".cob", ".COB")
 
 
-def _sub_seed(bundle_seed: int, scenario: str, category: str, key: str) -> int:
+def _sub_seed(bundle_seed: int, category: str, key: str) -> int:
     """Derive a per-boundary seed so adding one boundary never reshuffles
     every value generated after it (a single shared RNG in iteration order
-    would). `zlib.crc32` is stdlib -- the zero-dependency rule holds."""
-    text = f"{scenario}|{category}|{key}".encode()
+    would). `zlib.crc32` is stdlib -- the zero-dependency rule holds.
+
+    The scenario is deliberately not part of it: a boundary a scenario does
+    not pin gets the same rows in every scenario, so a version 2 bundle
+    writes it once instead of once per scenario (a seed per scenario made
+    every fixture distinct, and a `branches` bundle ran to hundreds of
+    megabytes). A scenario's pins are applied over those rows."""
+    text = f"{category}|{key}".encode()
     return zlib.crc32(text) ^ bundle_seed
 
 
@@ -617,9 +623,7 @@ class ProgramFixtureGenerator:
         override: PlannedScenario | None = None,
     ) -> tuple[BoundaryFixture | None, list[Expectation], list[str]]:
         ref = boundary.ref
-        rng = random.Random(
-            _sub_seed(bundle_seed, scenario_name, ref.category, ref.key)
-        )
+        rng = random.Random(_sub_seed(bundle_seed, ref.category, ref.key))
         factory = ValueFactory(rng, self.options)
         unresolved = list(boundary.unresolved)
 
@@ -744,13 +748,17 @@ class ProgramFixtureGenerator:
         property of the sequence rather than of a single record (see
         `PlannedScenario.row_witnesses`).
         """
+        # Drawn even when a pin replaces it, so a pin never shifts the
+        # values of the fields after it: an unpinned field reads the same
+        # in every scenario as in the happy path.
+        generated = factory.value_for(spec, row)
         if override is not None:
             per_row = override.row_witnesses.get(row)
             if per_row is not None and spec.qualified_name in per_row:
                 return per_row[spec.qualified_name]
             if spec.qualified_name in override.witnesses:
                 return override.witnesses[spec.qualified_name]
-        return factory.value_for(spec, row)
+        return generated
 
     @staticmethod
     def _return_code_value(spec: FieldSpec, override: PlannedScenario | None) -> str:
@@ -1223,7 +1231,7 @@ class ProgramFixtureGenerator:
             line=procedure.location.line if procedure is not None else None,
         )
         if fields:
-            rng = random.Random(_sub_seed(bundle_seed, scenario.name, "ENTRY", program))
+            rng = random.Random(_sub_seed(bundle_seed, "ENTRY", program))
             factory = ValueFactory(rng, self.options)
             scenario.entry_parameters = BoundaryFixture(
                 ref=ref,
