@@ -181,8 +181,9 @@ the next statement); `ABEND` always is one. A static `CALL 'CEE3ABD'` or
 services; site modules such as `ABEND` / `CKRABEND` are not assumed, #817,
 unless the site names them: `_abend.set_site_abend_programs()` /
 `using_site_abend_programs()`, set per file by the CLI from `--abend-program`
-/ `project.abend_programs` and by `scan_one` from `ScanOptions.abend_programs`;
-process-wide state, so a library caller sets it in the process that analyzes)
+/ `project.abend_programs`, by `scan_one` from `ScanOptions.abend_programs`
+and by the MCP `Workspace.site_settings()`; `set_*` is process-wide, the
+`using_*` block thread-local and wins over it in its own thread)
 is a terminator in the scanner's `_is_terminator` too, sets
 `FlowNode.has_abend_call`, adds an exit point with `exit_statement_kind`
 `"CALL 'CEE3ABD'"`, and counts as a way out in
@@ -833,8 +834,12 @@ score (computed over what was recovered) but sets `grade` to `None` and adds
 a `caveats` entry; `to_dict()` always carries `parse_error_count` and
 `caveats`. `copybook_error=` (why expansion failed when the caller fell
 back to an unexpanded parse) withholds the grade the same way, with its own
-caveat. The `health` subcommand passes the count; since 2026-11-11 `scan`
-passes both (it used to pass neither, so a file that failed to parse or to
+caveat. `unexpanded_copybooks=` (members the parse left as written, not
+found) keeps the grade but adds one caveat naming them, unless
+`copybook_error` already withheld it (#897, Samuel's option 2: the
+other analyzers report an unexpanded COPY as a caveat too). The `health`
+subcommand passes the count and the members (`scan.unexpanded_members()`
+over the parse warnings); since 2026-11-11 `scan` passes all three (it used to pass neither, so a file that failed to parse or to
 expand still graded A/B in the portfolio). Pinned by `test_technical_debt.py::
 TestParseErrorsWithholdTheGrade` and `test_complexity_health_subcommands.py::
 TestHealthWithParseErrors`.

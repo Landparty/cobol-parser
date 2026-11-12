@@ -290,12 +290,15 @@ class ScanReport:
                 "file_count": len(self.files),
                 "scanned_file_count": len(ok),
                 "failed_file_count": len(failed),
-                # Scanned, but not cleanly: the parse recovered from errors
-                # or fell back to an unexpanded parse. Their units are
-                # reported with the grade withheld; this makes them
-                # countable without breaking the identity above.
+                # Scanned, but not cleanly: the parse recovered from errors,
+                # fell back to an unexpanded parse (both: grade withheld),
+                # or left a COPY member it could not find unexpanded (grade
+                # kept, with a caveat, #897). This makes them countable
+                # without breaking the identity above.
                 "degraded_file_count": sum(
-                    1 for f in ok if f.parse_error_count or f.copybook_error
+                    1
+                    for f in ok
+                    if f.parse_error_count or f.copybook_error or f.unexpanded_copybooks
                 ),
                 "program_unit_count": sum(len(f.units) for f in ok),
                 **(
@@ -323,6 +326,7 @@ def _run_analyzer(
     *,
     parse_error_count: int = 0,
     copybook_error: str | None = None,
+    unexpanded_copybooks: Sequence[str] = (),
 ) -> dict[str, Any]:
     """Run one analyzer over one already-parsed program unit.
 
@@ -348,6 +352,7 @@ def _run_analyzer(
                 unit,
                 parse_error_count=parse_error_count,
                 copybook_error=copybook_error,
+                unexpanded_copybooks=unexpanded_copybooks,
             )
             .to_dict()
         )
@@ -399,6 +404,7 @@ def _scan_unit(
     *,
     parse_error_count: int = 0,
     copybook_error: str | None = None,
+    unexpanded_copybooks: Sequence[str] = (),
 ) -> UnitScan:
     """Every requested analyzer over one unit, each failing on its own."""
     scan = UnitScan(program_name=unit.program_name or "", depth=depth)
@@ -414,6 +420,7 @@ def _scan_unit(
                 copybook_names,
                 parse_error_count=parse_error_count,
                 copybook_error=copybook_error,
+                unexpanded_copybooks=unexpanded_copybooks,
             )
         except Exception as exc:  # noqa: BLE001 -- see the module docstring
             # Deliberately broad. An analyzer that trips over an exotic
@@ -540,7 +547,7 @@ def _scan_one_uncached(
         path=path,
         parse_error_count=len(result.errors),
         copybook_error=expansion_failures[0] if expansion_failures else None,
-        unexpanded_copybooks=_unexpanded_members(result),
+        unexpanded_copybooks=unexpanded_members(result),
         decode_warnings=decode_warnings,
     )
     source_map = getattr(result, "expansion_source_map", None)
@@ -559,6 +566,7 @@ def _scan_one_uncached(
             copybook_names,
             parse_error_count=scan.parse_error_count,
             copybook_error=scan.copybook_error,
+            unexpanded_copybooks=scan.unexpanded_copybooks,
         )
         if source_map:
             # With copybooks expanded, every report location counts lines of
@@ -582,7 +590,7 @@ _UNEXPANDED_MEMBER_RE = re.compile(
 )
 
 
-def _unexpanded_members(result: Any) -> list[str]:
+def unexpanded_members(result: Any) -> list[str]:
     """The members the parser reports as not expanded, once each."""
     names: list[str] = []
     for warning in getattr(result, "warnings", None) or []:

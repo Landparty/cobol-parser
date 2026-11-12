@@ -129,7 +129,15 @@ def _failed(facts: FileFacts, what: str, exc: Exception) -> None:
 def compute_facts(workspace: Workspace, path: Path, builder: Any) -> FileFacts:
     """The facts of program file *path*, from one parse. *builder* is the
     :class:`~cobolparser.analysis.codebase.CodebaseGraphBuilder` whose
-    :meth:`absorb` gives the file's graph part."""
+    :meth:`absorb` gives the file's graph part. Runs under the workspace's
+    :meth:`~.workspace.Workspace.site_settings` (reachability, and so the
+    called-programs list, follows ``project.abend_programs``)."""
+    with workspace.site_settings():
+        return _compute_facts(workspace, path, builder)
+
+
+def _compute_facts(workspace: Workspace, path: Path, builder: Any) -> FileFacts:
+    """:func:`compute_facts` with the site settings applied."""
     from ..batch import BatchResult
 
     display = workspace.display(path)
@@ -368,6 +376,7 @@ class FactsStore:
                 config.extensions,
                 config.dialect,
                 getattr(config, "encoding", None),
+                config.abend_programs,
             )
         )
         return hashlib.sha256(text.encode()).hexdigest()[:24]

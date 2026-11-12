@@ -78,7 +78,7 @@ this package exposes none of it.
 |-------|-------|
 | `JclParseResult` | `jobs`, `procedures`, `symbols`, `errors`, `unresolved`, `filename`, `template_procedures` |
 | `JclJob` | `name`, `steps`, `parameters`, job-level `dd_statements` (JOBLIB), `line` |
-| `JobStep` | `name`, `program`, `procedure`, `parm`, `dd_statements`, `condition`, `parameters`, `line` |
+| `JobStep` | `name`, `program`, `procedure`, `parm`, `dd_statements`, `condition`, `if_condition`, `cond`, `parameters`, `line` |
 | `DDStatement` | `name`, `dataset`, `disposition`, `sysout`, `is_dummy`, `is_instream`, `instream_lines`, `concatenated`, `record_format`, `record_length`, `parameters`, `procstep`, `line` |
 | `JclParameter` | `keyword`, `value`, `subparameters`, `positional` |
 | `DatasetBinding` | `ddname`, `dataset`, `step`, `job`, `disposition`, `record_format`, `record_length`, `program` (the step's `PGM=`; `None` for job-level DDs and `EXEC proc` steps) |
@@ -113,6 +113,12 @@ dataset bind nothing there and are skipped, #547).
   (`(S1.RC = 0)`; in the ELSE `NOT (...)` around the whole expression; nested
   ones each parenthesised and joined with ` AND `). jclparser normalises
   unparenthesised expressions (`RC = 0` reads `RC=0`).
+  `if_condition` is the enclosing-IF expression alone and `cond` the raw
+  `COND=` alone, each `None` when absent: a step inside an `IF` that also
+  codes `COND=` runs only when both allow it, and `condition` (kept as it
+  was for existing readers) holds only the `COND=` then (#896). The MCP job
+  rows (`jcl_common.add_condition()`) add `if_condition` beside such a
+  `condition`, and `run_order` says `only if IF ... holds and ...`.
 * **Procedure invocations** keep their own step (`program=None`,
   `procedure=NAME`, and only the override / added DDs that reached no
   expanded step, with `procstep` set: `_drop_applied_overrides` removes the

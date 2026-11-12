@@ -17,6 +17,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+* **A JCL step inside `IF` that also codes `COND=` keeps the IF.**
+  `JobStep` gains `if_condition` (the enclosing IF/ELSE) and `cond` (the
+  raw `COND=`) beside `condition`, which is unchanged; the MCP job tools
+  show the IF too. mocky-mock's `mockymock job` should test both (#896).
+* **A free-form copybook indented four spaces keeps its field names.** Its
+  level numbers ended in column 6, so it was read as fixed format, the
+  levels were cut off and every field became `ANONYMOUS-n-7` (#898).
+* **health names copybooks it could not find.** A COPY member missing from
+  the copybook path kept a full grade with no word about it. `health` and
+  `scan --analyzer health` now keep the grade but add a caveat naming the
+  members, and scan counts the file in `degraded_file_count` (#897).
+* **The MCP server honours `project.abend_programs`.** Every tool now
+  applies the site abend routines `cobol.yml` names, as the CLI does, so
+  `lint` no longer reports a perform-range fall-through the CLI suppresses
+  for the same file (#900).
 * **`call-check` cites the line in the file.** Standalone `call-check`
   (JSON, text and SARIF) gave the line of the copybook-expanded text, so
   every CALL after a `COPY` was cited too low, sometimes past the end of

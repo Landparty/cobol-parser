@@ -900,7 +900,7 @@ def warm_indexes(workspace: Workspace) -> threading.Thread:
             builders.append(jcl_index)
         for build in builders:
             try:
-                with workspace.lock:
+                with workspace.lock, workspace.site_settings():
                     build(workspace)
             except Exception:  # noqa: BLE001 -- warm-up is best-effort
                 continue

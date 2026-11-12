@@ -515,9 +515,13 @@ def _negated(condition: str) -> str:
     return f"NOT {_grouped(condition)}"
 
 
-def _condition(params: dict[str, Any], enclosing: list[str]) -> str | None:
-    if "COND" in params:
-        return _raw(params["COND"])
+def _cond(params: dict[str, Any]) -> str | None:
+    """The step's raw ``COND=``, or None."""
+    return _raw(params["COND"]) if "COND" in params else None
+
+
+def _if_condition(enclosing: list[str]) -> str | None:
+    """The enclosing ``IF``/``ELSE`` conditions as one expression, or None."""
     if not enclosing:
         return None
     if len(enclosing) == 1:
@@ -535,6 +539,8 @@ def _step(
 ) -> JobStep:
     params = step.parameters
     parm = params.get("PARM")
+    cond = _cond(params)
+    if_condition = _if_condition(enclosing)
     dds = _dds(step.dd_statements, offset)
     for key, override in step.dd_overrides.items():
         procstep, _, ddname = key.rpartition(".")
@@ -553,9 +559,12 @@ def _step(
         procedure=procedure if procedure is not None else step.procedure,
         parm=None if parm is None else unquote(_raw(parm) or ""),
         dd_statements=dds,
-        condition=_condition(params, enclosing),
+        # COND= when coded, else the IF: what ``condition`` always held.
+        condition=cond if cond is not None else if_condition,
         line=step.line_number + offset if step.line_number else 0,
         parameters=_parameters(params),
+        if_condition=if_condition,
+        cond=cond,
     )
 
 
