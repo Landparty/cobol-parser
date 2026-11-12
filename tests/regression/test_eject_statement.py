@@ -26,6 +26,12 @@ Fixed by giving EJECT its own ``TokenType`` + keyword entry (so it can never
 be mistaken for an ``IDENTIFIER``-typed paragraph name) and a real
 ``EjectStatementParser`` -> ``EjectStatement`` no-op, mirroring
 ``ContinueStatementParser`` / ``ContinueStatement``.
+
+Since 2026-11-12 a line holding only ``EJECT`` (as IBM requires) is dropped
+from the token stream before parsing, so it is no statement at all: kept as
+one it made a paragraph ending ``STOP RUN.`` look like it fell through, and
+an empty paragraph look non-empty. The statement parser still handles an
+EJECT that shares its line.
 """
 
 import textwrap
@@ -68,7 +74,6 @@ class TestEjectWithTrailingPeriod:
         main_para = paras[0]
         assert [s["statement_type"] for s in main_para["statements"]] == [
             "DISPLAY",
-            "EJECT",
         ]
 
         second_para = paras[1]
@@ -98,7 +103,7 @@ class TestEjectWithTrailingPeriod:
         # since it is followed by a period like any paragraph name) and
         # must survive distinctly from a bare EJECT statement.
         assert names == ["FIRST-PARA", "EJECT-PARA", "LAST-PARA"], names
-        assert [s["statement_type"] for s in paras[1]["statements"]] == ["EJECT"]
+        assert [s["statement_type"] for s in paras[1]["statements"]] == []
 
 
 class TestEjectWithoutTrailingPeriod:
@@ -120,7 +125,6 @@ class TestEjectWithoutTrailingPeriod:
         [main_para] = _paragraphs(result)
         assert [s["statement_type"] for s in main_para["statements"]] == [
             "DISPLAY",
-            "EJECT",
             "DISPLAY",
             "STOP",
         ]
@@ -142,27 +146,26 @@ class TestEjectWithoutTrailingPeriod:
         [main_para] = _paragraphs(result)
         assert [s["statement_type"] for s in main_para["statements"]] == [
             "DISPLAY",
-            "EJECT",
-            "EJECT",
             "DISPLAY",
             "STOP",
         ]
 
 
 class TestEjectAstShape:
-    """EjectStatement is a proper no-op node, not a dropped/opaque token."""
+    """An EJECT that shares its line (non-conforming: IBM wants it alone on
+    the line) still parses as a no-op EjectStatement node."""
 
     def test_eject_statement_to_dict_shape(self):
         source = _HEADER + textwrap.dedent("""\
             MAIN-PARA.
-                EJECT.
+                CONTINUE EJECT.
                 STOP RUN.
             """)
         result = parse_cobol(source, filename="eject_shape.cbl")
 
         assert result.success
         [main_para] = _paragraphs(result)
-        eject_stmt = main_para["statements"][0]
+        eject_stmt = main_para["statements"][1]
         assert eject_stmt["statement_type"] == "EJECT"
         assert eject_stmt["node_type"] == "Statement"
 
@@ -219,5 +222,4 @@ class TestEjectInCopybook:
         common_one = paras[1]
         assert [s["statement_type"] for s in common_one["statements"]] == [
             "DISPLAY",
-            "EJECT",
         ]

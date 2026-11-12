@@ -345,6 +345,15 @@ class _DataIndex:
         self.by_name: dict[str, list[CobolDataItem]] = {}
         for item in self.items:
             self.by_name.setdefault(item.name.upper(), []).append(item)
+        #: Every item with a REDEFINES clause, FILLER included: ``items``
+        #: leaves FILLER out (it cannot be referenced), but a ``FILLER
+        #: REDEFINES X`` still overlays X, and a MOVE into one of its named
+        #: subfields stores into X's storage.
+        self.redefiners: list[CobolDataItem] = [
+            item
+            for item in _all_data_items(ast)
+            if isinstance(item, CobolDataItem) and item.redefines
+        ]
 
     def resolve(self, operand: _Operand) -> CobolDataItem | None:
         """The one item *operand* names, or None when absent or ambiguous."""
@@ -359,6 +368,20 @@ class _DataIndex:
                 | {str(c.get_metadata("fd_file_name") or "").upper()}
             ]
         return candidates[0] if len(candidates) == 1 else None
+
+
+def _all_data_items(ast: CobolProgram) -> list[CobolDataItem]:
+    """Every data item of every DATA DIVISION section, FILLER included."""
+    data_div = ast.data_division
+    if data_div is None:
+        return []
+    items: list[CobolDataItem] = []
+    for section in data_div.sections:
+        if isinstance(section, CobolSection):
+            for top in section.data_items:
+                items.append(top)
+                items.extend(top.get_all_children())
+    return items
 
 
 def _item_capacity(item: CobolDataItem) -> Capacity | None:
@@ -603,8 +626,7 @@ class _Context:
         if any(n.redefines for n in [item, *_ancestors(item)]):
             return True
         return any(
-            other.redefines and other.redefines.upper() in family
-            for other in self.data.items
+            str(other.redefines).upper() in family for other in self.data.redefiners
         )
 
     def _constant_value(self, text: str) -> tuple[bool, Capacity | None]:
@@ -1107,18 +1129,35 @@ class _Context:
         )
 
     def _ends(self, stmt: Any, index: ProcedureIndex, section: str | None) -> bool:
-        """Whether control never passes the last statement *stmt* of a paragraph."""
-        if _is_unconditional_transfer(stmt):
-            return True
-        if isinstance(stmt, PerformStatement) and stmt.target_paragraph:
-            if stmt.inline_statements:
-                return False
-            if stmt.perform_type not in ("SIMPLE", "TIMES"):
-                return False
-            for target in index.resolve(stmt.target_paragraph, None, section):
-                if self._terminates(target, index):
-                    return True
-        return False
+        """Whether control never passes the last statement *stmt* of a paragraph.
+
+        An IF / EVALUATE ends it when every arm does, and an arm may end by
+        PERFORMing an abend paragraph (``IF ok GOBACK ELSE PERFORM
+        9999-ABEND``) as well as by a STOP RUN / GOBACK / GO TO.
+        """
+
+        def ends(s: Any) -> bool:
+            return _is_unconditional_transfer(s) or self._performs_terminating(
+                s, index, section
+            )
+
+        return ends(stmt) or branch_terminates(stmt, ends)
+
+    def _performs_terminating(
+        self, stmt: Any, index: ProcedureIndex, section: str | None
+    ) -> bool:
+        """Whether *stmt* is an out-of-line PERFORM of a procedure that ends
+        the run (see :meth:`_terminates`)."""
+        if not isinstance(stmt, PerformStatement) or not stmt.target_paragraph:
+            return False
+        if stmt.inline_statements:
+            return False
+        if stmt.perform_type not in ("SIMPLE", "TIMES"):
+            return False
+        return any(
+            self._terminates(target, index)
+            for target in index.resolve(stmt.target_paragraph, None, section)
+        )
 
     # -- file-status ---------------------------------------------------------
 
@@ -1198,8 +1237,8 @@ class _Context:
         for node in family:
             if node.redefines:
                 names.add(node.redefines.upper())
-        for other in self.data.items:
-            if other.redefines and other.redefines.upper() in names:
+        for other in self.data.redefiners:
+            if str(other.redefines).upper() in names:
                 names.add(other.name.upper())
                 names |= {c.name.upper() for c in other.get_all_children()}
         return [e for e in self.xref.entries if e.name.upper() in names]

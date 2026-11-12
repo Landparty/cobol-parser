@@ -114,6 +114,7 @@ rather than read under the wrong rules.
 | `seed` | integer | `--seed` |
 | `extensions` | list | `--extension` (`codebase-graph`, `copybook-impact`, `call-check`), and the files the MCP server treats as programs |
 | `define` | mapping or list | `--define` |
+| `abend_programs` | list | `--abend-program` (the analyzing subcommands, and `scan`, `codebase-graph`, `field-impact`, `widen-check`): your site's abend routines, e.g. `[CBLTBNC2, CSDABEND]`. A static `CALL` of one is taken to never return, like `CALL 'CEE3ABD'`, so a paragraph ending in it does not fall through (lint `perform-range`, dead code, recursion escapes) |
 
 `define` takes either shape:
 

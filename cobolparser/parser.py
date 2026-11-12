@@ -170,6 +170,78 @@ class ParseResult:
         return bool(self.warnings)
 
 
+#: Token types of the listing directives that have their own keyword token.
+#: ``TITLE`` has none (it is not reserved everywhere) and is matched by word,
+#: and only when a literal follows it.
+_LISTING_DIRECTIVE_TYPES = frozenset(
+    {TokenType.EJECT, TokenType.SKIP1, TokenType.SKIP2, TokenType.SKIP3}
+)
+_LINE_NOISE_TYPES = frozenset(
+    {TokenType.WHITESPACE, TokenType.NEWLINE, TokenType.CONTINUATION}
+)
+
+
+def _is_listing_directive_line(tokens: list[Token]) -> bool:
+    """True if *tokens* (one line's meaningful tokens) are exactly ``EJECT``
+    / ``SKIPn`` / ``TITLE literal``, with an optional closing period."""
+    if tokens and tokens[-1].type is TokenType.PERIOD:
+        tokens = tokens[:-1]
+    if len(tokens) == 1:
+        return tokens[0].type in _LISTING_DIRECTIVE_TYPES
+    return (
+        len(tokens) == 2
+        and tokens[0].type is TokenType.IDENTIFIER
+        and (tokens[0].value or "").upper() == "TITLE"
+        and tokens[1].type is TokenType.STRING_LITERAL
+    )
+
+
+def _drop_listing_directive_lines(tokens: list[Token]) -> list[Token]:
+    """*tokens* without the lines that hold only a listing directive.
+
+    ``EJECT``, ``SKIP1``-``SKIP3`` and ``TITLE`` only shape the compiler's
+    source listing. IBM Enterprise COBOL requires each to be alone on its
+    line, in Area A or B, and removes it before compiling: it is not a
+    statement, does not end a sentence (its optional period is its own),
+    and may sit anywhere -- between two statements, inside an IF or WHEN
+    body, even between a statement's operands. Kept as statements they made
+    a paragraph that ends ``STOP RUN.`` look like it fell through to the
+    next one, and an empty paragraph look like it had a body; inside a
+    statement they were read as an operand (``MOVE 1 EJECT TO A``).
+
+    A directive that shares its line with anything else is left in place
+    for the EJECT / SKIP / TITLE statement parsers, as before.
+    """
+    kept: list[Token] = []
+    line: list[Token] = []  # the current line's tokens, noise included
+    meaningful: list[Token] = []
+    line_no: int | None = None
+
+    def flush() -> None:
+        if not (meaningful and _is_listing_directive_line(meaningful)):
+            kept.extend(line)
+        else:
+            # Keep the line break so line-sensitive lookahead still sees it.
+            kept.extend(t for t in line if t.type is TokenType.NEWLINE)
+
+    for token in tokens:
+        tok_line = token.location.line if token.location else None
+        if token.type is TokenType.EOF:
+            flush()
+            line, meaningful = [], []
+            kept.append(token)
+            continue
+        if line and tok_line != line_no:
+            flush()
+            line, meaningful = [], []
+        line_no = tok_line
+        line.append(token)
+        if token.type not in _LINE_NOISE_TYPES:
+            meaningful.append(token)
+    flush()
+    return kept
+
+
 class CobolParser:
     """COBOL parser orchestrator using factory-based architecture.
 
@@ -635,8 +707,14 @@ class CobolParser:
         # -- the operand after the comment was dropped as an "unparsed
         # token", or (``OCCURS *> n`` / ``10 TIMES``) read as a new item's
         # level number. The lexer's own token list keeps them.
+        #
+        # A line holding only a listing directive (``EJECT``, ``SKIP1``-
+        # ``SKIP3``, ``TITLE literal``) is dropped the same way: see
+        # ``_drop_listing_directive_lines``.
         self.stream = TokenStream(
-            [t for t in self.tokens if t.type is not TokenType.COMMENT]
+            _drop_listing_directive_lines(
+                [t for t in self.tokens if t.type is not TokenType.COMMENT]
+            )
         )
         # Lines whose COPY text was blanked before lexing: the tokens alone
         # cannot tell that something was written there (see

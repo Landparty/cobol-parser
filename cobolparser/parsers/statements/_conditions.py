@@ -78,10 +78,16 @@ _CLASS_SIGN_WORDS = {
     "ZEROES",
 }
 
-# A plausible COBOL data/condition name: letter followed by letters,
-# digits, or hyphens. Used to tell a bare condition-name (level-88 style
-# ``IF END-OF-FILE``) apart from stray literals in the fallback path.
-_IDENTIFIER_RE = re.compile(r"^[A-Za-z][A-Za-z0-9-]*$")
+# A plausible COBOL data/condition name: a user-defined word of letters,
+# digits and hyphens with at least one letter, not starting or ending with
+# a hyphen. Used to tell a bare condition-name (level-88 style ``IF
+# END-OF-FILE``) apart from stray literals in the fallback path. A word may
+# start with a digit (``88-EXP-TXN-AVANCE``, ``1000-READ``): requiring a
+# leading letter left such a condition an empty COMPARISON, so two different
+# ones compared equal and lint reported a false duplicate-branch.
+_IDENTIFIER_RE = re.compile(
+    r"^(?=[A-Za-z0-9-]*[A-Za-z])[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?$"
+)
 
 # Resolved relational operator names, and each one's negation. Used both to
 # fold a leading ``NOT`` into a simple relation (``NOT A = 1`` is ``A NOT =

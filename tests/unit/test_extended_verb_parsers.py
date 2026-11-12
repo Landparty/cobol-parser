@@ -396,7 +396,7 @@ class TestCompilerDirectingStatements:
         assert stmt.operand == operand
 
     def test_title(self):
-        result = _parse("TITLE 'Payroll listing'.", "MOVE WS-A TO WS-B.")
+        result = _parse("CONTINUE TITLE 'Payroll listing'.", "MOVE WS-A TO WS-B.")
         _clean(result)
         stmt = _first(result, TitleStatement)
         assert stmt.title == "Payroll listing"

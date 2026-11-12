@@ -196,6 +196,7 @@ def _cmd_scan(args: argparse.Namespace) -> None:
         preprocess_fixed=source_format["preprocess_fixed"],
         debug_lines=bool(source_format.get("debug_lines", False)),
         defined_symbols=_defined_symbol_pairs(args),
+        abend_programs=tuple(getattr(args, "abend_programs", None) or ()),
         cache_dir=args.cache_dir,
         **_limit_kwargs(args),
     )

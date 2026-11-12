@@ -216,6 +216,56 @@ _ENDS = "ends"
 _ViolationKey = tuple[Any, ...]
 
 
+# The state of a file this program may find open already (_carried_files):
+# never opened, or open in an unknown mode, its last I/O a READ or not.
+_UNKNOWN_AT_ENTRY: frozenset[str] = frozenset(
+    {_UNOPENED, _OPEN_PREFIX, _OPEN_PREFIX + _AFTER_READ}
+)
+
+
+def _carried_files(ast: CobolProgram) -> frozenset[str]:
+    """Files whose state when this program starts is not known here.
+
+    - An ``FD f IS EXTERNAL`` file is shared by every program of the run
+      unit that declares it: another one may have opened (or will close) it.
+    - Every file of a subprogram (``PROCEDURE DIVISION USING ...``) that is
+      not ``IS INITIAL``: its files keep their state from one CALL to the
+      next, so a dispatcher that OPENs on one call, READs on the next and
+      CLOSEs on a third is correct, and returns (GOBACK) with files open on
+      purpose. An INITIAL program's files start closed on every CALL.
+    """
+    carried: set[str] = set()
+    data_div = ast.get_division("DATA")
+    file_section = data_div._sections.get("FILE") if data_div is not None else None
+    files: set[str] = set()
+    if file_section is not None:
+        for item in file_section.data_items:
+            fd_file = item.get_metadata("fd_file_name")
+            if not fd_file:
+                continue
+            files.add(str(fd_file).upper())
+            if (item.get_metadata("fd_clauses") or {}).get("external"):
+                carried.add(str(fd_file).upper())
+    if _is_reentered_subprogram(ast):
+        carried |= files
+        carried |= {
+            select.file_name.upper()
+            for select in ast.find_all_by_type("SelectStatement")
+            if isinstance(select, SelectStatement) and select.file_name
+        }
+    return frozenset(carried)
+
+
+def _is_reentered_subprogram(ast: CobolProgram) -> bool:
+    """A program CALLed with parameters whose files persist between CALLs."""
+    proc = ast.procedure_division
+    if proc is None or not proc.get_metadata("using_parameters"):
+        return False
+    ident = ast.get_division("IDENTIFICATION")
+    attributes = ident.get_metadata("program_attributes") if ident else None
+    return "INITIAL" not in {str(a).upper() for a in attributes or ()}
+
+
 def _merge_into(table: dict[str, _Status], name: str, state: _Status) -> None:
     """Union *state* into ``table[name]`` (see ``IOSequenceAnalyzer._merge``)."""
     previous = table.get(name)
@@ -359,6 +409,8 @@ class IOSequenceAnalyzer:
         # COPY member that was not expanded) is absent: its organization is
         # unknown, so its WRITE under I-O is not judged.
         self._organization: dict[str, str] = {}
+        # Upper-cased files whose state at entry is unknown (_carried_files).
+        self._carried: frozenset[str] = frozenset()
 
     def analyze(self, ast: CobolProgram) -> IOSequenceReport:
         """Analyze the AST and return an IOSequenceReport.
@@ -394,6 +446,13 @@ class IOSequenceAnalyzer:
             for select in ast.find_all_by_type("SelectStatement")
             if isinstance(select, SelectStatement) and select.file_name
         }
+
+        # Files this program may find already open: their state at entry
+        # is unknown, so it starts as "open on some paths, not on others"
+        # (no before-OPEN / never-opened / duplicate-OPEN claim), and
+        # leaving one open is not reported.
+        self._carried = _carried_files(ast)
+        self._status = dict.fromkeys(self._carried, _UNKNOWN_AT_ENTRY)
 
         proc_division = ast.procedure_division
         if proc_division is not None:
@@ -783,7 +842,11 @@ class IOSequenceAnalyzer:
         return self._status.get(key, _NEVER_OPENED)
 
     def _maybe_open_files(self) -> list[str]:
-        return sorted(k for k, v in self._status.items() if _any_open(v))
+        return sorted(
+            k
+            for k, v in self._status.items()
+            if _any_open(v) and k not in self._carried
+        )
 
     def _run_perform(
         self,

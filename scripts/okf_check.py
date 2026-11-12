@@ -677,6 +677,7 @@ SHARED_CLI_FLAGS = {
     "--copybook-path",
     "--program",
     "--define",
+    "--abend-program",
     "--encoding",
     "--output",
     "--profile",

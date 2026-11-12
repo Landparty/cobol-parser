@@ -129,8 +129,11 @@ FIXTURES: dict[str, Fixture] = {
     "NextSentenceStatementParser": Fixture(
         "NextSentenceStatement", "    NEXT SENTENCE"
     ),
-    "EjectStatementParser": Fixture("EjectStatement", "    EJECT"),
-    "SkipStatementParser": Fixture("SkipStatement", "    SKIP1"),
+    # A listing directive alone on its line is dropped before parsing (IBM
+    # removes it from the program), so these share a line to reach the
+    # statement parser.
+    "EjectStatementParser": Fixture("EjectStatement", "    CONTINUE EJECT"),
+    "SkipStatementParser": Fixture("SkipStatement", "    CONTINUE SKIP1"),
     "GobackStatementParser": Fixture("GobackStatement", "    GOBACK"),
     "AcceptStatementParser": Fixture("IOAcceptStatement", "    ACCEPT WS-VAR"),
     "ReadStatementParser": Fixture(
@@ -278,7 +281,7 @@ FIXTURES: dict[str, Fixture] = {
     ),
     "TraceStatementParser": Fixture("TraceStatement", "    READY TRACE"),
     "ServiceStatementParser": Fixture("ServiceStatement", "    SERVICE RELOAD WS-VAR"),
-    "TitleStatementParser": Fixture("TitleStatement", "    TITLE 'LISTING'"),
+    "TitleStatementParser": Fixture("TitleStatement", "    CONTINUE TITLE 'LISTING'"),
     # COBOL 2002
     "RaiseStatementParser": Fixture("RaiseStatement", "    RAISE EXCEPTION EC-ALL"),
     "ResumeStatementParser": Fixture("ResumeStatement", "    RESUME NEXT STATEMENT"),

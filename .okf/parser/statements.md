@@ -65,7 +65,7 @@ Writer, communication).
 | `rewrite_parser.py` | REWRITE | io |
 | `search_parser.py` | SEARCH | control |
 | `set_parser.py` | SET | data |
-| `simple_statement_parsers.py` | ALTER, CANCEL, COMMIT, CONTINUE, NEXT SENTENCE (`NextSentenceStatementParser`), EJECT, SKIP1/SKIP2/SKIP3 (`SkipStatementParser`), EXIT, GENERATE, GOBACK, RELEASE, RETURN, ROLLBACK, USE | control / io |
+| `simple_statement_parsers.py` | ALTER, CANCEL, COMMIT, CONTINUE, NEXT SENTENCE (`NextSentenceStatementParser`), EJECT, SKIP1/SKIP2/SKIP3 (`SkipStatementParser`; both only for a directive that shares its line, see [orchestration.md](orchestration.md#pipeline)), EXIT, GENERATE, GOBACK, RELEASE, RETURN, ROLLBACK, USE | control / io |
 | `sort_merge_parsers.py` | SORT, MERGE | io |
 | `start_parser.py` | START | io |
 | `stop_parser.py` | STOP | control |
@@ -329,7 +329,10 @@ yields the identical clause. Pinned by
 PERFORM UNTIL (`condition_tree`), EVALUATE and SEARCH WHEN (`condition_tree` next
 to the raw `condition` text; #348). Class / sign / condition-name conditions
 (`A IS NUMERIC`) get a structured node while `metadata.raw_condition` stays
-populated. An AND / OR chain is split at every top-level operator in one
+populated. A condition-name is any COBOL word (`_IDENTIFIER_RE`: letters,
+digits, hyphens, at least one letter, no hyphen at either end), so one
+starting with a digit (`IF 88-EXP-TXN-AVANCE`) is a CONDITION_NAME node, not
+an empty COMPARISON. An AND / OR chain is split at every top-level operator in one
 pass (`find_top_level_operators`; there is no single-operator variant) and the legs folded from the left
 (`_fold_logical`): up to `_MAX_LEFT_DEEP_LEGS` (64) legs the tree is the
 left-deep one it always was; a longer chain is paired neighbour by neighbour so

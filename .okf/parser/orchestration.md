@@ -194,6 +194,16 @@ DATA DIVISION sub-clause reader skips NEWLINE but not
 COMMENT, so filtering once at the stream is what keeps those readers correct;
 do not reintroduce COMMENT tokens into the stream.
 
+**A line holding only a listing directive is dropped from the stream too**
+(`_drop_listing_directive_lines`): `EJECT`, `SKIP1`-`SKIP3` or `TITLE
+literal`, optional period included. IBM requires each alone on its line and
+removes it before compiling, so it is no statement, ends no sentence, and may
+sit anywhere, even between a statement's operands. Kept as statements they
+made a paragraph ending `STOP RUN.` fall through (lint perform-range) and an
+empty paragraph non-empty. A directive sharing its line still reaches the
+EJECT / SKIP / TITLE statement parsers (and the swallow-sweep fixtures write
+it that way).
+
 The stream also carries `omitted_source_lines` -- the lines
 `strip_unexpanded_copy_statements` blanked -- which the EVALUATE parser consults
 before treating adjacent WHENs as stacked (see
