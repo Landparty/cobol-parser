@@ -181,8 +181,9 @@ the next statement); `ABEND` always is one. A static `CALL 'CEE3ABD'` or
 services; site modules such as `ABEND` / `CKRABEND` are not assumed, #817,
 unless the site names them: `_abend.set_site_abend_programs()` /
 `using_site_abend_programs()`, set per file by the CLI from `--abend-program`
-/ `project.abend_programs` and by `scan_one` from `ScanOptions.abend_programs`;
-process-wide state, so a library caller sets it in the process that analyzes)
+/ `project.abend_programs`, by `scan_one` from `ScanOptions.abend_programs`
+and by the MCP `Workspace.site_settings()`; `set_*` is process-wide, the
+`using_*` block thread-local and wins over it in its own thread)
 is a terminator in the scanner's `_is_terminator` too, sets
 `FlowNode.has_abend_call`, adds an exit point with `exit_statement_kind`
 `"CALL 'CEE3ABD'"`, and counts as a way out in

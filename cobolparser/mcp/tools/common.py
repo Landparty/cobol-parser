@@ -5,6 +5,7 @@ helpers more than one tool calls (:func:`_attempt`, :func:`_notes`,
 
 from __future__ import annotations
 
+import functools
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -46,11 +47,34 @@ _CONTROL_EDGES = frozenset(
 )
 
 
+def _with_site_settings(method: Callable[..., Any]) -> Callable[..., Any]:
+    """*method* run under its workspace's :meth:`Workspace.site_settings`."""
+
+    @functools.wraps(method)
+    def tool(self: BaseTools, *args: Any, **kwargs: Any) -> Any:
+        with self.workspace.site_settings():
+            return method(self, *args, **kwargs)
+
+    return tool
+
+
 class BaseTools:
-    """The workspace every tool reads, and the helpers several tools share."""
+    """The workspace every tool reads, and the helpers several tools share.
+
+    Every public method a subclass defines (a tool) runs under the
+    workspace's :meth:`~..workspace.Workspace.site_settings`, so ``cobol.yml``
+    settings that are process-wide in the analyzers (``abend_programs``)
+    apply to a tool called straight from Python as to one the server calls.
+    """
 
     def __init__(self, workspace: Workspace) -> None:
         self.workspace = workspace
+
+    def __init_subclass__(cls, **kwargs: Any) -> None:
+        super().__init_subclass__(**kwargs)
+        for name, value in list(vars(cls).items()):
+            if not name.startswith("_") and callable(value):
+                setattr(cls, name, _with_site_settings(value))
 
     # -- PL/I and assembler ---------------------------------------------------
 

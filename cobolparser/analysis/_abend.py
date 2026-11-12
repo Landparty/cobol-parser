@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import threading
 from collections.abc import Iterable, Iterator
 from contextlib import contextmanager
 from typing import Any
@@ -21,6 +22,12 @@ NON_RETURNING_ABEND_PROGRAMS = frozenset({"CEE3ABD", "ILBOABN0"})
 #: as the CLI does for each file it parses.
 _site_abend_programs: frozenset[str] = frozenset()
 
+#: :func:`using_site_abend_programs`' list, for the thread that entered the
+#: block only. Thread-local, so two threads of one process (the MCP server's
+#: tool call and its index warm-up) each see their own list: a process-wide
+#: swap restored by one thread would cut the list from under the other.
+_scoped = threading.local()
+
 
 def _normalize(names: Iterable[str]) -> frozenset[str]:
     return frozenset(
@@ -36,26 +43,30 @@ def set_site_abend_programs(names: Iterable[str] | None) -> None:
 
 
 def site_abend_programs() -> frozenset[str]:
-    """The names :func:`set_site_abend_programs` set (upper-cased)."""
-    return _site_abend_programs
+    """The site's abend routines in effect (upper-cased): the innermost
+    :func:`using_site_abend_programs` block of this thread, else what
+    :func:`set_site_abend_programs` set."""
+    scoped: frozenset[str] | None = getattr(_scoped, "names", None)
+    return _site_abend_programs if scoped is None else scoped
 
 
 @contextmanager
 def using_site_abend_programs(names: Iterable[str] | None) -> Iterator[None]:
-    """:func:`set_site_abend_programs` for the ``with`` block only."""
-    saved = _site_abend_programs
-    set_site_abend_programs(names)
+    """:func:`set_site_abend_programs` for the ``with`` block only, and only
+    in the thread that entered it."""
+    saved = getattr(_scoped, "names", None)
+    _scoped.names = _normalize(names or ())
     try:
         yield
     finally:
-        set_site_abend_programs(saved)
+        _scoped.names = saved
 
 
 def is_abend_program(name: str | None) -> bool:
     """Whether a CALL of program *name* never returns: an IBM abend service
     or one of the site's own (:func:`set_site_abend_programs`)."""
     target = (name or "").strip().strip("'\"").upper()
-    return target in NON_RETURNING_ABEND_PROGRAMS or target in _site_abend_programs
+    return target in NON_RETURNING_ABEND_PROGRAMS or target in site_abend_programs()
 
 
 def abend_call_target(stmt: Any) -> str | None:

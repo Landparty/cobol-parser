@@ -60,7 +60,8 @@ Any client that takes a JSON server list (Claude desktop's
 | `--no-warm-up` | | Do not parse the root at start; the first cross-program question does it. |
 | `--config FILE` / `--no-config` | `cobol.yml` in `--root` | Which `cobol.yml` to use. |
 
-Copybook directories, source format and `>>DEFINE` symbols come from the
+Copybook directories, source format, `>>DEFINE` symbols and the site's
+non-returning abend routines (`project.abend_programs`) come from the
 project's [`cobol.yml`](project-config.md) (or `cobol.yaml`) in `--root`.
 Unlike the CLI, the server does not look for one in the directories above
 the root. An edit to it takes effect on the next call, with no

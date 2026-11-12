@@ -263,6 +263,11 @@ bad severity) raises `ToolError`, which the SDK returns as an error result.
   Copybook paths, source format, `debug_lines` and `define` come from it (`define: [X=]` is
   the empty value, as the CLI reads `--define X=`); no
   tool takes them.
+  `project.abend_programs` too: `Workspace.site_settings()` wraps
+  `using_site_abend_programs()` (thread-local, so the warm-up thread and a
+  tool call cannot cut each other's list) around every public tool method
+  (`BaseTools.__init_subclass__` wraps them), every `compute_facts()` and
+  each warm-up index build; the facts key includes the list (#900).
 - **Parse.** Always `COLLECT_ALL`. With copybook paths it expands with
   `skip_missing_copybooks=True`, so a missing member is left as written and
   the rest still expand. Any other `PreprocessingError` (circular COPY, a

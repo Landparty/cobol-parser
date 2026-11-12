@@ -17,6 +17,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+* **The MCP server honours `project.abend_programs`.** Every tool now
+  applies the site abend routines `cobol.yml` names, as the CLI does, so
+  `lint` no longer reports a perform-range fall-through the CLI suppresses
+  for the same file (#900).
 * **`call-check` cites the line in the file.** Standalone `call-check`
   (JSON, text and SARIF) gave the line of the copybook-expanded text, so
   every CALL after a `COPY` was cited too low, sometimes past the end of
