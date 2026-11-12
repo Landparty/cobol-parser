@@ -7,8 +7,8 @@ This module provides delegating CobolParser that orchestrates parsing through:
 """
 
 import logging
-import re
 import os
+import re
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Literal, overload
 

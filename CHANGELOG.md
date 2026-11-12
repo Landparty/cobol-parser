@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+* **`DISPLAY X(I)(1:N)` keeps its reference modification.** The `(1:N)`
+  after a subscript was dropped, along with every DISPLAY item after it.
 * **Fixed-format copybooks are no longer read as free-form.** A member was
   judged on its first ten lines, so a banner with something odd in columns
   1-6 (a `"` in column 3, a change note with blanks, a `*` in column 6) made
