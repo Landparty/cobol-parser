@@ -17,6 +17,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+* **No false "file left open" after an AT END that closes and leaves.**
+  `READ f AT END CLOSE f GO TO P9` (or `IF ... CLOSE f GO TO P9`) with
+  `STOP RUN` in P9, and `AT END CLOSE f MOVE 'Y' TO EOF-SW` in a
+  `PERFORM UNTIL EOF-SW = 'Y'` loop, no longer report FILE_LEFT_OPEN: a GO
+  TO carries its own state to its target, and an UNTIL loop is left in the
+  state of the branch that ends it.
 * **`call-check` cites the line in the file.** Standalone `call-check`
   (JSON, text and SARIF) gave the line of the copybook-expanded text, so
   every CALL after a `COPY` was cited too low, sometimes past the end of

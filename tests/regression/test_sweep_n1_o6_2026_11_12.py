@@ -383,3 +383,132 @@ class TestO6FileStatusGuardIsPassed:
             s.verification is not None and s.verification["status"] == "unverified"
             for s in branch
         )
+
+
+class TestO1FollowUpGoToArmsAndLoops:
+    """Bug hunt after #901: forking AT END made two shapes report the file
+    left open -- a GO TO arm's closed state was merged into the path that
+    read a record (and the GO TO target started from the loop's state), and
+    a PERFORM UNTIL loop was left in the merge of every arm instead of the
+    arm that ends it."""
+
+    GOTO_LOOP = """\
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. X.
+       ENVIRONMENT DIVISION.
+       INPUT-OUTPUT SECTION.
+       FILE-CONTROL.
+           SELECT F ASSIGN TO DD1.
+       DATA DIVISION.
+       FILE SECTION.
+       FD F.
+       01 R PIC X(10).
+       WORKING-STORAGE SECTION.
+       01 FS PIC XX.
+       01 EOF-SW PIC X VALUE 'N'.
+          88 EOF-R VALUE 'Y'.
+       PROCEDURE DIVISION.
+"""
+
+    def _kinds(self, body: str) -> list[IOViolationKind]:
+        ast = parse_cobol(self.GOTO_LOOP + body).ast
+        return [v.kind for v in IOSequenceAnalyzer().analyze(ast).violations]
+
+    def test_at_end_close_go_to_stop_run(self) -> None:
+        body = """\
+       P1.
+           OPEN INPUT F.
+       P2.
+           READ F AT END CLOSE F GO TO P9.
+           GO TO P2.
+       P9.
+           STOP RUN.
+"""
+        assert self._kinds(body) == []
+
+    def test_if_close_go_to_stop_run(self) -> None:
+        body = """\
+       P1.
+           OPEN INPUT F.
+       P2.
+           READ F
+           IF FS = '10'
+              CLOSE F
+              GO TO P9
+           END-IF
+           GO TO P2.
+       P9.
+           STOP RUN.
+"""
+        assert self._kinds(body) == []
+
+    def test_at_end_go_to_without_close_is_still_left_open(self) -> None:
+        body = """\
+       P1.
+           OPEN INPUT F.
+       P2.
+           READ F AT END GO TO P9.
+           GO TO P2.
+       P9.
+           STOP RUN.
+"""
+        assert self._kinds(body) == [IOViolationKind.FILE_LEFT_OPEN]
+
+    def test_a_second_close_at_the_target_is_still_a_double_close(self) -> None:
+        body = """\
+       P1.
+           OPEN INPUT F.
+       P2.
+           READ F AT END CLOSE F GO TO P9.
+           GO TO P2.
+       P9.
+           CLOSE F
+           STOP RUN.
+"""
+        assert self._kinds(body) == [IOViolationKind.DOUBLE_CLOSE]
+
+    def test_inline_perform_until_closed_at_end(self) -> None:
+        body = """\
+       P1.
+           OPEN INPUT F
+           PERFORM UNTIL EOF-SW = 'Y'
+              READ F
+                AT END
+                  CLOSE F
+                  MOVE 'Y' TO EOF-SW
+                NOT AT END
+                  DISPLAY R
+              END-READ
+           END-PERFORM
+           STOP RUN.
+"""
+        assert self._kinds(body) == []
+
+    def test_out_of_line_perform_until_an_88(self) -> None:
+        body = """\
+       P1.
+           OPEN INPUT F
+           PERFORM READ-P UNTIL EOF-R
+           STOP RUN.
+       READ-P.
+           READ F
+             AT END
+               CLOSE F
+               SET EOF-R TO TRUE
+           END-READ.
+"""
+        assert self._kinds(body) == []
+
+    def test_a_loop_that_never_closes_still_leaves_it_open(self) -> None:
+        body = """\
+       P1.
+           OPEN INPUT F
+           PERFORM UNTIL EOF-SW = 'Y'
+              READ F
+                AT END
+                  MOVE 'Y' TO EOF-SW
+              END-READ
+           END-PERFORM
+           STOP RUN.
+"""
+        assert self._kinds(body) == [IOViolationKind.FILE_LEFT_OPEN]
