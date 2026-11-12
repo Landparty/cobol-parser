@@ -187,6 +187,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   copybook field `warning` where the `lint` subcommand says `info`. The
   copybook-origin names now come from one function,
   `cobolparser.analysis.unused_variables.copybook_item_names`.
+* **A copybook of PROCEDURE DIVISION code is not read as a record.**
+  gen-data, decode and data-items wrapped it as data, so a statement such as
+  `MOVE 8 TO RETURN-CODE` became a level-08 item and the member a zero-byte
+  record with a "no PICTURE" warning; they now say the member holds
+  procedure code.
+* **call-check does not length-check a group missing a copybook.** A group
+  declared around a `COPY` that was not expanded (`01 WS-GMO. COPY
+  CMQGMOV.`) counted as zero bytes and was reported as a `length` error; it
+  is now listed under `unchecked`, and `program-signature` leaves such a
+  LINKAGE parameter's `byte_length` out.
+* **`le-info` answers the names it knows when one is unknown.** One unknown
+  name among several failed the whole command; the known ones are now
+  answered and the rest listed under `unknown`. A reserved word such as
+  `PIC` is called that.
 
 ### Added
 

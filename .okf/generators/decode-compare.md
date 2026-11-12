@@ -84,7 +84,9 @@ size model.
 (A bare copybook is wrapped in a program skeleton before parsing, see
 [record-data.md](record-data.md#parsing-a-copybook); `data-items` and the
 MCP server wrap the same way through `wrap_copybook_fragment`, #536; the
-fragment's format comes from the same detector copybook expansion uses.)
+fragment's format comes from the same detector copybook expansion uses. A
+member of PROCEDURE DIVISION code is refused rather than wrapped, see
+`procedure_code_start` there.)
 
 `RecordDecoder(views, opts=None, *, record_length=None, varying=None,
 layout_warnings=None)`, or `.from_copybook_source()` / `.from_copybook_file()`

@@ -57,6 +57,7 @@ from ..models.ast_base import SourceLocation
 from ..models.data_items import CobolDataItem, ConditionNameItem
 from ..models.program import CobolProgram, CobolSection
 from ..models.statements.call import EntryStatement
+from ._copy_holes import items_with_copy_holes
 from ._names import QUALIFIER_SEPARATOR
 from .context import ProgramContext
 from .unused_variables import _ancestor_names
@@ -365,6 +366,7 @@ class ProgramSignatureExtractor:
                     declarations.setdefault(node.name.upper(), node)
 
         directions = self._parameter_directions(ctx, signature)
+        holed = items_with_copy_holes(ast)
 
         named: set[str] = set()
         for entry in self._entry_points(ast, signature):
@@ -381,6 +383,14 @@ class ProgramSignatureExtractor:
                         signature.undeclared_parameters.append(key)
                     continue
                 self._apply_declaration(parameter, declaration)
+                if id(declaration) in holed:
+                    parameter.byte_length = None
+                    note = (
+                        f"{key}: its layout holds a COPY that was not expanded, "
+                        "so its length is not known"
+                    )
+                    if note not in signature.unchecked:
+                        signature.unchecked.append(note)
                 parameter.direction = _as_passed(
                     self._direction_for(key, declaration, directions, signature),
                     parameter.by_clause,
