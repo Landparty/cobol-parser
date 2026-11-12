@@ -346,6 +346,23 @@ def _is_fixed_only_line(line: str) -> bool:
     )
 
 
+def _sequence_tags(lines: list[str]) -> set[str]:
+    """Six-character sequence-area tags (``P1CKBA``, ``CHG012``) that open
+    at least one line with a valid column-7 indicator: what a tag-only line
+    of the same member repeats."""
+    tags: set[str] = set()
+    for line in lines:
+        if len(line) < INDICATOR_COL:
+            continue
+        tag = line[: INDICATOR_COL - 1]
+        if " " in tag or "\t" in tag:
+            continue
+        indicator = line[INDICATOR_COL - 1]
+        if indicator in (" ", "-") or indicator in ALL_COMMENT_INDICATORS:
+            tags.add(tag)
+    return tags
+
+
 def member_format_votes(source: str) -> tuple[int, int, bool, bool]:
     """Line votes over every non-blank line of *source*.
 
@@ -356,9 +373,16 @@ def member_format_votes(source: str) -> tuple[int, int, bool, bool]:
     """
     fixed = free = 0
     fixed_only = level_signal = False
-    for raw in split_source_lines(source):
-        line = raw.expandtabs(8)
+    lines = [raw.expandtabs(8) for raw in split_source_lines(source)]
+    tags = _sequence_tags(lines)
+    for line in lines:
         if not line.strip():
+            continue
+        if line.rstrip() in tags:
+            # A line holding only the sequence-area tag its neighbours carry
+            # (``P1CKBA`` and nothing after it): a blank fixed-format line,
+            # not short free-form code. Voting it free-form read a tagged
+            # procedure copybook as free-form, so its code was never seen.
             continue
         vote = _member_line_vote(line)
         if vote > 0:

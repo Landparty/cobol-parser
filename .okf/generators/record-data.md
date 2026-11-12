@@ -833,6 +833,13 @@ Three pieces, none of which re-flattens the layout:
    a variable-length file actually *vary*: clamping would pin nearly every
    row to the maximum. A declared `VALUE`/level-88 still wins when it names a
    count the table can hold, and is overridden when it does not.
+   `flatten_record` also passes the declared ranges of the ODO tables in the
+   *other* level-01 records beside it (`_sibling_odo_bounds`, the record's
+   parent section's children): a counter in a header 01 whose table sits in
+   another 01 got any value its PICTURE held (640 against a table of at most
+   15, sweep N3). Not covered: a counter declared under a `REDEFINES` the
+   flattening excludes -- it has no spec, and the redefined field's bytes are
+   generated as that field.
 3. **`layout.present_indexes(specs, row)`** — the positions whose bytes that
    row's record contains, in order. The counter governing a given occurrence
    is resolved by *position*, not just by name: it is the counter spec

@@ -195,9 +195,15 @@ size is `envelope.wire_size()`: the `structuredContent` plus the text copy
 sent beside it, JSON-escaped. `_on_the_wire()` makes each tool return a
 `CallToolResult` whose text copy is `wire_text()` (compact JSON): left to
 FastMCP it was pretty-printed, and an answer cut to 24000 compact bytes
-went out at about three times that. Only the envelope outside `answer`
-(caveats, `truncated`, `next`) is never cut, so a budget below it
-(about 2 KB on a large root) cannot be met. A location anywhere in `answer` is
+went out at about three times that. Still over once every list is at one
+item and every long string halved, `_trim_envelope` cuts the envelope (sweep
+O5: `codebase_overview` asked for 2 KB answered 4.4 KB, most of it caveats
+and the cut records): `next` goes, `caveats` are halved (never below one; a
+`caveats` entry in `truncated`), the `answer budget` entries fold into one
+(`field` the comma-joined cut fields, `fields` their count), and, only when
+emptying them all would fit (`_fits_without_lists`), the answer's one-item
+lists are emptied largest first. Scalars and short strings are never cut, so
+a budget below them still cannot be met. A location anywhere in `answer` is
 `{"file", "line", "column"?}` in the file on disk, root-relative when it can
 be; `null` with an `unmapped-location` caveat when the source map has no
 entry. `caveats[].kind` is closed: <!-- okf:gen mcp-caveat-kinds -->`unresolved-copybook`, `partial-parse`, `analyzer-failed`, `incomplete-analysis`, `ambiguous-name`, `duplicate-declaration`, `unmapped-location`, `program-unit-selected`<!-- /okf:gen -->.

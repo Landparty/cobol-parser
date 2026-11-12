@@ -392,7 +392,12 @@ valid column-7 indicator counts as fixed whatever columns 1-6 hold (IBM
 never reads them: change tags `CGOGP1`, `CR 12`, a `"` in column 3, a banner
 typed from column 6); a `*>` opening before column 7, a level number whose
 data name starts in columns 1-7 (`01 REC.`), a line shorter than 7 or a
-non-indicator in column 7 count as free. A level number in the sequence area
+non-indicator in column 7 count as free. A line holding only a six-character
+tag that opens some other line of the member with a valid indicator
+(`_sequence_tags`: `P1CKBA` and nothing after it) does not vote: it is a
+blank tagged line, and counting it free read a tagged procedure copybook as
+free-form, so gen-data wrote 0-byte records instead of refusing it (sweep
+N4). A level number in the sequence area
 decides free-form on its own unless some line is fixed-only (a column-7
 comment, a numeric sequence area). A tie goes to `default`, the including
 program's format. A member with a `>>SOURCE` directive is left to

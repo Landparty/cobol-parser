@@ -358,6 +358,18 @@ join as one arm id, the staying ids joined by `GUARD_ALTERNATIVES` (`|`,
 `WHEN_1|WHEN_2`); `_path_options` reads it as alternatives, one per modeled
 staying arm (an unmodeled one is skipped). Leaving it out let a case for an IF
 below such an EVALUATE take the STOP RUN arm while reported verified.
+**A status guard a successful run passes is left out** (sweep O6):
+`_walk_statements(..., transparent=_StatusGuards(...).passes_on_success)`
+skips an IF guard whose condition reads only status registers -- each
+boundary's FILE STATUS field (its 88s and sub-fields too, success `00`),
+`SQLCODE` (0), `SQLSTATE` (`00000`) -- when that condition, evaluated with
+the registers at success (`_evaluate`: 88 VALUEs, `=`/`NOT =`/orderings
+against a literal, NOT/AND/OR), picks the staying arm. No fixture row feeds
+those registers, so the arm had no constraint and every scenario below
+`IF NOT FS-OK GOBACK` was "could not be verified"; a boundary mock returns
+success unless a scenario injects a failure. Anything it cannot decide (an
+EVALUATE, EIBCALEN, an IMS PCB status, a guard that exits on success) stays
+in the chain, as before.
 The other `_walk_statements` callers (correlation carriers' "unconditional
 MOVE", literal-table scans) walk without guards; `_statement_sites` keeps its
 own walk. `TransferSite.enclosing` gets the guards, so a paragraph PERFORMed

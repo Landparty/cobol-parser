@@ -86,11 +86,14 @@ class TestLineLengthFindings:
         assert finding.origin_column == 81
         assert "85 columns" in finding.message
 
-    def test_comment_line_past_80_is_only_a_warning(self) -> None:
+    def test_comment_line_past_80_is_not_reported(self) -> None:
+        # Nothing the compiler reads is lost (sweep O3, 2026-11-12).
         text = "      *" + "X" * 80 + "\n"
-        [finding] = line_length_findings("P.cbl", text)
-        assert finding.severity == "warning"
-        assert "comment text only" in finding.message
+        assert line_length_findings("P.cbl", text) == []
+
+    def test_inline_comment_past_80_is_not_reported(self) -> None:
+        text = "       DISPLAY 'X'. *> " + "Y" * 70 + "\n"
+        assert line_length_findings("P.cbl", text) == []
 
     def test_word_cut_at_column_72_is_a_warning(self) -> None:
         code = "05  CUST-ADDRESS".ljust(60) + "PIC X(30)"
@@ -186,7 +189,7 @@ class TestRuleSelection:
 
     def test_only_line_length(self, tmp_path: Path, capsys) -> None:
         path = tmp_path / "P.cbl"
-        path.write_text(CLEAN + _fixed("*> x", "SEQ00001" + "Z" * 10) + "\n")
+        path.write_text(CLEAN + _fixed("DISPLAY 'X'.", "SEQ00001" + "Z" * 10) + "\n")
         _run(str(path), "--rule", "line-length", "--compact")
         data = json.loads(capsys.readouterr().out)
         assert data["rules_run"] == ["line-length"]

@@ -154,12 +154,14 @@ def call_check_results(report: Any) -> list[SarifResult]:
         }
         if finding.position is not None:
             properties["position"] = finding.position
+        if finding.origin_file is not None:
+            properties["program_file"] = finding.path
         out.append(
             SarifResult(
                 rule=f"call-check/{finding.kind}",
                 severity=finding.severity,
                 message=finding.message,
-                file=finding.path,
+                file=finding.file,
                 line=finding.line or None,
                 properties=properties,
             )

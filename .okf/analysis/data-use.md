@@ -850,7 +850,11 @@ DB104A's `IF .. CLOSE f GO TO ..` guards). A top-level IF whose arms all end
 the program ends the paragraph walk (`_ENDS`). Violations need to hold on
 every merged path (READ of a file open on no path, OPEN of a file open on
 every path); FILE_LEFT_OPEN is the exception and fires for a file open on any
-path. AT END / INVALID KEY handlers are not forked. The PERFORM-summary key is
+path. Handler phrases (`HANDLER_CLAUSE_PAIRS`: AT END / NOT AT END, INVALID
+KEY / NOT INVALID KEY, ON SIZE ERROR / ...) are forked like IF arms after
+the statement itself runs (`_handler_arms`; a side not written is an empty
+arm), so `READ f AT END CLOSE f GOBACK END-READ` then `CLOSE f` is no
+DOUBLE_CLOSE (sweep O1). The PERFORM-summary key is
 the whole `_status` map, so a range is re-walked from a new set of possible
 states. Pinned by `tests/unit/analysis/test_io_sequence_branches.py`.
 
@@ -882,8 +886,9 @@ whose last I/O statement on the file was a READ carries `;read`
 strips it wherever a mode is compared. A REWRITE of a file whose SELECT is
 SEQUENTIAL, open I-O on every path with the mark on none, is
 `REWRITE_WITHOUT_READ` (status 43) -- a lint *warning*, not an error. A READ
-counts whether or not it hit AT END (handlers are not forked), so a REWRITE
-after a READ at end of file is not caught. Keyed files are not judged.
+counts whether or not it hit AT END (the AT END arm runs from the state the
+READ left, which carries the mark), so a REWRITE after a READ at end of file
+is not caught. Keyed files are not judged.
 Both rules matched GnuCOBOL 3.1.2's FILE STATUS on 1,000 random
 OPEN/READ/WRITE/REWRITE/CLOSE sequences. Pinned by
 `tests/regression/test_io_sequence_failed_open_rewrite_issue_735_736.py`.

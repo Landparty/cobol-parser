@@ -342,7 +342,9 @@ ENTRY). `LinkageChecker` does count and mode only, and only within one file;
 this is the cross-file one, and adds shape. Kinds: `argument-count` (error),
 `passing-mode` (error: callee BY VALUE needs caller BY VALUE; callee BY
 REFERENCE takes REFERENCE or CONTENT), `length` (shorter argument = error,
-longer = info), `usage` (warning: storage class by `_USAGE_CLASS`, so COMP /
+longer = info; shorter against a maximum-size buffer of at least
+`MAX_BUFFER_BYTES` (32760: the `PIC X(32767)` idiom of a routine told the
+real length another way) = info, sweep N2), `usage` (warning: storage class by `_USAGE_CLASS`, so COMP /
 COMP-4 / BINARY agree; then numeric vs alphanumeric DISPLAY), `returning`
 (warning, one side only). A callee with no USING has a zero-operand primary
 entry. Targets: a static name, every `possible_values` target of a dynamic
@@ -360,8 +362,15 @@ subscript and a reference modification without a literal length are compared
 by count and mode only and named in `unchecked`. `(start:len)` with a literal
 length is that many bytes; a subscripted element is one occurrence. Files are
 parsed in chunks of `_CHUNK_SIZE` and reduced to `_Interface` / `_CallSite`
-before the next chunk, so few ASTs are live at once. Backs the `call-check`
-CLI subcommand. Over the 459 NIST programs: 121 checked calls, 0 findings.
+before the next chunk, so few ASTs are live at once. `check_results` puts each
+CALL's line back on disk through `ParseResult.expansion_source_map`
+(`_on_disk`): the program's own line, or, for a CALL COPYed in, the
+copybook's line with `origin_file` set on the site and the finding
+(`CallInterfaceFinding.file` is the file `line` counts; text and SARIF print
+it, SARIF adds `program_file`). Without that, every line after an expanded
+COPY was cited too low (sweep N1). `check_programs` and `CalleeResolver`
+keep the parsed lines: `lint --callee-path` maps them itself. Backs the
+`call-check` CLI subcommand. Over the 459 NIST programs: 121 checked calls, 0 findings.
 Tests: `tests/unit/analysis/test_call_interface.py`.
 
 `CalleeResolver(callee_paths, copybook_paths=...)` checks one program's CALLs
