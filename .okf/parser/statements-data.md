@@ -236,7 +236,11 @@ first. Node fields are in [ast-models.md](../ast-models.md).
   `is_statement_boundary` and the H9 check before each identifier.
   `_consume_subscript` folds a following `( ... )` -- found past a line break via
   `peek_past_noise` -- into the preceding item, keeping nested parens literally
-  (`TAB(FUNCTION MOD(3 2))`); `ELEM OF GRP` folds too. `FUNCTION name[(args)][(refmod)]`
+  (`TAB(FUNCTION MOD(3 2))`); `ELEM OF GRP` folds too. A second group after
+  the subscript (and after any qualifier) is the reference modification,
+  folded the same way (`X(I)(1:N)`, colon joined tight as MOVE renders it);
+  before 2026-11-11 it was left behind and the bare `(` ended the item list,
+  losing `(1:N)` and every later item (`test_display_subscript_refmod.py`). `FUNCTION name[(args)][(refmod)]`
   is one item rendered as MOVE renders it (`"FUNCTION TRIM(A)"`). Literals are
   re-quoted; typed literals keep `raw_value`.
 - `[WITH] NO ADVANCING` sets `with_no_advancing` (`WITH` / `NO` / `ADVANCING`

@@ -317,6 +317,11 @@ class DisplayStatementParser(IStatementParser):
                         item_value = consume_optional_qualifiers(
                             token_stream, item_value
                         )
+                    # A reference modification after the subscript
+                    # (``X(I)(1:N)``) is a second parenthesized group. It
+                    # was left behind, and the bare LEFT_PAREN then ended
+                    # the item list: ``(1:N)`` and every later item lost.
+                    item_value += self._consume_subscript(token_stream)
 
                 stmt.add_display_item(item_value)
             else:
@@ -537,9 +542,11 @@ class DisplayStatementParser(IStatementParser):
         # with one between adjacent non-paren tokens (`TAB(I J)`'s
         # multi-dimension subscript), so nested parens round-trip literally
         # instead of being flattened into a single space-joined pair.
+        # A reference modification's colon joins tight too (``(1:N)``, as
+        # MOVE renders it).
         out: list[str] = []
         for i, part in enumerate(parts):
-            if i > 0 and part not in ("(", ")") and parts[i - 1] != "(":
+            if i > 0 and part not in ("(", ")", ":") and parts[i - 1] not in ("(", ":"):
                 out.append(" ")
             out.append(part)
         return "".join(out)
