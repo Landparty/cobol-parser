@@ -265,6 +265,31 @@ class TestA3CommentEntryCopy:
         assert result.errors == []
         assert not any("was not expanded" in w for w in result.warnings)
 
+    @pytest.mark.parametrize(
+        "prose", ["    TITLE PAGE IS PRINTED FIRST.", "    TITLE."]
+    )
+    def test_title_without_a_literal_is_prose(self, prose: str) -> None:
+        # IBM's TITLE takes a literal; without one the line is remarks text,
+        # and ending the entry there dropped the rest of it.
+        source = "\n".join(
+            [
+                _rec("IDENTIFICATION DIVISION."),
+                _rec("PROGRAM-ID. T1."),
+                _rec("REMARKS. FIRST LINE OF REMARKS."),
+                _rec(prose),
+                _rec("    LAST LINE OF REMARKS."),
+                _rec("PROCEDURE DIVISION."),
+                _rec("MAIN-PARA."),
+                _rec("    GOBACK."),
+            ]
+        )
+        result = parse_cobol(source)
+        assert result.errors == []
+        remarks = result.ast.identification_division.metadata["remarks"]
+        assert remarks.startswith("FIRST LINE OF REMARKS.")
+        assert remarks.endswith("LAST LINE OF REMARKS")
+        assert prose.strip().rstrip(".") in remarks
+
 
 class TestA5ListingDirectives:
     @pytest.mark.parametrize(

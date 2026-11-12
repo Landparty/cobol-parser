@@ -285,6 +285,13 @@ class ScanReport:
                 "file_count": len(self.files),
                 "scanned_file_count": len(ok),
                 "failed_file_count": len(failed),
+                # Scanned, but not cleanly: the parse recovered from errors
+                # or fell back to an unexpanded parse. Their units are
+                # reported with the grade withheld; this makes them
+                # countable without breaking the identity above.
+                "degraded_file_count": sum(
+                    1 for f in ok if f.parse_error_count or f.copybook_error
+                ),
                 "program_unit_count": sum(len(f.units) for f in ok),
                 **(
                     {"cached_file_count": sum(f.from_cache for f in self.files)}
@@ -308,6 +315,9 @@ def _run_analyzer(
     options: ScanOptions,
     source_map: dict[int, tuple[str, int]] | None = None,
     copybook_names: set[str] | None = None,
+    *,
+    parse_error_count: int = 0,
+    copybook_error: str | None = None,
 ) -> dict[str, Any]:
     """Run one analyzer over one already-parsed program unit.
 
@@ -324,7 +334,18 @@ def _run_analyzer(
     if name == "health":
         from .analysis.technical_debt import TechnicalDebtAnalyzer
 
-        return TechnicalDebtAnalyzer().analyze(unit).to_dict()
+        # The single-file ``health`` subcommand withholds the grade of a
+        # file that parsed with errors; a scan graded it as if clean (an
+        # "A" for a file whose copybooks failed to expand).
+        return (
+            TechnicalDebtAnalyzer()
+            .analyze(
+                unit,
+                parse_error_count=parse_error_count,
+                copybook_error=copybook_error,
+            )
+            .to_dict()
+        )
 
     if name == "redundancy":
         from .analysis.redundancy import RedundancyAnalyzer
@@ -370,6 +391,9 @@ def _scan_unit(
     options: ScanOptions,
     source_map: dict[int, tuple[str, int]] | None = None,
     copybook_names: set[str] | None = None,
+    *,
+    parse_error_count: int = 0,
+    copybook_error: str | None = None,
 ) -> UnitScan:
     """Every requested analyzer over one unit, each failing on its own."""
     scan = UnitScan(program_name=unit.program_name or "", depth=depth)
@@ -378,7 +402,13 @@ def _scan_unit(
             continue
         try:
             scan.reports[name] = _run_analyzer(
-                name, unit, options, source_map, copybook_names
+                name,
+                unit,
+                options,
+                source_map,
+                copybook_names,
+                parse_error_count=parse_error_count,
+                copybook_error=copybook_error,
             )
         except Exception as exc:  # noqa: BLE001 -- see the module docstring
             # Deliberately broad. An analyzer that trips over an exotic
@@ -506,7 +536,15 @@ def _scan_one(
         sources.update(getattr(result, "expansion_copybooks", None) or [])
     copybook_names = _copybook_names(result.ast, source_map, path)
     for unit, depth in _units_with_depth(result.ast):
-        unit_scan = _scan_unit(unit, depth, options, source_map, copybook_names)
+        unit_scan = _scan_unit(
+            unit,
+            depth,
+            options,
+            source_map,
+            copybook_names,
+            parse_error_count=scan.parse_error_count,
+            copybook_error=scan.copybook_error,
+        )
         if source_map:
             # With copybooks expanded, every report location counts lines of
             # the expanded text -- past the first COPY it is not the line the

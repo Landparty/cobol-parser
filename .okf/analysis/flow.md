@@ -827,9 +827,11 @@ parse hands over a near-empty AST, which would score 0.0 and grade "A".
 `analyze(ast, parse_error_count=len(result.errors))` keeps the
 score (computed over what was recovered) but sets `grade` to `None` and adds
 a `caveats` entry; `to_dict()` always carries `parse_error_count` and
-`caveats`. The `health` subcommand passes the count; `scan` does not (it
-already flags `parse_error_count` per file, and its grade feeds the
-extension's portfolio sort). Pinned by `test_technical_debt.py::
+`caveats`. `copybook_error=` (why expansion failed when the caller fell
+back to an unexpanded parse) withholds the grade the same way, with its own
+caveat. The `health` subcommand passes the count; since 2026-11-11 `scan`
+passes both (it used to pass neither, so a file that failed to parse or to
+expand still graded A/B in the portfolio). Pinned by `test_technical_debt.py::
 TestParseErrorsWithholdTheGrade` and `test_complexity_health_subcommands.py::
 TestHealthWithParseErrors`.
 

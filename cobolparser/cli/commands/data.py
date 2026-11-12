@@ -975,6 +975,7 @@ def _warn_unexpanded_copybooks(args: argparse.Namespace, unresolved: list[str]) 
 def _cmd_gen_fixtures(args: argparse.Namespace) -> None:
     from ...generators.program_fixtures import ProgramFixtureGenerator
     from ...layout.errors import ProgramLayoutError
+    from ...preprocess import PreprocessingError
 
     generator = ProgramFixtureGenerator()
     copybook_paths = args.copybook_path or None
@@ -996,6 +997,8 @@ def _cmd_gen_fixtures(args: argparse.Namespace) -> None:
             )
         except ProgramLayoutError as exc:
             _fail(str(exc))
+        except PreprocessingError as exc:
+            _fail(f"Copybook expansion failed for {args.file}: {exc}")
         _warn_unexpanded_copybooks(args, report.unresolved)
         _json_out(
             {
@@ -1042,6 +1045,11 @@ def _cmd_gen_fixtures(args: argparse.Namespace) -> None:
         )
     except ProgramLayoutError as exc:
         _fail(str(exc))
+    except PreprocessingError as exc:
+        # A copybook that fails validation (CopybookSyntaxError), cannot be
+        # found or expands circularly: one line and exit 1, as `parse` says
+        # it, not a traceback.
+        _fail(f"Copybook expansion failed for {args.file}: {exc}")
 
     _warn_unexpanded_copybooks(args, bundle.unresolved)
 

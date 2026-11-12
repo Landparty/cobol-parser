@@ -9,6 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+* **A REMARKS line that starts with `TITLE` stays in the remarks.** A line of
+  prose such as `TITLE PAGE IS PRINTED FIRST.` ended the comment-entry as if
+  it were the `TITLE` listing directive, and the rest of the remarks was
+  dropped. `TITLE` ends a comment-entry only when a literal follows it.
+* **`scan` no longer grades files that failed to parse.** Its `health` report
+  never received the parse-error count or the copybook expansion failure, so
+  a file the `health` subcommand leaves ungraded got a B, and one whose
+  copybooks failed to expand got an A with no caveat. The grade is now
+  withheld with a caveat, and the summary gains `degraded_file_count`.
+* **`gen-fixtures` reports a copybook that fails validation as `error: ...`
+  with exit 1**, not a `CopybookSyntaxError` traceback.
 * **`DISPLAY X(I)(1:N)` keeps its reference modification.** The `(1:N)`
   after a subscript was dropped, along with every DISPLAY item after it.
 * **Fixed-format copybooks are no longer read as free-form.** A member was
