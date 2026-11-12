@@ -17,6 +17,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+* **A free-form copybook indented four spaces keeps its field names.** Its
+  level numbers ended in column 6, so it was read as fixed format, the
+  levels were cut off and every field became `ANONYMOUS-n-7` (#898).
 * **health names copybooks it could not find.** A COPY member missing from
   the copybook path kept a full grade with no word about it. `health` and
   `scan --analyzer health` now keep the grade but add a caveat naming the
