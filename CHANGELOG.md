@@ -17,6 +17,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+* **A JCL step inside `IF` that also codes `COND=` keeps the IF.**
+  `JobStep` gains `if_condition` (the enclosing IF/ELSE) and `cond` (the
+  raw `COND=`) beside `condition`, which is unchanged; the MCP job tools
+  show the IF too. mocky-mock's `mockymock job` should test both (#896).
 * **A free-form copybook indented four spaces keeps its field names.** Its
   level numbers ended in column 6, so it was read as fixed format, the
   levels were cut off and every field became `ANONYMOUS-n-7` (#898).

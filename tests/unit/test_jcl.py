@@ -938,6 +938,8 @@ class TestSerialization:
             "procedure",
             "parm",
             "condition",
+            "if_condition",
+            "cond",
             "parameters",
             "dd_statements",
             "line",

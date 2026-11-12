@@ -25,7 +25,7 @@ from .jcl_common import (
     _ProgramUses,
     _step_access,
     _step_row,
-    explain_condition,
+    add_condition,
     run_order,
 )
 from .jcl_index import JclFile, _Locator, _program_selects, jcl_index
@@ -179,11 +179,7 @@ def _job_flow(
         if step.procedure:
             key = "from_procedure" if "." in (step.name or "") else "invokes_procedure"
             row[key] = step.procedure
-        if step.condition:
-            row["condition"] = step.condition
-            meaning = explain_condition(step.condition)
-            if meaning:
-                row["condition_means"] = meaning
+        add_condition(row, step)
         if id(step) in running:
             row["runs_the_program"] = True
         reads: list[str] = []
