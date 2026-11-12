@@ -17,6 +17,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+* **health names copybooks it could not find.** A COPY member missing from
+  the copybook path kept a full grade with no word about it. `health` and
+  `scan --analyzer health` now keep the grade but add a caveat naming the
+  members, and scan counts the file in `degraded_file_count` (#897).
 * **The MCP server honours `project.abend_programs`.** Every tool now
   applies the site abend routines `cobol.yml` names, as the CLI does, so
   `lint` no longer reports a perform-range fall-through the CLI suppresses

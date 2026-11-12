@@ -319,8 +319,10 @@ changes; the COBOL Analyzer extension reads it before any other key.
 degraded_file_count, program_unit_count}`, and `file_count == scanned +
 failed` always — a consumer can prove every file it handed over was
 accounted for. `degraded_file_count` counts the scanned files with a
-`parse_error_count` or a `copybook_error`; their `health` grade is withheld
-(`TechnicalDebtAnalyzer.analyze(parse_error_count=, copybook_error=)`).
+`parse_error_count` or a `copybook_error` (their `health` grade is withheld,
+`TechnicalDebtAnalyzer.analyze(parse_error_count=, copybook_error=)`) or
+any `unexpanded_copybooks` (grade kept, with a caveat naming the members,
+#897; a scan with no copybook path counts every file that COPYs).
 
 * `FileScan` — `path`, `units: list[UnitScan]`, `error` (unreadable /
   unparseable / parsed to nothing; a file with an error has no units and is
