@@ -236,6 +236,10 @@ tail.
 * `DecodeResult.to_csv()` — the exact inverse of `GeneratedDataset.to_csv()`:
   same column names, same value rendering, same `"\n"` terminator. The CLI
   test asserts `gen-data | decode` reproduces the generated CSV byte for byte.
+  The same seed also gives the same values whether the CSV or the record
+  image is generated (FILLER draws nothing, see
+  [record-data.md](record-data.md)), unless a `--max-occurs` cap cut the
+  CSV's tables.
 * `DecodeResult.to_dict()` — every field's `offset`, `length`, `hex`,
   `present`, `truncated`, `error`. This is what a UI hex pane binds to.
 * `decoded_hex_dump(result, opts)` — the same shape `encoding.hex_dump()`
@@ -324,7 +328,9 @@ adds pairing and field comparison, and decodes nothing itself.
 picks the 01 a `--record` name means. Both halves of the package use it and
 must *agree*: generating from `--record CUST-REC` and decoding through
 `--record CUST-REC` must land on the same 01, or a round trip through the
-record image silently changes layout.
+record image silently changes layout. With no `--record`, both use
+`first_generatable_record` (see [record-data.md](record-data.md)) for the
+same reason.
 `generators/data/copybook.py` is otherwise generation-only (value drawing, `unique_fields`
 caveats, #526, the `record_image_gap` that makes short record images warn)
 and never reaches the decoder.

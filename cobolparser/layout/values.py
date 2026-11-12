@@ -275,6 +275,35 @@ def _mark_initial_value(cell: str | None) -> str | None:
     return InitialValueCell(cell)
 
 
+#: Figurative constants a FILLER's VALUE can fill it with: its bytes are then
+#: fixed, whatever cell is generated (the record-image encoder writes them).
+_FILLER_FILL_WORDS = frozenset(
+    {
+        "SPACE",
+        "SPACES",
+        "LOW-VALUE",
+        "LOW-VALUES",
+        "NULL",
+        "NULLS",
+        "HIGH-VALUE",
+        "HIGH-VALUES",
+    }
+)
+
+
+def _filler_without_content(spec: FieldSpec) -> bool:
+    """A FILLER whose written bytes no generated value changes: no level-88
+    condition to satisfy, and no VALUE or a figurative fill."""
+    if not spec.is_filler or spec.condition_values:
+        return False
+    if not spec.value_clause:
+        return True
+    word = spec.value_clause.strip().upper()
+    if word.startswith("ALL "):
+        word = word[4:].strip()
+    return word in _FILLER_FILL_WORDS
+
+
 class ValueFactory:
     """Builds one field's value for one row.
 
@@ -292,6 +321,9 @@ class ValueFactory:
 
     def __init__(self, rng: random.Random, opts: DataGeneratorOptions) -> None:
         self._rng = rng
+        #: Seeds the side streams a FILLER with level-88s draws from (see
+        #: :meth:`value_for`); reading the state does not advance *rng*.
+        self._side_seed = hash(rng.getstate()[1][:8])
         self._opts = opts
         self._unique = {u.upper() for u in opts.unique_fields}
         self._used: dict[str, set[str]] = {}
@@ -302,6 +334,27 @@ class ValueFactory:
 
     def value_for(self, spec: FieldSpec, row: int) -> str:
         """Generate the CSV cell for *spec* in row *row* (0-based)."""
+        if _filler_without_content(spec):
+            # A FILLER whose bytes do not depend on its cell -- no VALUE, or
+            # a figurative fill (SPACES, LOW-VALUES) -- is written as that
+            # fill whatever is generated, so it draws nothing: a draw here
+            # shifted every later value, and the record image (which always
+            # includes FILLER) no longer matched the CSV for the same seed.
+            return ""
+        if spec.is_filler:
+            # A FILLER that owns level-88s is in a record image but not, by
+            # default, in the CSV. Its value comes from a stream of its own,
+            # so including it or not leaves every other value unchanged and
+            # the same seed gives the same values in both outputs.
+            main = self._rng
+            self._rng = random.Random(f"{self._side_seed}:{row}:{spec.column}")
+            try:
+                return self._value_for(spec, row)
+            finally:
+                self._rng = main
+        return self._value_for(spec, row)
+
+    def _value_for(self, spec: FieldSpec, row: int) -> str:
         if self._opts.blank_rate and self._rng.random() < self._opts.blank_rate:
             return ""
 

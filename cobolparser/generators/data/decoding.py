@@ -1047,13 +1047,30 @@ class RecordDecoder:
             CopybookLayoutError: if the source has no usable record layout,
                 or the requested *record* is not in it.
         """
-        from .copybook import fd_record_length, parse_copybook_records, select_record
+        from ...layout.options import DataGeneratorOptions
+        from .copybook import (
+            fd_record_length,
+            first_generatable_record,
+            parse_copybook_records,
+            select_record,
+        )
 
         warnings: list[str] = []
         records = parse_copybook_records(
             source, filename=filename, copybook_paths=copybook_paths, warnings=warnings
         )
-        chosen = select_record(records, record, filename)
+        if record is None:
+            # The record gen-data generates by default, so a round trip with
+            # no --record lands on the same 01; the first 01 when none has a
+            # generatable field (decode still shows its bytes).
+            try:
+                chosen = first_generatable_record(
+                    records, options or DataGeneratorOptions(), filename
+                )
+            except CopybookLayoutError:
+                chosen = records[0]
+        else:
+            chosen = select_record(records, record, filename)
         if record_length is None:
             # A whole program's FD frames its file at the LRECL every 01
             # under it shares, not at the chosen 01's own length.
@@ -1462,7 +1479,12 @@ class RecordDecoder:
         # A counter the overlay covers is still read (see decode_record), so
         # it counts as part of the record: leaving it out claimed it was not.
         counters = [counter.spec for counter in view.hidden_counters]
-        for caveat in encoding_caveats([*specs, *counters], opts):
+        from ...layout.fields import pictureless_field_caveats
+
+        for caveat in [
+            *encoding_caveats([*specs, *counters], opts),
+            *pictureless_field_caveats(specs),
+        ]:
             if caveat not in caveats:
                 caveats.append(caveat)
         if any(_normalized_usage(spec) in SINGLE_FLOAT_USAGES for spec in specs):

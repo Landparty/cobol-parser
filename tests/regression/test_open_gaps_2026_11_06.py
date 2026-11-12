@@ -157,7 +157,7 @@ PROCEDURE DIVISION.
         )
         fixtures = [
             f
-            for scenario in bundle.to_dict()["scenarios"]
+            for scenario in bundle.to_dict(bundle_version=1)["scenarios"]
             for f in scenario.get("fixtures", [])
             if f["category"] == "CALL"
         ]

@@ -26,8 +26,15 @@ class TestGenFixturesParser:
         assert args.format == "json"
         assert args.scenarios == "happy"
 
-    def test_max_occurs_flag_defaults_to_none(self):
+    def test_max_occurs_flag_defaults_to_ten(self):
+        # Uncapped, OCCURS 160 tables x 97 scenarios made a 1.5 GB bundle.
         args = _build_parser().parse_args(["gen-fixtures", FILE_OPERATIONS])
+        assert args.max_occurs == 10
+
+    def test_max_occurs_all_lifts_the_cap(self):
+        args = _build_parser().parse_args(
+            ["gen-fixtures", FILE_OPERATIONS, "--max-occurs", "all"]
+        )
         assert args.max_occurs is None
 
     def test_max_occurs_flag_parses(self):
@@ -58,7 +65,7 @@ class TestGenFixturesOutput:
         _run(monkeypatch, FILE_OPERATIONS, "--seed", "1", "--compact")
         out = json.loads(capsys.readouterr().out)
         assert out["source_file"] == FILE_OPERATIONS
-        assert out["bundle_version"] == 1
+        assert out["bundle_version"] == 2
         assert out["program_name"] == "FILETEST"
         assert out["seed"] == 1
 
@@ -73,10 +80,10 @@ class TestGenFixturesOutput:
         _run(monkeypatch, FILE_OPERATIONS, "--seed", "1", "--rows", "3", "--compact")
         out = json.loads(capsys.readouterr().out)
         reads = [
-            f
+            out["fixtures"][f]
             for s in out["scenarios"]
             for f in s["fixtures"]
-            if f["category"] == "READ"
+            if out["fixtures"][f]["category"] == "READ"
         ]
         assert reads
         assert all(len(f["sequence"]) == 3 for f in reads)
@@ -115,7 +122,14 @@ class TestGenFixturesOutput:
             str(out_path),
         )
         data = json.loads(out_path.read_text())
-        assert data["bundle_version"] == 1
+        assert data["bundle_version"] == 2
+
+    def test_bundle_version_1_on_request(self, monkeypatch, capsys):
+        _run(monkeypatch, FILE_OPERATIONS, "--seed", "1", "--bundle-version", "1")
+        out = json.loads(capsys.readouterr().out)
+        assert out["bundle_version"] == 1
+        assert "fixtures" not in out
+        assert all(isinstance(f, dict) for s in out["scenarios"] for f in s["fixtures"])
 
     def test_csv_dir_format_writes_directory(self, monkeypatch, tmp_path):
         out_dir = tmp_path / "fixtures"

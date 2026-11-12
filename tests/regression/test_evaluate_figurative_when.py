@@ -115,7 +115,7 @@ class TestGenFixtures:
         bundle = ProgramFixtureGenerator().generate_with_scenarios_from_file(
             str(path), mode="branches", seed=1
         )
-        data = bundle.to_dict()
+        data = bundle.to_dict(bundle_version=1)
         codes_by_scenario = {
             scenario["name"]: {
                 row["IN-CODE"]

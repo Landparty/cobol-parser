@@ -13,6 +13,7 @@ from pathlib import Path
 
 import pytest
 
+from cobolparser.generators.data.bundle import BUNDLE_VERSION
 from cobolparser.generators.program_fixtures import ProgramFixtureGenerator
 
 pytestmark = pytest.mark.integration
@@ -28,7 +29,7 @@ class TestGenFixturesCorpus:
     @pytest.mark.parametrize("cbl_path", [pytest.param(p, id=p.name) for p in _ALL_CBL])
     def test_generates_without_raising(self, cbl_path: Path) -> None:
         bundle = ProgramFixtureGenerator().generate_from_file(str(cbl_path), seed=1)
-        assert bundle.bundle_version == 1
+        assert bundle.bundle_version == BUNDLE_VERSION
         assert len(bundle.scenarios) == 1
 
         coverage = bundle.coverage

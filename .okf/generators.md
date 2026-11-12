@@ -53,7 +53,7 @@ that one. CLI flags for every subcommand live in [cli.md](cli.md).
 `cobolparser.analysis.__init__`): importing the package touches no submodule;
 each public name resolves on first attribute access. `__all__` lists **54**
 names (copybook data, record encoding/decoding/views/compare, layout index,
-bundle shapes, flowcharts, `ProgramFixtureGenerator`). Several helpers live
+bundle shapes, flowcharts, `ProgramFixtureGenerator`; `BUNDLE_VERSION` 2, `SUPPORTED_BUNDLE_VERSIONS` and `expand_shared_fixtures` are exported lazily too). Several helpers live
 only in `cobolparser.generators.data` (its own `__all__`, 61 names):
 `encode_record`, `encode_field`, `hex_dump`, `decode_field`, `decode_record`,
 `occurrence_count`, `unresolved_odo_counters`, `select_record`,

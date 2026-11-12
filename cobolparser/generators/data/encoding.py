@@ -566,7 +566,7 @@ def encode_field(spec: FieldSpec, text: str, opts: EncodingOptions) -> bytes:
     if width == 0:
         return b""
 
-    if spec.is_filler and not spec.value_clause:
+    if spec.is_filler and not spec.value_clause and not spec.condition_values:
         # FILLER names no field a program reads, so whatever the value
         # generator put in its CSV cell is noise in a record image.  An empty
         # cell falls through every encoder below as spaces (text) or zeros

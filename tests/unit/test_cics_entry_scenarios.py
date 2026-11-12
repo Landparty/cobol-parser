@@ -61,7 +61,7 @@ def _bundle(tmp_path: Path, source: str) -> dict:
     generator = ProgramFixtureGenerator(entry_parameters=True)
     return generator.generate_with_scenarios_from_file(
         str(path), mode="branches", seed=7
-    ).to_dict()
+    ).to_dict(bundle_version=1)
 
 
 def _entry(scenario: dict) -> dict:

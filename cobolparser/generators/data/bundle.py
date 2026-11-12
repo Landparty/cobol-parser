@@ -26,7 +26,17 @@ if TYPE_CHECKING:
 #: Bumped only on a breaking change to the JSON shape. Phase 8 (mockymock
 #: integration) checks this before consuming a bundle; fail closed on an
 #: unknown version rather than guess at a schema that changed underneath it.
-BUNDLE_VERSION = 1
+#:
+#: 2 (2026-11-11): each distinct fixture is written once, in the top-level
+#: ``fixtures`` table, and a scenario's ``fixtures`` lists the ids of the
+#: ones it uses. In version 1 every scenario repeated every fixture in
+#: full, so a branches/all bundle repeated the same unchanged READ
+#: sequences once per scenario. :func:`expand_shared_fixtures` turns a
+#: version 2 dict back into the version 1 shape.
+BUNDLE_VERSION = 2
+
+#: The versions :meth:`FixtureBundle.to_dict` can write.
+SUPPORTED_BUNDLE_VERSIONS: tuple[int, ...] = (1, 2)
 
 
 @dataclass
@@ -193,25 +203,46 @@ class FixtureBundle:
     #: by one more key appearing.
     scenario_coverage: dict[str, Any] | None = None
 
-    def to_dict(self) -> dict[str, Any]:
-        return {
-            "bundle_version": self.bundle_version,
+    def to_dict(self, *, bundle_version: int | None = None) -> dict[str, Any]:
+        """The bundle as JSON-ready data, in *bundle_version*'s shape
+        (default: :attr:`bundle_version`, which defaults to
+        :data:`BUNDLE_VERSION`). Version 1 repeats every fixture inside every
+        scenario; version 2 writes each distinct fixture once in
+        ``fixtures`` and has each scenario list fixture ids."""
+        version = self.bundle_version if bundle_version is None else bundle_version
+        if version not in SUPPORTED_BUNDLE_VERSIONS:
+            raise ValueError(
+                f"unsupported bundle_version {version} (supported: "
+                f"{', '.join(str(v) for v in SUPPORTED_BUNDLE_VERSIONS)})"
+            )
+        scenarios = [s.to_dict() for s in self.scenarios]
+        result: dict[str, Any] = {
+            "bundle_version": version,
             "program_name": self.program_name,
             "seed": self.seed,
-            "scenarios": [s.to_dict() for s in self.scenarios],
-            "layouts": {
-                name: [f.to_dict() for f in fields]
-                for name, fields in self.layouts.items()
-            },
-            "coverage": self.coverage.to_dict(),
-            "unresolved": list(self.unresolved),
-            "scenario_coverage": self.scenario_coverage,
+            "scenarios": scenarios,
         }
+        if version >= 2:
+            result["fixtures"] = _share_fixtures(scenarios)
+        result.update(
+            {
+                "layouts": {
+                    name: [f.to_dict() for f in fields]
+                    for name, fields in self.layouts.items()
+                },
+                "coverage": self.coverage.to_dict(),
+                "unresolved": list(self.unresolved),
+                "scenario_coverage": self.scenario_coverage,
+            }
+        )
+        return result
 
-    def to_json(self, *, indent: int | None = 2) -> str:
+    def to_json(
+        self, *, indent: int | None = 2, bundle_version: int | None = None
+    ) -> str:
         import json
 
-        return json.dumps(self.to_dict(), indent=indent)
+        return json.dumps(self.to_dict(bundle_version=bundle_version), indent=indent)
 
     def write_csv_dir(self, path: str | os.PathLike[str]) -> None:
         """Emit ``<path>/<scenario-slug>/<KEY>.csv``, one CSV per file-shaped
@@ -249,7 +280,9 @@ class FixtureBundle:
                     writer.writerow(header)
                     writer.writerows(rows)
 
-        manifest = self.to_dict()
+        # The manifest keeps the version 1 shape: each scenario's fixtures
+        # inline, each with the path of the CSV written for it there.
+        manifest = self.to_dict(bundle_version=1)
         for scenario, scenario_dict, slug, names in zip(
             self.scenarios, manifest["scenarios"], slugs, csv_names, strict=True
         ):
@@ -274,6 +307,55 @@ class FixtureBundle:
         with open(os.path.join(root, "MANIFEST.json"), "w", encoding="utf-8") as handle:
             _json.dump(manifest, handle, indent=2)
             handle.write("\n")
+
+
+def _share_fixtures(scenarios: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    """Move each scenario dict's fixtures into one table, in place.
+
+    Each distinct fixture (same content, compared as canonical JSON) is
+    kept once under an id, ``CATEGORY:KEY``, or ``CATEGORY:KEY#2``,
+    ``#3``, ... for a second, third variant of the same boundary; each
+    scenario's ``fixtures`` becomes the list of its fixtures' ids, in the
+    same order. Ids are given in first-use order, so the same bundle always
+    gets the same ids."""
+    import json
+
+    table: dict[str, dict[str, Any]] = {}
+    by_content: dict[str, str] = {}
+    variants: dict[str, int] = {}
+    for scenario in scenarios:
+        ids: list[str] = []
+        for fixture in scenario["fixtures"]:
+            content = json.dumps(fixture, sort_keys=True, default=str)
+            fixture_id = by_content.get(content)
+            if fixture_id is None:
+                base = f"{fixture['category']}:{fixture['key']}"
+                count = variants[base] = variants.get(base, 0) + 1
+                fixture_id = base if count == 1 else f"{base}#{count}"
+                by_content[content] = fixture_id
+                table[fixture_id] = fixture
+            ids.append(fixture_id)
+        scenario["fixtures"] = ids
+    return table
+
+
+def expand_shared_fixtures(bundle: dict[str, Any]) -> dict[str, Any]:
+    """A copy of a bundle dict in the version 1 shape: every scenario's
+    fixtures inline. A version 1 dict comes back as an equal copy. For a
+    consumer written against version 1, and for reading a scenario's
+    fixtures without looking each id up."""
+    import copy
+
+    result = copy.deepcopy(bundle)
+    table = result.pop("fixtures", None)
+    if result.get("bundle_version") == 1 or table is None:
+        return result
+    for scenario in result.get("scenarios", []):
+        scenario["fixtures"] = [
+            copy.deepcopy(table[fixture_id]) for fixture_id in scenario["fixtures"]
+        ]
+    result["bundle_version"] = 1
+    return result
 
 
 def _slugify(name: str) -> str:
@@ -384,6 +466,8 @@ def _sanitize_key(key: str) -> str:
 
 __all__ = [
     "BUNDLE_VERSION",
+    "SUPPORTED_BUNDLE_VERSIONS",
+    "expand_shared_fixtures",
     "Expectation",
     "BoundaryFixture",
     "CoverageSummary",

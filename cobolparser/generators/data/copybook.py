@@ -21,6 +21,7 @@ from ...layout.fields import (
     VaryingLength,
     flatten_record,
     occurs_expansion_caveats,
+    pictureless_field_caveats,
 )
 from ...layout.options import DataGeneratorOptions
 from ...layout.values import ValueFactory
@@ -33,6 +34,7 @@ __all__ = [
     "CopybookDataGenerator",
     "fd_record_length",
     "parse_copybook_records",
+    "first_generatable_record",
     "select_record",
     "wrap_copybook_fragment",
 ]
@@ -79,6 +81,43 @@ def fd_record_length(
     if declared is not None and block.get("min") is None and not block.get("varying"):
         lrecl = max(lrecl, int(declared))
     return lrecl if lrecl > own else None
+
+
+def _generatable_hint(
+    records: list[CobolDataItem], options: DataGeneratorOptions
+) -> str:
+    """``"; generatable records: A, B"`` (or ``""`` when there are none)."""
+    names = [r.name for r in records if flatten_record(r, options)]
+    if not names:
+        return ""
+    shown = ", ".join(names[:10]) + (" ..." if len(names) > 10 else "")
+    return f"; records with generatable fields: {shown} (pick one with --record)"
+
+
+def first_generatable_record(
+    records: list[CobolDataItem],
+    options: DataGeneratorOptions,
+    filename: str = "<copybook>",
+) -> CobolDataItem:
+    """The record gen-data and decode use when no ``--record`` is given: the
+    first 01 with at least one generatable field.
+
+    The first 01 outright, which this used to be, is often an all-FILLER
+    header or a one-line REDEFINES; the command then failed with "no
+    generatable fields" although later records qualified.
+
+    Raises:
+        CopybookLayoutError: when no record has a generatable field, naming
+            the records it looked at.
+    """
+    for candidate in records:
+        if flatten_record(candidate, options):
+            return candidate
+    names = ", ".join(r.name for r in records[:10])
+    raise CopybookLayoutError(
+        f"{filename}: no record has generatable fields (all FILLER, REDEFINES, "
+        f"or empty); records: {names}"
+    )
 
 
 class CopybookDataGenerator:
@@ -136,7 +175,16 @@ class CopybookDataGenerator:
         records = parse_copybook_records(
             source, filename=filename, copybook_paths=copybook_paths, warnings=warnings
         )
-        chosen = self._select_record(records, record, filename)
+        if record is None:
+            chosen = first_generatable_record(records, self.options, filename)
+        else:
+            chosen = self._select_record(records, record, filename)
+            if not flatten_record(chosen, self.options):
+                raise CopybookLayoutError(
+                    f"{chosen.name}: record has no generatable fields (all "
+                    "FILLER, REDEFINES, or empty)"
+                    + _generatable_hint(records, self.options)
+                )
         dataset = self.generate_from_record(chosen)
         dataset.lrecl = fd_record_length(records, chosen, self.options)
         dataset.caveats[:0] = warnings
@@ -164,8 +212,10 @@ class CopybookDataGenerator:
         # After the rows, deliberately: a copybook that declares no varying
         # range draws nothing here, and so generates byte-identical output to
         # a version of this package that had never heard of one.
-        caveats = occurs_expansion_caveats(record, self.options) + self._unique_caveats(
-            record, fields, factory
+        caveats = (
+            occurs_expansion_caveats(record, self.options)
+            + pictureless_field_caveats(fields)
+            + self._unique_caveats(record, fields, factory)
         )
         varying = self._varying_for(record, fields, caveats)
         lengths = self._draw_lengths(varying, fields, rng)
