@@ -32,7 +32,7 @@ themselves are in [../dialects.md](../dialects.md).
 ```python
 from cobolparser.analysis import HostVariableResolver
 report: HostVarResolutionReport = HostVariableResolver().resolve(ast)   # .resolve(), not .analyze()
-# report.resolved / .unresolved / .declare_tables / .column_name_collisions
+# report.resolved / .unresolved / .ambiguous / .declare_tables / .column_name_collisions
 ```
 
 Resolves SQL host variables (`:var-name`) in EXEC SQL blocks against WORKING-STORAGE
@@ -46,6 +46,17 @@ through its column. `column_name_collisions` uses
 that form too (`CUST-ID`, not `CUST_ID`). Matching them verbatim paired only
 the columns with no underscore in their name (#572). `DclgenChecker` imports
 the same function, so the two cannot drift apart.
+
+**One entry per data item, not per name (#863).** `:STRUCT.NAME` resolves to
+the NAME under STRUCT. The first item a name resolves to keys `resolved` by the
+bare name; a qualified reference to a *different* item with that name gets its
+own entry keyed `STRUCT.NAME` (with `HostVariableInfo.qualifiers`), so
+`:DCLEMP.CUST-NAME` and `:DCLCUST.CUST-NAME` keep their own PICTUREs. A name
+used *unqualified* while declared more than once goes to `ambiguous`
+(name -> declaration count) and is not resolved, as the DB2 precompiler
+rejects it. `DclgenChecker` reports those as unchecked, strips the qualifier
+before matching a column, and when several tables declare the column binds
+the one the variable's statements name (`FROM CUST`).
 
 A DCLGEN member's `DECLARE TABLE` in WORKING-STORAGE carries a qualified
 `SCHEMA.TABLE` name, which `DeclareTableStatement` extracts, so both this
@@ -215,7 +226,9 @@ DLI` (GU/GN/GNP/ISRT/DLET/REPL, ...) -- resolving each call's SSAs to segment
 names.
 
 **Function code.** A function-code variable resolves to every value its VALUE
-clause and MOVEs give it, joined by the "/" convention (`CHNG/GU/ROLB`); only
+clause and MOVEs give it (propagated through `MOVE var TO var` as a fixpoint,
+so a MOVE in an init paragraph written below the CALL still counts, #865),
+joined by the "/" convention (`CHNG/GU/ROLB`); only
 values that cannot be a function code -- blank, or a figurative such as
 `VALUE SPACES` -- are dropped. An unquoted literal is recognised against
 `IBMEnterpriseCobol.IMS_COMMANDS`, the one DL/I call-code list. Keeping only

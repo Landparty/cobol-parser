@@ -1460,3 +1460,43 @@ class TestPrimarySegmentIsTarget:
         assert isrt, "EXECDLI.cbl's two-segment ISRT not found"
         assert isrt[0].segment_names == ["CUSTSEG", "NOTESEG"]
         assert isrt[0].primary_segment == "NOTESEG"
+
+
+_COBOL_INIT_BELOW = """\
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. INITBLW.
+       DATA DIVISION.
+       WORKING-STORAGE SECTION.
+       01  WS-FUNC          PIC X(4) VALUE 'GU  '.
+       01  WS-SEG           PIC X(8) VALUE 'CUSTOMER'.
+       01  IO-AREA          PIC X(100).
+       01  SSA-1.
+           05  SSA-SEG      PIC X(8).
+           05  FILLER       PIC X    VALUE SPACE.
+       LINKAGE SECTION.
+       01  DB-PCB           PIC X(40).
+       PROCEDURE DIVISION.
+{paras}
+"""
+
+_MAIN_PARA = """\
+       MAIN-PARA.
+           PERFORM INIT-PARA
+           MOVE WS-SEG TO SSA-SEG
+           CALL 'CBLTDLI' USING WS-FUNC DB-PCB IO-AREA SSA-1
+           GOBACK."""
+
+_INIT_PARA = """\
+       INIT-PARA.
+           MOVE 'ORDER' TO WS-SEG."""
+
+
+class TestMovePropagationFixpoint:
+    """#865: a MOVE written below the CALL still feeds the CALL's SSA."""
+
+    @pytest.mark.parametrize("init_first", [False, True])
+    def test_paragraph_order_does_not_change_the_answer(self, init_first):
+        paras = [_INIT_PARA, _MAIN_PARA] if init_first else [_MAIN_PARA, _INIT_PARA]
+        ast = _parse(_COBOL_INIT_BELOW.format(paras="\n".join(paras)))
+        results = IMSSegmentAnalyzer().analyze(ast)
+        assert results[0].segment_names == ["CUSTOMER/ORDER"]

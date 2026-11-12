@@ -266,10 +266,16 @@ class DclgenChecker:
         # binds to no column -- reporting it as "unchecked" was a false
         # caveat on every program that uses indicators.
         indicator_names = _indicator_variables(ast)
+        ambiguous = dict(getattr(resolution, "ambiguous", {}) or {})
         names = sorted(
             name
-            for name in set(resolution.resolved) | set(resolution.unresolved)
-            if not (name.upper() in indicator_names and _normalize(name) not in columns)
+            for name in set(resolution.resolved)
+            | set(resolution.unresolved)
+            | set(ambiguous)
+            if not (
+                _base(name).upper() in indicator_names
+                and _normalize(name) not in columns
+            )
         )
         if not resolution.declare_tables:
             # Nothing to check against. Said as a caveat rather than as a
@@ -286,6 +292,14 @@ class DclgenChecker:
         # merely cannot write NULL (#530).
         outputs, undetermined = _host_variable_directions(ast)
         for name in names:
+            if name in ambiguous:
+                # Used unqualified while declared more than once: the
+                # precompiler rejects it, so no item is graded (#863).
+                report.unchecked[name] = (
+                    f"declared {ambiguous[name]} times in the DATA DIVISION "
+                    "and used unqualified, so which item binds is ambiguous"
+                )
+                continue
             info = resolution.resolved.get(name)
             item = info.data_item if info is not None else None
             binding = columns.get(_normalize(name))
@@ -294,7 +308,7 @@ class DclgenChecker:
                     "no DECLARE TABLE declares a column of this name"
                 )
                 continue
-            table, column = binding[0]
+            table, column = _pick_binding(binding, info)
             if item is None:
                 report.unchecked[name] = (
                     "no DATA DIVISION item declares this host variable"
@@ -305,7 +319,7 @@ class DclgenChecker:
                 report.unchecked[name] = reason
                 continue
             report.checked.append(name)
-            upper = name.upper()
+            upper = _base(name).upper()
             needs_indicator = upper in outputs
             if (
                 column.nullable
@@ -614,6 +628,32 @@ def _unsupported(column: DB2ColumnDefinition) -> str | None:
     return None
 
 
+def _base(name: str) -> str:
+    """The variable of a structure-qualified key (``DCLEMP.CUST-NAME``)."""
+    return name.rsplit(".", 1)[-1]
+
+
+def _pick_binding(
+    binding: list[tuple[str, DB2ColumnDefinition]], info: Any
+) -> tuple[str, DB2ColumnDefinition]:
+    """The column a host variable binds to when several tables declare it.
+
+    The table its statements name decides (``SELECT ... INTO
+    :DCLCUST.CUST-NAME FROM CUST`` binds CUST's column, #863); with no single
+    such table the first declaration wins, as before.
+    """
+    if len(binding) > 1 and info is not None:
+        used = {
+            str(table).upper()
+            for stmt in getattr(info, "sql_statements", []) or []
+            for table in getattr(stmt, "tables", []) or []
+        }
+        matching = [pair for pair in binding if pair[0].upper() in used]
+        if len({table for table, _ in matching}) == 1:
+            return matching[0]
+    return binding[0]
+
+
 def _normalize(name: str) -> str:
     """A name in the form both sides can be compared in.
 
@@ -622,7 +662,7 @@ def _normalize(name: str) -> str:
     :func:`~.host_var_resolver.dclgen_name` owns that rule, so the column a
     host variable resolves to there and here is always the same one (#572).
     """
-    return dclgen_name(name)
+    return dclgen_name(_base(name))
 
 
 def _column_index(resolution: Any) -> dict[str, list[tuple[str, DB2ColumnDefinition]]]:

@@ -73,11 +73,13 @@ class HostVariableInfo:
     data_item: CobolDataItem | None = None
     db2_column: DB2ColumnDefinition | None = None
     sql_statements: list[ExecSQLStatement] = field(default_factory=list)
+    qualifiers: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         """Serialise to a plain dictionary (no circular references)."""
         return {
             "name": self.name,
+            "qualifiers": list(self.qualifiers),
             "picture": self.picture,
             "usage": self.usage,
             "has_data_item": self.data_item is not None,
@@ -94,7 +96,15 @@ class HostVarResolutionReport:
         resolved: Mapping of upper-cased variable name →
             :class:`HostVariableInfo`.  Every host variable that either has a
             DATA DIVISION entry *or* a matching DCLGEN column definition
-            appears here.
+            appears here.  A structure-qualified reference that names a
+            different item than the bare name does (``:DCLCUST.CUST-NAME``
+            when ``CUST-NAME`` is also declared under ``DCLEMP``) gets its
+            own entry, keyed by its qualified spelling, when the bare name
+            already stands for the other item (#863).
+        ambiguous: Mapping of upper-cased variable name → number of DATA
+            DIVISION items declaring it, for names used *unqualified* in SQL
+            while declared more than once.  The DB2 precompiler rejects such
+            a reference, so no item is picked for it (#863).
         unresolved: Set of host-variable names that appear in SQL but have
             neither a DATA DIVISION entry nor a matching DB2 column.
         declare_tables: All ``DECLARE TABLE`` statements found in the program,
@@ -110,6 +120,7 @@ class HostVarResolutionReport:
 
     resolved: dict[str, HostVariableInfo] = field(default_factory=dict)
     unresolved: set[str] = field(default_factory=set)
+    ambiguous: dict[str, int] = field(default_factory=dict)
     declare_tables: dict[str, DeclareTableStatement] = field(default_factory=dict)
     column_name_collisions: dict[str, list[str]] = field(default_factory=dict)
 
@@ -121,6 +132,7 @@ class HostVarResolutionReport:
             "collision_count": len(self.column_name_collisions),
             "resolved": {k: v.to_dict() for k, v in self.resolved.items()},
             "unresolved": sorted(self.unresolved),
+            "ambiguous": dict(sorted(self.ambiguous.items())),
             "declare_tables": {k: v.to_dict() for k, v in self.declare_tables.items()},
             "column_name_collisions": {
                 k: sorted(v) for k, v in self.column_name_collisions.items()
@@ -238,6 +250,10 @@ class HostVariableResolver:
             for child in node.children:
                 self._build_symbol_table(child, child_ancestors)
 
+    def _declaration_count(self, upper: str) -> int:
+        """How many DATA DIVISION items declare *upper*."""
+        return len(self._all_items.get(upper, []))
+
     def _lookup_item(self, upper: str, qualifiers: list[str]) -> CobolDataItem | None:
         """The data item *upper* names, honouring ``:STRUCT.NAME`` qualifiers.
 
@@ -315,14 +331,35 @@ class HostVariableResolver:
     ) -> None:
         """Resolve a single host variable name and update the report."""
         upper = var_name.upper()
+        qualifiers = qualifiers or []
 
-        # Already resolved in a previous statement — just add the back-reference
-        if upper in report.resolved:
-            if stmt not in report.resolved[upper].sql_statements:
-                report.resolved[upper].sql_statements.append(stmt)
+        if not qualifiers and self._declaration_count(upper) > 1:
+            # Used unqualified while declared more than once: the precompiler
+            # calls this ambiguous, so no item is picked for it (#863).
+            report.ambiguous[upper] = self._declaration_count(upper)
+            report.unresolved.discard(upper)
             return
 
-        data_item = self._lookup_item(upper, qualifiers or [])
+        data_item = self._lookup_item(upper, qualifiers)
+        key = upper
+        taken = report.resolved.get(upper)
+        if (
+            qualifiers
+            and taken is not None
+            and data_item is not None
+            and taken.data_item is not data_item
+        ):
+            # The bare name already stands for another item: this one gets
+            # its own entry, so ``:DCLEMP.CUST-NAME`` and
+            # ``:DCLCUST.CUST-NAME`` do not share one PICTURE (#863).
+            key = ".".join([*qualifiers, upper])
+
+        # Already resolved in a previous statement — just add the back-reference
+        if key in report.resolved:
+            if stmt not in report.resolved[key].sql_statements:
+                report.resolved[key].sql_statements.append(stmt)
+            return
+
         db2_col = self._column_index.get(dclgen_name(upper))
 
         if data_item is None and db2_col is None:
@@ -347,10 +384,11 @@ class HostVariableResolver:
             data_item=data_item,
             db2_column=db2_col,
             sql_statements=[stmt],
+            qualifiers=list(qualifiers) if key != upper else [],
         )
-        report.resolved[upper] = info
+        report.resolved[key] = info
         # If it was previously recorded as unresolved, remove it
-        report.unresolved.discard(upper)
+        report.unresolved.discard(key)
 
     # ------------------------------------------------------------------
     # Convenience helpers
