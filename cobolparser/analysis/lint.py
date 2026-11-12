@@ -735,6 +735,19 @@ def add_parse_errors(report: LintReport, errors: list[Any]) -> LintReport:
     return report
 
 
+def _using_parameter_names(ast: CobolProgram) -> set[str]:
+    """Upper-cased names of every PROCEDURE DIVISION / ENTRY ``USING``
+    operand of *ast*."""
+    from .program_signature import ProgramSignatureExtractor
+
+    signature = ProgramSignatureExtractor().analyze(ast)
+    return {
+        (parameter.name or "").upper()
+        for entry in signature.entry_points
+        for parameter in entry.parameters
+    }
+
+
 def apply_source_map(
     report: LintReport,
     source_map: dict[int, tuple[str, int]] | None,
@@ -952,9 +965,9 @@ def line_length_findings(
       fixed-format record is 80 columns. Anything after column 80 is lost
       when the member goes to a mainframe library (an RECFM=FB LRECL=80
       dataset), and was never program text anyway. A line whose text past
-      column 72 is all comment (a comment line, or an inline ``*>`` comment)
-      is a warning instead: the transfer truncates it all the same, but
-      nothing the compiler reads is lost.
+      column 80 is all comment (a comment line, or an inline ``*>`` comment
+      that starts before column 81) is not reported: the transfer truncates
+      it, but nothing the compiler reads is lost.
     * **Text cut at column 72** (warning, ``kind`` ``TEXT_PAST_COLUMN_72``):
       columns 73-80 are the identification area, which the compiler ignores.
       When a word runs across the 72/73 boundary, the part in 73+ is dropped
@@ -1012,19 +1025,20 @@ def line_length_findings(
             continue
         line_no = index + 1
         comment_at = _comment_start(line, ALL_COMMENT_INDICATORS)
-        if width > IDENTIFICATION_END_COL:
-            # Past column 80 only inside a comment loses nothing the
-            # compiler reads: still worth fixing, never worth failing a build.
-            in_comment = comment_at is not None and comment_at < IDENTIFICATION_END_COL
+        # Past column 80 only inside a comment (a comment line, or an inline
+        # ``*>`` comment that starts before column 81) loses nothing the
+        # compiler reads, and editors that wrap at 80 make such lines
+        # common: not reported at all.
+        in_comment = comment_at is not None and comment_at < IDENTIFICATION_END_COL
+        if width > IDENTIFICATION_END_COL and not in_comment:
             found(
                 line_no,
                 IDENTIFICATION_END_COL + 1,
-                "warning" if in_comment else "error",
+                "error",
                 "LINE_PAST_COLUMN_80",
                 f"line is {width} columns long; a fixed-format record ends at "
                 f"column {IDENTIFICATION_END_COL}, so columns "
-                f"{IDENTIFICATION_END_COL + 1}-{width} are lost"
-                + (" (comment text only)" if in_comment else ""),
+                f"{IDENTIFICATION_END_COL + 1}-{width} are lost",
             )
         if comment_at is not None and comment_at < TEXT_END_COL:
             continue
@@ -1524,11 +1538,21 @@ class LintAnalyzer:
             ast, copybook_item_names=copybook_item_names
         )
         findings: list[LintFinding] = []
+        using = _using_parameter_names(ast) if result.unused_items else set()
         for item in result.unused_items:
             message = (
                 f"{item.section} item {item.name} (level {item.level:02d}) "
                 "is never referenced in the PROCEDURE DIVISION"
             )
+            in_using = item.section == "LINKAGE" and item.name.upper() in using
+            if in_using:
+                # A parameter the program receives but never reads or writes:
+                # it holds its place in the caller's argument list, which is
+                # often the design (an interface shared by many callees).
+                message = (
+                    f"LINKAGE item {item.name} (level {item.level:02d}) is "
+                    "received in the USING list but never used in the code"
+                )
             if item.used_group:
                 message = (
                     f"{item.section} item {item.name} (level {item.level:02d}) "
@@ -1552,6 +1576,7 @@ class LintAnalyzer:
                         if item.from_copybook
                         or item.used_group
                         or item.section == "FILE"
+                        or in_using
                         else "warning"
                     ),
                     message=message,
@@ -1657,6 +1682,13 @@ class LintAnalyzer:
         procedures = _procedure_nodes(ctx)
         findings: list[LintFinding] = []
         for risk in result.risks:
+            if risk.mechanism == "GOTO" and risk.severity == "MEDIUM":
+                # A GO TO loop with a way out is how COBOL wrote loops before
+                # PERFORM UNTIL (``LOOP. ... IF done GO TO EXIT. GO TO
+                # LOOP.``), not a recursion risk. ``recursion-check`` still
+                # lists it; lint keeps the inescapable (HIGH) ones and the
+                # PERFORM / mixed cycles.
+                continue
             # A risk describes a cycle, not a point -- RecursionRisk carries
             # no location of its own. The cycle's first procedure (or the
             # self-called program) is what a reader needs to find it, and is

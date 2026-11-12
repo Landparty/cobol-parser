@@ -43,6 +43,7 @@ from ..models.statements import (
     SortStatement,
     StopStatement,
 )
+from ..models.statements.base import HANDLER_CLAUSE_PAIRS
 from ._files import (
     record_to_file_map,
     report_to_file_map,
@@ -319,6 +320,22 @@ class _RangeSummary:
     guarded: frozenset[_PerformKey]
 
 
+def _handler_arms(node: ASTNode) -> list[list[list[ASTNode]]]:
+    """*node*'s handler phrases as forks, one ``[positive, negative]`` pair
+    per runtime test it writes either side of (``AT END`` / ``NOT AT END``,
+    ...); a side not written is an empty arm. Empty when it has none."""
+    out: list[list[list[ASTNode]]] = []
+    for positive, negative in HANDLER_CLAUSE_PAIRS:
+        yes = getattr(node, positive, None)
+        no = getattr(node, negative, None)
+        if not isinstance(yes, list) and not isinstance(no, list):
+            continue
+        if not yes and not no:
+            continue
+        out.append([list(yes or []), list(no or [])])
+    return out
+
+
 class IOSequenceAnalyzer:
     """Analyzes a parsed COBOL AST for file I/O sequencing violations.
 
@@ -341,7 +358,10 @@ class IOSequenceAnalyzer:
     A violation is reported only when it holds on *every* merged path
     (READ of a file open on no path, OPEN of a file open on every path, ...),
     except FILE_LEFT_OPEN, which a file open on any path still earns.
-    Other conditional phrases (AT END, INVALID KEY, ...) are not forked.
+    The handler phrases of a statement (AT END / NOT AT END, INVALID KEY /
+    NOT INVALID KEY, ON SIZE ERROR / ..., see ``HANDLER_CLAUSE_PAIRS``) are
+    forked the same way, after the statement itself runs: ``READ f AT END
+    CLOSE f GOBACK END-READ`` leaves *f* open on the path that read a record.
     Paragraphs unreachable from the entry procedure are not walked at all.
     A violation is reported once per source location, however many call
     sites reach it.
@@ -698,6 +718,7 @@ class IOSequenceAnalyzer:
             if isinstance(node, (IfStatement, EvaluateStatement)):
                 return (yield self._fork(node, _visit))
             self._dispatch(node)
+            handler_pairs = _handler_arms(node)
             if isinstance(node, GoStatement):
                 # Reached through _visit, so nested in a branch or handler
                 # (a paragraph's own top-level GO TO never gets here).
@@ -735,10 +756,20 @@ class IOSequenceAnalyzer:
                     yield self._run_perform(
                         node.output_procedure, node.output_procedure_thru
                     )
+            handled: set[int] = set()
+            ending: str | None = None
+            for arms in handler_pairs:
+                handled.update(id(s) for arm in arms for s in arm)
+                ending = yield self._fork(node, _visit, arms)
+                if ending != _FALLS:
+                    break
+            if ending is not None and ending != _FALLS:
+                return ending
             if hasattr(node, "children"):
                 for child in node.children:
-                    yield _visit(child)
-            return None
+                    if id(child) not in handled:
+                        yield _visit(child)
+            return ending
 
         return (yield _visit(stmt))
 
@@ -759,8 +790,9 @@ class IOSequenceAnalyzer:
 
     def _fork(
         self,
-        node: IfStatement | EvaluateStatement,
+        node: ASTNode,
         visit: Callable[[ASTNode], _Step],
+        arms: list[list[ASTNode]] | None = None,
     ) -> _Step:
         """Run each arm of *node* from the state at the branch, then merge.
 
@@ -777,7 +809,7 @@ class IOSequenceAnalyzer:
         endings: set[str] = set()
         self._fork_depth += 1
         try:
-            for arm in self._arms(node):
+            for arm in arms if arms is not None else self._arms(node):  # type: ignore[arg-type]
                 self._status = dict(entry)
                 ending = yield self._run_arm(arm, visit)
                 if self._terminated:
@@ -813,7 +845,11 @@ class IOSequenceAnalyzer:
                 if ending != _FALLS:
                     return ending
                 continue
-            yield visit(stmt)
+            ending = yield visit(stmt)
+            if ending is not None and ending != _FALLS:
+                # A statement whose handler arms (AT END, INVALID KEY, ...)
+                # all end the program or jump away.
+                return ending
             if (
                 isinstance(stmt, GoStatement)
                 and stmt.target_paragraph

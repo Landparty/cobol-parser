@@ -57,7 +57,9 @@ flag ordering cannot change the report.
 keeps its grading: MOVE's ERROR/WARNING kinds map to error/warning,
 recursion's HIGH (a cycle with no escape route, i.e. an infinite loop) to
 error and MEDIUM (a loop with a way out: how COBOL without PERFORM UNTIL
-writes every loop; 3,600 NIST warnings before 2026-11-06) to info,
+writes every loop; 3,600 NIST warnings before 2026-11-06) to info -- except
+a MEDIUM pure `GOTO` cycle, which lint drops (sweep O2: the read-loop idiom
+is not a recursion risk; `recursion-check` still lists it) --
 complexity's rating to warning (HIGH) / info (MODERATE), with LOW producing no
 finding at all. The rest carry a fixed severity: dead code, I/O
 `FILE_LEFT_OPEN` and `REWRITE_WITHOUT_READ` (#736) warn; every other I/O kind
@@ -71,7 +73,10 @@ is a FILE record field (likewise a record layout, often read INTO working
 storage), or when a group above it is named in the PROCEDURE DIVISION
 (`UnusedVariableItem.used_group`: `ACCTFILE-STAT1` under the FILE STATUS
 group `ACCTFILE-STATUS` -- its bytes are used, only its name is not; 58% of
-CardDemo's unused warnings). The `_SEVERITY_*` tables and `_unused_variables`
+CardDemo's unused warnings), or when it is a LINKAGE item named in a
+PROCEDURE DIVISION / ENTRY `USING` (`_using_parameter_names`; the message
+says "received in the USING list but never used in the code": it holds its
+place in the caller's argument list, sweep O4). The `_SEVERITY_*` tables and `_unused_variables`
 / `_dead_code` in the module are the whole of that policy.
 
 **`LintFinding.symbol`** is the *name* the finding is about (paragraph, data
@@ -302,9 +307,10 @@ parse judged it (program: `preprocess_fixed`, else the detector; copybook:
 `_looks_fixed_format`); a free-format file, or a line after `>>SOURCE FORMAT
 FREE`, has no limit. `line_length_findings(path, text, free_lines)` per file:
 
-* `LINE_PAST_COLUMN_80` at column 81: **error**, or **warning** when everything
-  past column 72 is comment (comment line, or an inline `*>` outside a literal;
-  `_comment_start`). The record is 80 columns on the mainframe.
+* `LINE_PAST_COLUMN_80` at column 81: **error**; not reported at all when the
+  text past column 80 is all comment (a comment line, or an inline `*>` outside
+  a literal that starts before column 81; `_comment_start`): nothing the
+  compiler reads is lost (sweep O3). The record is 80 columns on the mainframe.
 * `TEXT_PAST_COLUMN_72` at column 73, **warning**: a word runs across the
   72/73 edge (both columns non-blank), so the compiler keeps a cut word.
   Judged as `normalize_fixed_format`'s own warning: not on a comment line or
@@ -314,8 +320,9 @@ FREE`, has no limit. `line_length_findings(path, text, free_lines)` per file:
   letters `A`, seen on at least `MIN_ID_STAMP_EVIDENCE_LINES` lines whose
   column 72 is blank; NIST's `IX2094.2`).
 
-On `examples/cobol/` + `tests/samples/` (566 programs): 0 errors, 86 warnings
-(all comment lines past column 80). The CLI's multi-file run reports each
+On `examples/cobol/` + `tests/samples/` (566 programs): 0 errors; the 86
+warnings this rule once gave were all comment lines past column 80, which are
+no longer reported. The CLI's multi-file run reports each
 `line-length` finding once per run (`_drop_repeated_layout_findings`): a
 copybook COPYed by many programs is one fix.
 

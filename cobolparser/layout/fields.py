@@ -1110,9 +1110,50 @@ def flatten_record(
         redefines_label=record.redefines if ignore_root_redefines else None,
         ignore_own_redefines=ignore_root_redefines,
     )
-    _link_odo_counters(specs)
+    _link_odo_counters(specs, _sibling_odo_bounds(record))
     assign_columns(specs, opts)
     return specs
+
+
+def _sibling_odo_bounds(
+    record: CobolDataItem,
+) -> list[tuple[str, tuple[str, ...], int, int]]:
+    """``(counter, qualifiers, min, max)`` of every ``OCCURS ... DEPENDING
+    ON`` table in the *other* level-01 records beside *record*.
+
+    A counter is often declared in a header record and the table it sizes in
+    another 01 of the same copybook (or section): flattening the header
+    alone saw no table, so the counter got any value its PICTURE holds (640
+    against a table of at most 15). The declared range is used, not the
+    occurrences a generation of that record would expand: the counter has to
+    be valid for the table as the program sees it.
+    """
+    parent = getattr(record, "parent", None)
+    siblings = getattr(parent, "children", None) or []
+    out: list[tuple[str, tuple[str, ...], int, int]] = []
+    for sibling in siblings:
+        if sibling is record or not isinstance(sibling, CobolDataItem):
+            continue
+        for item in (sibling, *sibling.get_all_children()):
+            occurs = item.occurs_clause
+            if occurs is None or not occurs.depending_on:
+                continue
+            high = occurs.max_times or occurs.min_times
+            if high is None:  # OCCURS UNBOUNDED: no ceiling to keep to
+                continue
+            low = 1 if occurs.min_times is None else occurs.min_times
+            out.append(
+                (
+                    occurs.depending_on.upper(),
+                    tuple(
+                        q.upper()
+                        for q in getattr(occurs, "depending_on_qualifiers", ())
+                    ),
+                    max(0, min(low, high)),
+                    high,
+                )
+            )
+    return out
 
 
 @dataclass(frozen=True)
@@ -1622,7 +1663,10 @@ def assign_columns(specs: list[FieldSpec], opts: DataGeneratorOptions) -> None:
 # ---------------------------------------------------------------------------
 
 
-def _link_odo_counters(specs: list[FieldSpec]) -> None:
+def _link_odo_counters(
+    specs: list[FieldSpec],
+    foreign: list[tuple[str, tuple[str, ...], int, int]] | None = None,
+) -> None:
     """Stamp :attr:`FieldSpec.odo_counter_bounds` onto each table's counter.
 
     Run once per flattening, over the finished list, because a counter is
@@ -1639,24 +1683,36 @@ def _link_odo_counters(specs: list[FieldSpec]) -> None:
     not have.
     """
     bounds: dict[tuple[str, tuple[str, ...]], tuple[int, int]] = {}
-    for spec in specs:
-        for control in spec.odo_controls:
-            key = (control.depending_on.upper(), control.qualifiers)
-            existing = bounds.get(key)
-            if existing is None:
-                bounds[key] = (control.min_times, control.max_times)
-                continue
-            low = max(existing[0], control.min_times)
-            high = min(existing[1], control.max_times)
-            if low > high:
-                # Disjoint ranges (one table holds 1-3, another 5-8). Falling
-                # back to the larger *minimum* would name occurrence 5 of a
-                # 3-occurrence table -- the over-counting direction, which is
-                # the one that describes bytes the record does not have.
-                # Collapse to the tightest maximum instead: under-counting
-                # still addresses occurrences that exist.
-                low = high
-            bounds[key] = (low, high)
+    ranges = [
+        (
+            control.depending_on.upper(),
+            control.qualifiers,
+            control.min_times,
+            control.max_times,
+        )
+        for spec in specs
+        for control in spec.odo_controls
+    ]
+    # *foreign*: tables in other records of the copybook whose counter may
+    # sit in this one (see :func:`_sibling_odo_bounds`).
+    ranges.extend(foreign or ())
+    for counter_name, qualifiers, min_times, max_times in ranges:
+        key = (counter_name, qualifiers)
+        existing = bounds.get(key)
+        if existing is None:
+            bounds[key] = (min_times, max_times)
+            continue
+        low = max(existing[0], min_times)
+        high = min(existing[1], max_times)
+        if low > high:
+            # Disjoint ranges (one table holds 1-3, another 5-8). Falling
+            # back to the larger *minimum* would name occurrence 5 of a
+            # 3-occurrence table -- the over-counting direction, which is
+            # the one that describes bytes the record does not have.
+            # Collapse to the tightest maximum instead: under-counting
+            # still addresses occurrences that exist.
+            low = high
+        bounds[key] = (low, high)
 
     if not bounds:
         return

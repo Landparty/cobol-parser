@@ -308,7 +308,9 @@ class TestNoiseCuts:
         assert "only EXIT" in found["0000-MAIN-EXIT"].message
         assert found["9999-UNUSED"].severity == "warning"
 
-    def test_a_go_to_loop_with_a_way_out_is_info_on_its_header(self) -> None:
+    def test_a_go_to_loop_with_a_way_out_is_not_a_lint_finding(self) -> None:
+        # The pre-PERFORM-UNTIL loop idiom (sweep O2, 2026-11-12):
+        # recursion-check still lists it as MEDIUM, lint drops it.
         source = """\
        IDENTIFICATION DIVISION.
        PROGRAM-ID. LOOP.
@@ -323,9 +325,7 @@ class TestNoiseCuts:
            STOP RUN.
 """
         report = LintAnalyzer(["recursion-check"]).analyze(_ast(source))
-        [finding] = report.findings
-        assert finding.severity == "info"
-        assert finding.location is not None and finding.location.line == 7
+        assert report.findings == []
 
     def test_an_all_digit_literal_moved_to_a_numeric_item_is_fine(self) -> None:
         source = """\

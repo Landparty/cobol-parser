@@ -554,8 +554,9 @@ class ConstraintExtractor:
             if b.ref.category == "SQL" and b.ref.line
         }
 
+        status_guard = _StatusGuards(boundary_report, index)
         for paragraph_name, statement, enclosing in _walk_statements(
-            procedure, guards=True
+            procedure, guards=True, transparent=status_guard.passes_on_success
         ):
             _record_transfer_site(statement, paragraph_name, enclosing, report)
             if isinstance(statement, IfStatement) and statement.condition is not None:
@@ -2899,11 +2900,126 @@ _ARM_BEARING_ATTRS: dict[type, dict[str, str]] = {
 }
 
 
-def _walk_statements(procedure_division: CobolDivision, *, guards: bool = False) -> Any:
+def _walk_statements(
+    procedure_division: CobolDivision,
+    *,
+    guards: bool = False,
+    transparent: Any = None,
+) -> Any:
     for paragraph in all_paragraphs(procedure_division):
         yield from _walk_list(
-            paragraph.paragraph_name, paragraph.statements, (), guards=guards
+            paragraph.paragraph_name,
+            paragraph.statements,
+            (),
+            guards=guards,
+            transparent=transparent,
         )
+
+
+#: The value a status register holds when the operation succeeded, by the
+#: register's upper-cased leaf name. FILE STATUS fields are added per
+#: program (:class:`_StatusGuards`).
+_SUCCESS_STATUS: dict[str, str] = {"SQLCODE": "0", "SQLSTATE": "00000"}
+_FILE_STATUS_SUCCESS = "00"
+
+
+class _StatusGuards:
+    """Which early-exit guards a run with no injected failure passes.
+
+    ``IF NOT FS-OK GOBACK END-IF`` after an OPEN, ``IF SQLCODE NOT = 0 GO TO
+    9000-ERR END-IF`` after a SELECT: the guard tests a status register no
+    fixture row feeds, so its staying arm has no field constraint and every
+    scenario below it was reported unverified ("enclosing arm ... has no
+    modeled constraints"). But a boundary mock returns success unless a
+    scenario injects a failure (the error-status and file-status families
+    do that on purpose), so the guard's staying arm *is* the one the data
+    takes -- when the condition, evaluated with the register at its success
+    value, picks that arm. Such a guard is left out of the path chain.
+    Anything the evaluator cannot decide keeps the guard in, as before.
+    """
+
+    def __init__(self, boundary_report: Any, index: ProgramLayoutIndex) -> None:
+        self.index = index
+        self.success = dict(_SUCCESS_STATUS)
+        for boundary in getattr(boundary_report, "boundaries", ()):
+            status = getattr(boundary, "status_field", None)
+            if status:
+                name = bare_item_name(status).upper()
+                self.success.setdefault(name, _FILE_STATUS_SUCCESS)
+
+    def passes_on_success(self, statement: Any, arm_id: str) -> bool:
+        if not isinstance(statement, IfStatement) or arm_id not in ("THEN", "ELSE"):
+            return False
+        taken = self._evaluate(statement.condition)
+        if taken is None:
+            return False
+        return taken == (arm_id == "THEN")
+
+    def _register(self, name: str) -> tuple[str, str] | None:
+        """``(register, success value)`` for a data name that is a status
+        register (or a field of one, or an 88 under one)."""
+        bare = bare_item_name(name).upper()
+        if bare in self.success:
+            return bare, self.success[bare]
+        resolved = self.index.resolve(name)
+        if resolved is None:
+            return None
+        for part in (*resolved.spec.path, resolved.spec.name):
+            if part.upper() in self.success:
+                return part.upper(), self.success[part.upper()]
+        return None
+
+    def _evaluate(self, expr: Any) -> bool | None:
+        if isinstance(expr, LogicalExpression):
+            if expr.operator == "NOT":
+                inner = self._evaluate(expr.left_condition)
+                return None if inner is None else not inner
+            left = self._evaluate(expr.left_condition)
+            right = self._evaluate(expr.right_condition)
+            if left is None or right is None:
+                return None
+            if expr.operator == "AND":
+                return left and right
+            if expr.operator == "OR":
+                return left or right
+            return None
+        if not isinstance(expr, ConditionalExpression):
+            return None
+        operand = expr.left_operand if isinstance(expr.left_operand, str) else None
+        if not operand:
+            return None
+        if expr.operator == "CONDITION_NAME":
+            values = self.index.condition_values(operand)
+            register = self._register(operand)
+            if values is None or register is None:
+                return None
+            if len(register[1]) != 2:
+                return None  # 88s under SQLCODE / SQLSTATE: not modeled
+            return register[1] in {str(v) for v in values}
+        register = self._register(operand)
+        right_operand = expr.right_operand
+        if register is None or not isinstance(right_operand, str):
+            return None
+        literal = right_operand.strip()
+        if is_quoted_literal(literal):
+            literal = unquote_literal(literal)
+        elif not re.fullmatch(r"[+-]?\d+", literal):
+            return None
+        value = register[1]
+        if register[0] == "SQLCODE":
+            if not re.fullmatch(r"[+-]?\d+", literal):
+                return None
+            ordering = int(value) - int(literal)
+        else:
+            ordering = (value > literal) - (value < literal)
+        return {
+            "EQUAL": ordering == 0,
+            "NOT_EQUAL": ordering != 0,
+            "GREATER": ordering > 0,
+            "LESS": ordering < 0,
+            "GREATER_OR_EQUAL": ordering >= 0,
+            "LESS_OR_EQUAL": ordering <= 0,
+        }.get(expr.operator)
 
 
 def _leaves_list(statement: Any) -> bool:
@@ -2990,6 +3106,7 @@ def _walk_list(
     enclosing: tuple[tuple[str, str], ...],
     *,
     guards: bool = False,
+    transparent: Any = None,
 ) -> Any:
     """Yield `(paragraph_name, statement, enclosing)`, where `enclosing` is
     the chain of `(branch_id, arm_id)` pairs -- outermost first -- whose arms
@@ -3013,10 +3130,14 @@ def _walk_list(
                 if arm_id is not None and branch_id is not None
                 else enclosing
             )
-            yield from _walk_list(paragraph_name, nested, deeper, guards=guards)
+            yield from _walk_list(
+                paragraph_name, nested, deeper, guards=guards, transparent=transparent
+            )
         if guards and branch_id is not None:
             guard = _guard_arm(statement)
-            if guard is not None:
+            if guard is not None and not (
+                transparent is not None and transparent(statement, guard)
+            ):
                 enclosing = enclosing + ((branch_id, guard),)
 
 

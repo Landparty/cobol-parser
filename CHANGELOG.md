@@ -17,6 +17,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+* **`call-check` cites the line in the file.** Standalone `call-check`
+  (JSON, text and SARIF) gave the line of the copybook-expanded text, so
+  every CALL after a `COPY` was cited too low, sometimes past the end of
+  the file. A CALL written inside a copybook now names that copybook
+  (`origin_file`).
+* **A short argument to a maximum-size buffer is info, not an error.** A
+  callee parameter of 32,760 bytes or more (`PIC X(32767)`) is a buffer
+  the routine is told the length of some other way.
+* **gen-data keeps an ODO counter in another record within its table.** A
+  counter declared in a header 01 whose table is in another 01 got any
+  value its PICTURE could hold.
+* **Tagged procedure copybooks are refused again.** Blank lines holding
+  only the sequence-area tag made the member look free-form, so gen-data
+  wrote 0-byte records instead of saying it is not a record layout.
+* **io-sequence follows AT END and INVALID KEY as branches.** `READ f AT
+  END CLOSE f GOBACK END-READ` followed by `CLOSE f` was a false duplicate
+  CLOSE.
+* **lint drops escapable GO TO loops from `recursion-check`.** The
+  pre-PERFORM-UNTIL loop idiom is not a recursion risk; the
+  `recursion-check` subcommand still lists it.
+* **Comment-only lines past column 80 are no longer `line-length`
+  findings**: nothing the compiler reads is lost.
+* **A LINKAGE item used only in `PROCEDURE DIVISION USING`** is reported
+  as "received in the USING list but never used in the code", as info.
+* **The MCP answer budget trims the envelope too.** Once the answer is
+  down to one item per list, hints, caveats and the record of cuts are
+  trimmed, so a small `--max-answer-bytes` is no longer missed by twice
+  its size.
+* **gen-fixtures scenarios below a FILE STATUS or SQLCODE guard are
+  verified.** `IF NOT FS-OK GOBACK` after an OPEN made every later branch
+  scenario "could not be verified"; a run without injected failures passes
+  such a guard.
 * **EJECT, SKIP1-3 and TITLE lines are no longer statements.** A line
   holding only one is removed before parsing, as the compiler does: after
   `STOP RUN.` it made lint report a false fall-through (perform-range), it

@@ -22,7 +22,10 @@ shape of each argument, and compares them pairwise:
   REFERENCE, or BY REFERENCE / BY CONTENT where it declares BY VALUE.
 - ``length`` -- the argument is shorter than the callee's operand (error:
   the callee addresses bytes past it) or longer (info: harmless, often
-  deliberate, but the tail is invisible to the callee).
+  deliberate, but the tail is invisible to the callee). A shorter argument
+  passed to a maximum-size buffer (an operand of at least
+  :data:`MAX_BUFFER_BYTES`, the ``PIC X(32767)`` idiom of a routine that is
+  told the real length some other way) is info, not error.
 - ``usage`` (warning) -- two elementary items with different storage
   (COMP-3 against zoned DISPLAY, BINARY against COMP-5, ...) or different
   categories (numeric against alphanumeric DISPLAY).
@@ -46,9 +49,10 @@ Memory stays flat: each file is reduced to its interfaces and call sites
 
 from __future__ import annotations
 
+import os
 import re
 from collections.abc import Iterable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any
 
 from ..batch import BatchResult, parse_files, parse_files_with_copybooks
@@ -100,6 +104,12 @@ _USAGE_CLASS: dict[str, str] = {
     "COMP-2": "COMP-2",
     "COMPUTATIONAL-2": "COMP-2",
 }
+
+#: A callee operand this long is a maximum-size buffer: ``PIC X(32767)``,
+#: ``X(32760)``, ``X(65535)``. A routine declares one to take any caller's
+#: area and is told the real length another way (a length operand, a
+#: delimiter), so a shorter argument is the design, not an overrun.
+MAX_BUFFER_BYTES = 32760
 
 _SUBSCRIPT_RE = re.compile(r"\(([^()]*)\)")
 _QUALIFIER_RE = re.compile(r"\s+(?:OF|IN)\s+", re.IGNORECASE)
@@ -157,6 +167,9 @@ class _CallSite:
     #: Target name -> the nested program's graph id COBOL scope sends the
     #: CALL to, when it reaches one.
     scoped: tuple[tuple[str, str], ...] = ()
+    #: The copybook the CALL was written in, when it came from one (then
+    #: ``line`` counts that file's lines, not *path*'s).
+    origin_file: str | None = None
 
 
 @dataclass
@@ -180,6 +193,14 @@ class CallInterfaceFinding:
     #: set is flow-insensitive: any MOVE to the identifier anywhere), so its
     #: severity is capped at warning. Empty for a static or one-target CALL.
     possible_targets: tuple[str, ...] = ()
+    #: The copybook the CALL sits in, when it was COPYed into *path*: then
+    #: ``line`` is that copybook's line. None for a CALL in *path* itself.
+    origin_file: str | None = None
+
+    @property
+    def file(self) -> str:
+        """The file ``line`` counts lines in."""
+        return self.origin_file or self.path
 
     def to_dict(self) -> dict[str, Any]:
         out: dict[str, Any] = {
@@ -200,6 +221,8 @@ class CallInterfaceFinding:
             out["parameter"] = self.parameter.to_dict()
         if self.possible_targets:
             out["possible_targets"] = list(self.possible_targets)
+        if self.origin_file is not None:
+            out["origin_file"] = self.origin_file
         return out
 
 
@@ -245,7 +268,7 @@ class CallInterfaceReport:
     def to_text(self) -> str:
         lines = []
         for f in self.findings:
-            lines.append(f"{f.path}:{f.line}: {f.severity}: [{f.kind}] {f.message}")
+            lines.append(f"{f.file}:{f.line}: {f.severity}: [{f.kind}] {f.message}")
         counts = self.counts()
         lines.append(
             f"{len(self.findings)} finding(s) ({counts['error']} error, "
@@ -521,7 +544,13 @@ class CallInterfaceChecker:
                         f"first: {parse.errors[0]}",
                     }
                 )
-            self._absorb(path, ast, interfaces, calls)
+            self._absorb(
+                path,
+                ast,
+                interfaces,
+                calls,
+                source_map=parse.expansion_source_map if parse else None,
+            )
         self._compare(interfaces, calls, report)
         return report
 
@@ -544,7 +573,17 @@ class CallInterfaceChecker:
         ast: CobolProgram,
         interfaces: dict[str, list[_Interface]],
         calls: list[_CallSite],
+        source_map: dict[int, tuple[str, int]] | None = None,
     ) -> None:
+        """Collect *ast*'s entries into *interfaces* and its CALLs into *calls*.
+
+        *source_map* is the copybook expander's per-line record
+        (``ParseResult.expansion_source_map``): with it, each CALL's line is
+        put back on the file on disk -- the program's own line, or the
+        copybook's (``origin_file``) for a CALL COPYed in. Without it the
+        lines count the parsed text, which is what ``lint --callee-path``
+        wants: it maps them itself (:func:`~.lint.apply_source_map`).
+        """
         units = [u for u in ast.program_units() if u.unit_kind not in _OO_MEMBER_KINDS]
         graph_ids = program_graph_ids(units, path)
         for unit in units:
@@ -585,7 +624,7 @@ class CallInterfaceChecker:
                     continue
                 site = _call_site(statement, program_id, path, owner, index, graph_ids)
                 if site is not None:
-                    calls.append(site)
+                    calls.append(_on_disk(site, source_map))
 
     # -- comparison -------------------------------------------------------
 
@@ -597,7 +636,7 @@ class CallInterfaceChecker:
     ) -> None:
         unknown_notes: set[str] = set()
         for site in calls:
-            where = f"{site.path}:{site.line}: {site.caller}"
+            where = f"{site.origin_file or site.path}:{site.line}: {site.caller}"
             if site.is_dynamic and site.incomplete:
                 report.unchecked.append(
                     f"{where}: dynamic CALL whose possible targets are not all "
@@ -628,6 +667,26 @@ class CallInterfaceChecker:
         report.findings.sort(
             key=lambda f: (f.path, f.line, f.callee, f.position or 0, f.kind)
         )
+
+
+def _on_disk(
+    site: _CallSite, source_map: dict[int, tuple[str, int]] | None
+) -> _CallSite:
+    """*site* with its line moved from the expanded text to the file on disk.
+
+    A line the map does not cover keeps its parsed number: no map means no
+    expansion happened, and the parsed text is the file.
+    """
+    if not source_map or site.line <= 0:
+        return site
+    origin = source_map.get(site.line)
+    if origin is None:
+        return site
+    origin_file, origin_line = origin
+    same = os.path.normcase(os.path.abspath(origin_file)) == os.path.normcase(
+        os.path.abspath(site.path)
+    )
+    return replace(site, line=origin_line, origin_file=None if same else origin_file)
 
 
 def _call_site(
@@ -702,6 +761,7 @@ def _compare_one(
                 callee=callee.program_id,
                 path=site.path,
                 line=site.line,
+                origin_file=site.origin_file,
                 callee_path=callee.path,
                 position=position,
                 argument=argument,
@@ -759,8 +819,24 @@ def _compare_one(
                 else f"{callee.entry}'s {parameter.text}"
             )
             unknown_notes.add(
-                f"{site.path}:{site.line}: {call} argument {position}: length not "
+                f"{site.origin_file or site.path}:{site.line}: {call} argument {position}: length not "
                 f"compared ({subject}: {reason})"
+            )
+        elif (
+            argument.byte_length < parameter.byte_length
+            and parameter.byte_length >= MAX_BUFFER_BYTES
+        ):
+            add(
+                KIND_LENGTH,
+                "info",
+                f"{call} argument {position} ({argument.text}) is "
+                f"{argument.byte_length} byte(s) but {callee.entry}'s "
+                f"{parameter.text} is a maximum-size buffer of "
+                f"{parameter.byte_length}: fine as long as the callee is told "
+                "the real length and stays inside it",
+                position,
+                argument,
+                parameter,
             )
         elif argument.byte_length < parameter.byte_length:
             add(
