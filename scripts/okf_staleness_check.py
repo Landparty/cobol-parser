@@ -207,6 +207,7 @@ OKF_MAP = [
     ("cobolparser/analysis/crud_matrix.py", [".okf/analysis/data-use.md"]),
     ("cobolparser/analysis/value_tracker.py", [".okf/analysis/data-use.md"]),
     ("cobolparser/analysis/_names.py", [".okf/analysis/data-use.md"]),
+    ("cobolparser/analysis/_copy_holes.py", [".okf/analysis/codebase.md"]),
     ("cobolparser/analysis/_files.py", [".okf/analysis/data-use.md"]),
     ("cobolparser/analysis/host_var_resolver.py", [".okf/analysis/sql-cics-ims.md"]),
     ("cobolparser/analysis/dclgen_check.py", [".okf/analysis/sql-cics-ims.md"]),

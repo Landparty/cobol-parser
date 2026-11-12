@@ -325,6 +325,17 @@ report.unchecked       # what could not be compared, one line each
 report.errors          # files that did not parse cleanly
 ```
 
+**A group around an unexpanded `COPY` is never length-checked**
+(`analysis/_copy_holes.items_with_copy_holes(unit)`, from the unit's
+`omitted_copy_lines`): `01 WS-GMO. COPY CMQGMOV.` with the member missing
+parsed as a zero-byte group and was a `length` error against any callee. A
+group whose extent (its line to the line before the next item at its level
+or above, at most to the PROCEDURE DIVISION) holds a blanked `COPY` is an
+argument "whose layout holds a COPY that was not expanded", named in
+`unchecked`; on the callee side `ProgramSignatureExtractor` leaves that
+parameter's `byte_length` `None` and adds the same note to the signature's
+`unchecked`.
+
 Every CALL across a set of files against the entry it reaches
 (`ProgramSignatureExtractor`'s entries: PROCEDURE DIVISION USING and every
 ENTRY). `LinkageChecker` does count and mode only, and only within one file;

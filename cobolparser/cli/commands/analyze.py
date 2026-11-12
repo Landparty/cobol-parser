@@ -606,6 +606,7 @@ def _cmd_le_info(args: argparse.Namespace) -> None:
 
     uncatalogued = {entry["name"]: entry for entry in services_without_signature()}
     entries: list[dict[str, Any]] = []
+    unknown: list[str] = []
     for raw_name in args.name:
         name = raw_name.strip().upper()
         service = le_service_signature(name) if args.kind != "function" else None
@@ -629,19 +630,43 @@ def _cmd_le_info(args: argparse.Namespace) -> None:
                 }
             )
         else:
-            _fail(
-                f"Unknown name: {raw_name!r}. Run `cobol-parser le-info` with "
-                f"no arguments to list everything the catalogue knows."
-            )
+            unknown.append(raw_name)
 
-    _json_out(
-        {
-            "catalog_version": catalog["catalog_version"],
-            "reference": catalog["reference"],
-            "entries": entries,
-        },
-        args.compact,
-        args.output,
+    if unknown and not entries:
+        _fail(_unknown_le_names(unknown))
+    output = {
+        "catalog_version": catalog["catalog_version"],
+        "reference": catalog["reference"],
+        "entries": entries,
+    }
+    if unknown:
+        # Several names, some unknown: the known ones are still answered (a
+        # sweep handing over every name it found lost them all to one bad
+        # one) and the rest are listed, not dropped.
+        output["unknown"] = [name.strip().upper() for name in unknown]
+        print(f"warning: {_unknown_le_names(unknown)}", file=sys.stderr)
+    _json_out(output, args.compact, args.output)
+
+
+def _unknown_le_names(names: list[str]) -> str:
+    """The message for names the LE / intrinsic catalogue does not know,
+    saying when one is a COBOL reserved word (``PIC``), which a scan of the
+    source picked up rather than a service a program calls."""
+    from ...lexer import CobolLexer
+
+    shown = ", ".join(repr(name) for name in names)
+    label = "Unknown name" if len(names) == 1 else "Unknown names"
+    reserved = [n for n in names if n.strip().upper() in CobolLexer.KEYWORDS]
+    hint = ""
+    if reserved:
+        words = ", ".join(n.strip().upper() for n in reserved)
+        hint = (
+            f" ({words}: a COBOL reserved word, not an LE service or intrinsic "
+            "function)"
+        )
+    return (
+        f"{label}: {shown}{hint}. Run `cobol-parser le-info` with no arguments "
+        "to list everything the catalogue knows."
     )
 
 

@@ -380,7 +380,10 @@ def _encode_text(
     behind leading spaces, and an oversized one loses its leftmost
     characters rather than its rightmost.
     """
-    codec = EBCDIC_CODEC if opts.charset is Charset.EBCDIC else "ascii"
+    # Latin-1 for ASCII, as decode reads it (``_decode_text``): plain
+    # "ascii" turned every accented letter of a VALUE ('CAFÉ', 'Montréal')
+    # into '?', so the record image no longer held the CSV's text.
+    codec = EBCDIC_CODEC if opts.charset is Charset.EBCDIC else "latin-1"
     return _place_bytes(
         text.encode(codec, errors="replace"), size, opts, justified=justified
     )

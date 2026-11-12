@@ -634,6 +634,8 @@ copybook, back into a table**.
 * Data file positional, copybook `--copybook`; the data file is optional only
   with `--list-views` (layout and every REDEFINES overlay with offsets,
   `length` / `overlay_length` — also how to learn what `--view` accepts).
+  Its `framing_length` is the stride decode cuts the file at, a whole
+  program's FD LRECL when longer than the record (then also as `lrecl`).
   `--record` goes through the same `select_record()` as `gen-data`.
 * `--view` reads the bytes through an overlay, by short name
   (`ADDR-OVERSEAS`) or path (`CUST-REC.ADDR-OVERSEAS`); output is the whole
@@ -1066,7 +1068,11 @@ its shape is pinned by `catalog_version`. No name: `{catalog_version,
 reference, services[], services_without_signature[], functions[]}`; names:
 `{catalog_version, reference, entries[]}` in the order asked. A name the
 dialect knows but the catalogue cannot describe has `"parameters": null` and
-a note; an unknown name exits 1. `--kind` restricts both forms.
+a note. When every name is unknown it exits 1; when only some are, the known
+ones are answered, the rest listed under `unknown` with a stderr warning, and
+it exits 0 (a sweep passing every name it found lost them all to one bad one).
+A reserved word (`PIC`) is called that in the message. `--kind` restricts
+both forms.
 
 ## IO coverage tools (`cobolparser/cli/coverage.py`)
 

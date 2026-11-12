@@ -35,6 +35,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   another program, so a READ or CLOSE with no OPEN in sight, and a GOBACK
   with the file open, are not reported for them.
 
+* **gen-data `--format record` and decode use the same record.** With no
+  `--record`, the record image (which includes FILLER) took an all-FILLER
+  header 01 while the CSV and decode skipped it, so the image did not decode.
+  The default record is now judged without FILLER for every format.
+* **`decode --list-views` and MCP `decode_record` report the stride the file
+  is cut at.** Under an FD whose LRECL is longer than the chosen 01, they
+  gave the 01's own length (2 bytes) while gen-data wrote, and decode read,
+  28-byte records. `framing_length` is now the LRECL, with an `lrecl` key.
+* **Every generated field draws from its own random stream**, so the same
+  seed gives a field the same values whatever else is generated: a
+  `--max-occurs` cap or `--include-redefines` no longer shifts the values of
+  later fields between the CSV and the record image. Values for a given seed
+  differ from earlier releases.
+* **ASCII record images keep accented text.** VALUE text such as `'MONTRÉAL'`
+  was written with `?` for each accented letter; it is now written as
+  Latin-1, the codec decode reads ASCII images with.
+* **gen-fixtures bundles share unchanged fixtures across scenarios.** Each
+  scenario seeded its own random values, so no two scenarios' fixtures were
+  equal and version 2 could share none; a boundary a scenario does not pin
+  now has the happy path's rows in every scenario, and a pin no longer
+  shifts the fields after it. A NIST `--scenarios all` bundle went from
+  32.7 MB to 1.1 MB. Values for a given seed differ from earlier releases;
+  `examples/fixtures/FIXTUREDEMO.bundle.json` was regenerated (mocky-mock's
+  copy must be re-copied).
 * **The same seed gives the same values in the CSV and the record image.**
   The record image always includes FILLER, and every FILLER drew values that
   were then never written, shifting every later value. A FILLER whose bytes
@@ -189,6 +213,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   copybook field `warning` where the `lint` subcommand says `info`. The
   copybook-origin names now come from one function,
   `cobolparser.analysis.unused_variables.copybook_item_names`.
+* **A copybook of PROCEDURE DIVISION code is not read as a record.**
+  gen-data, decode and data-items wrapped it as data, so a statement such as
+  `MOVE 8 TO RETURN-CODE` became a level-08 item and the member a zero-byte
+  record with a "no PICTURE" warning; they now say the member holds
+  procedure code.
+* **call-check does not length-check a group missing a copybook.** A group
+  declared around a `COPY` that was not expanded (`01 WS-GMO. COPY
+  CMQGMOV.`) counted as zero bytes and was reported as a `length` error; it
+  is now listed under `unchecked`, and `program-signature` leaves such a
+  LINKAGE parameter's `byte_length` out.
+* **`le-info` answers the names it knows when one is unknown.** One unknown
+  name among several failed the whole command; the known ones are now
+  answered and the rest listed under `unknown`. A reserved word such as
+  `PIC` is called that.
 
 ### Added
 

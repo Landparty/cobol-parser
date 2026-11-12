@@ -70,6 +70,83 @@ def _wrap_fragment(source: str) -> str:
     return _WRAPPER_HEAD + body + _WRAPPER_TAIL
 
 
+_FIRST_WORD_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9-]*")
+_PARAGRAPH_HEADER_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9-]*\s*\.$")
+_SECTION_HEADER_RE = re.compile(
+    r"^([A-Za-z0-9][A-Za-z0-9-]*)\s+SECTION(?:\s+\d+)?\s*\.?$", re.IGNORECASE
+)
+#: DATA DIVISION section headers a data copybook may itself carry.
+_DATA_SECTIONS = frozenset(
+    {"FILE", "WORKING-STORAGE", "LOCAL-STORAGE", "LINKAGE", "REPORT", "SCREEN"}
+)
+#: Listing directives and members a data copybook may open with.
+_SKIPPED_WORDS = frozenset(
+    {"EJECT", "SKIP1", "SKIP2", "SKIP3", "TITLE", "COPY", "REPLACE"}
+)
+#: Verbs that open a statement: a member whose first code line starts with
+#: one holds PROCEDURE DIVISION code.
+_PROCEDURE_VERBS = frozenset(
+    {
+        "ACCEPT", "ADD", "CALL", "CANCEL", "CLOSE", "COMPUTE", "CONTINUE",
+        "DELETE", "DISPLAY", "DIVIDE", "ELSE", "END-IF", "END-EVALUATE",
+        "END-PERFORM", "EVALUATE", "EXIT", "GO", "GOBACK", "IF", "INITIALIZE",
+        "INSPECT", "MERGE", "MOVE", "MULTIPLY", "OPEN", "PERFORM", "READ",
+        "RELEASE", "RETURN", "REWRITE", "SEARCH", "SET", "SORT", "START",
+        "STOP", "STRING", "SUBTRACT", "UNSTRING", "WHEN", "WRITE",
+    }
+)  # fmt: skip
+
+
+def procedure_code_start(source: str) -> str | None:
+    """The first code line of a member that holds PROCEDURE DIVISION code
+    (a paragraph or section header, or a statement), else ``None``.
+
+    Judged on the first line of code alone, after comments, listing
+    directives, ``COPY`` / ``REPLACE`` lines and ``EXEC ... END-EXEC``
+    blocks (a DCLGEN's ``DECLARE TABLE``): a data copybook opens with a level
+    number. Wrapped as a DATA DIVISION fragment, a procedure member read as
+    data -- ``MOVE 8 TO RETURN-CODE`` became a level-08 item with no
+    PICTURE -- and gen-data, decode and data-items reported a zero-byte
+    record instead of saying the member is not a record layout. ``None``
+    as well when the first code line decides nothing either way.
+    """
+    text = source.expandtabs(8)
+    fixed = detect_member_fixed_format(text)
+    in_exec = False
+    for line in split_source_lines(text):
+        if fixed:
+            if len(line) > 6 and line[6] in "*/Dd":
+                continue
+            code = line[7:72]
+        else:
+            code = line
+        code = code.split("*>", 1)[0].strip()
+        if not code:
+            continue
+        upper = code.upper()
+        if in_exec:
+            in_exec = "END-EXEC" not in upper
+            continue
+        word_match = _FIRST_WORD_RE.match(code)
+        if word_match is None:
+            continue  # pseudo-text of a COPY REPLACING, a lone period
+        word = word_match.group(0).upper()
+        if word == "EXEC":
+            in_exec = "END-EXEC" not in upper
+            continue
+        if word in _SKIPPED_WORDS:
+            continue
+        if word.isdigit():
+            return None
+        section = _SECTION_HEADER_RE.match(code)
+        if section is not None:
+            return None if section.group(1).upper() in _DATA_SECTIONS else code
+        if word in _PROCEDURE_VERBS or _PARAGRAPH_HEADER_RE.match(code):
+            return code
+        return None
+    return None
+
+
 #: Lines :func:`_wrap_fragment` puts in front of a fragment's first line.
 WRAPPER_HEAD_LINES = _WRAPPER_HEAD.count("\n")
 _DIVISION_HEADER_RE = re.compile(
@@ -80,7 +157,8 @@ _DIVISION_HEADER_RE = re.compile(
 def wrap_copybook_fragment(source: str) -> str | None:
     """*source* wrapped in the program skeleton :func:`parse_copybook_records`
     parses a copybook through, or ``None`` when *source* is not a bare
-    fragment (it names a division or a ``PROGRAM-ID``, or holds no code).
+    fragment (it names a division or a ``PROGRAM-ID``, holds no code, or
+    holds PROCEDURE DIVISION code -- see :func:`procedure_code_start`).
 
     The fragment's line *n* is line ``n + WRAPPER_HEAD_LINES`` of the result.
     For the tools that take any source file -- ``data-items``, the MCP
@@ -89,7 +167,7 @@ def wrap_copybook_fragment(source: str) -> str | None:
     """
     if not source.strip() or _looks_like_program(source):
         return None
-    if _DIVISION_HEADER_RE.search(source):
+    if _DIVISION_HEADER_RE.search(source) or procedure_code_start(source):
         return None
     return _wrap_fragment(source)
 
@@ -124,7 +202,16 @@ def parse_copybook_records(
     if not source.strip():
         raise CopybookLayoutError(f"{filename}: copybook is empty")
 
-    text = source if _looks_like_program(source) else _wrap_fragment(source)
+    if _looks_like_program(source):
+        text = source
+    else:
+        procedure = procedure_code_start(source)
+        if procedure is not None:
+            raise CopybookLayoutError(
+                f"{filename}: holds PROCEDURE DIVISION code (starts with "
+                f"{procedure!r}), not a record layout"
+            )
+        text = _wrap_fragment(source)
     if copybook_paths:
         try:
             result = parse_cobol_with_expansion(
