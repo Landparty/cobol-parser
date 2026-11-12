@@ -7,18 +7,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
-### Changed
-
-* **gen-fixtures bundles are version 2: a fixture is written once.** A
-  `branches`/`all` bundle repeated every fixture in full inside every
-  scenario. Each distinct fixture now sits once in a top-level `fixtures`
-  table and a scenario's `fixtures` lists ids into it. **Breaking for
-  consumers gated on `bundle_version == 1`** (mocky-mock): until they read
-  version 2, use `gen-fixtures --bundle-version 1`,
-  `FixtureBundle.to_dict(bundle_version=1)` / `to_json(bundle_version=1)`, or
-  `cobolparser.generators.expand_shared_fixtures()` on a version 2 dict.
-  `--format csv-dir`'s `MANIFEST.json` keeps the version 1 shape.
-
 ### Fixed
 
 * **The same seed gives the same values in the CSV and the record image.**
@@ -32,13 +20,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 * **gen-data and decode default to the first record with generatable
   fields**, not the first 01; a record with none lists the ones that have
   some.
-
-### Changed
-
-* **`gen-fixtures` caps OCCURS tables at 10 occurrences by default**
-  (`--max-occurs all` expands every one; a note says which tables were cut)
-  and writes compact JSON unless `--pretty`. A bundle over 10 MB draws a
-  warning. Uncapped and pretty-printed, one program's bundle reached 1.5 GB.
+* **MCP answers stay within `--max-answer-bytes`.** The budget measured
+  compact JSON while the server sent a pretty-printed text copy beside the
+  structured one, so a `codebase_overview` cut to 24 KB went out at about
+  52 KB. The text copy is now compact, the budget measures both copies as
+  sent, and an answer whose lists are down to one item has its longest
+  strings halved.
+* **MCP answers say when a copybook was read badly.** A member read in the
+  wrong source format lost its declarations with no caveat: `record_layout`
+  said not found, `explain_symbol` said undeclared, and `lint` reported
+  undefined names the member declares. Each such member now draws a caveat,
+  those undefined-name findings are withheld (with a caveat), the lookups
+  name the member, `decode_record` names the fields the layout is missing,
+  and parse errors are cited at the file and line on disk rather than a
+  line of the expanded text.
+* **`check_claims` `flows_to` confirms a group-to-group flow.** A group
+  MOVE reaches the group's children in the lineage, so the claim that the
+  group flows to the other group was called contradicted.
+* **MCP polish.** `serverInfo.version` is this package's version (it was
+  the MCP SDK's), `mcp --help` lists every tool and the `--config` /
+  `--no-config` flags, every subcommand's `--help` shows its own help (it
+  showed the top-level overview), progress notifications are sent while
+  the cross-program facts are read, and `find_statements` no longer keeps
+  the sequence area of a fixed-format line.
+* **A REMARKS line that starts with `TITLE` stays in the remarks.** A line of
+  prose such as `TITLE PAGE IS PRINTED FIRST.` ended the comment-entry as if
+  it were the `TITLE` listing directive, and the rest of the remarks was
+  dropped. `TITLE` ends a comment-entry only when a literal follows it.
+* **`scan` no longer grades files that failed to parse.** Its `health` report
+  never received the parse-error count or the copybook expansion failure, so
+  a file the `health` subcommand leaves ungraded got a B, and one whose
+  copybooks failed to expand got an A with no caveat. The grade is now
+  withheld with a caveat, and the summary gains `degraded_file_count`.
+* **`gen-fixtures` reports a copybook that fails validation as `error: ...`
+  with exit 1**, not a `CopybookSyntaxError` traceback.
+* **`DISPLAY X(I)(1:N)` keeps its reference modification.** The `(1:N)`
+  after a subscript was dropped, along with every DISPLAY item after it.
 * **Fixed-format copybooks are no longer read as free-form.** A member was
   judged on its first ten lines, so a banner with something odd in columns
   1-6 (a `"` in column 3, a change note with blanks, a `*` in column 6) made
@@ -459,6 +476,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+* **gen-fixtures bundles are version 2: a fixture is written once.** A
+  `branches`/`all` bundle repeated every fixture in full inside every
+  scenario. Each distinct fixture now sits once in a top-level `fixtures`
+  table and a scenario's `fixtures` lists ids into it. **Breaking for
+  consumers gated on `bundle_version == 1`** (mocky-mock): until they read
+  version 2, use `gen-fixtures --bundle-version 1`,
+  `FixtureBundle.to_dict(bundle_version=1)` / `to_json(bundle_version=1)`, or
+  `cobolparser.generators.expand_shared_fixtures()` on a version 2 dict.
+  `--format csv-dir`'s `MANIFEST.json` keeps the version 1 shape.
+* **`gen-fixtures` caps OCCURS tables at 10 occurrences by default**
+  (`--max-occurs all` expands every one; a note says which tables were cut)
+  and writes compact JSON unless `--pretty`. A bundle over 10 MB draws a
+  warning. Uncapped and pretty-printed, one program's bundle reached 1.5 GB.
 * **Multi-file `lint` exits 2 when a file could not be linted.** That is the
   code `scan`, `batch`, `codebase-graph` and `call-check` use when one file
   of a multi-file run fails. It was 1, which elsewhere means "the CLI never

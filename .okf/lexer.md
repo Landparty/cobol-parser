@@ -522,7 +522,9 @@ match the IDENTIFICATION parser's: a paragraph name at or left of the
 `IDENTIFICATION DIVISION` header's indentation (Area A) also claims every
 following line indented deeper (Area B) -- NIST OBNC1M's phony program
 included -- up to the next Area A line, or to an Area B line opening with
-`COPY`, `EJECT`, `SKIP1-3` or `TITLE` (`_COMMENT_ENTRY_END_RE`: IBM processes
+`COPY`, `EJECT`, `SKIP1-3`, or `TITLE` followed by its literal
+(`_COMMENT_ENTRY_END_RE`; a `TITLE` with no literal, such as `TITLE PAGE IS
+PRINTED FIRST.`, is a line of REMARKS prose and stays in the entry: IBM processes
 those wherever they are written, so `DATE-COMPILED.` over an indented `COPY
 E1MDFRE1.` now copies the member instead of hiding its ENVIRONMENT and DATA
 DIVISIONs); one indented deeper claims only its own line. `CobolParser`

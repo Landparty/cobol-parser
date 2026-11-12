@@ -12,7 +12,7 @@ import pytest
 
 from cobolparser.config.project import ProjectConfig
 from cobolparser.mcp import CobolTools, Workspace
-from cobolparser.mcp.envelope import fit_budget
+from cobolparser.mcp.envelope import fit_budget, wire_size
 from cobolparser.mcp.hints import MAX_HINTS, add_hints
 
 ENTERPRISE = Path(__file__).resolve().parents[2] / "samples" / "enterprise"
@@ -45,7 +45,7 @@ class TestFitBudget:
             "truncated": [],
         }
         fit_budget(result, 2000)
-        assert len(json.dumps(result, separators=(",", ":"))) <= 2000
+        assert wire_size(result) <= 2000
         assert result["answer"]["small"] == [1, 2]
         (cut,) = result["truncated"]
         assert cut["field"] == "big.rows"
@@ -69,9 +69,20 @@ class TestFitBudget:
         ]
 
     def test_cuts_keep_the_head_and_one_item(self) -> None:
-        result: dict[str, Any] = {"answer": {"a": ["z" * 500, "z" * 500]}}
+        result: dict[str, Any] = {"answer": {"a": ["z" * 50, "z" * 50]}}
         fit_budget(result, 10)
-        assert result["answer"]["a"] == ["z" * 500]
+        assert result["answer"]["a"] == ["z" * 50]
+
+    def test_long_strings_are_halved_once_lists_are_at_one_item(self) -> None:
+        result: dict[str, Any] = {"answer": {"a": ["z" * 5000, "z" * 5000]}}
+        fit_budget(result, 2000)
+        assert wire_size(result) <= 2000
+        (text,) = result["answer"]["a"]
+        assert set(text) == {"z"}
+        cut = result["truncated"][-1]
+        assert cut["field"] == "a[0]"
+        assert cut["total_chars"] == 5000
+        assert cut["shown_chars"] == len(text)
 
     def test_no_budget_or_small_answer_is_untouched(self) -> None:
         result: dict[str, Any] = {"answer": {"a": [1, 2, 3]}, "truncated": []}

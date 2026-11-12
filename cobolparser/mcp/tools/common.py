@@ -302,6 +302,23 @@ def _declared_elsewhere(
         )
 
 
+def _degraded_declaration(
+    answer: dict[str, Any], parsed: ParsedProgram, name: str
+) -> None:
+    """On a not-found or undeclared *answer*, name the COPY member that
+    declares *name* on disk but that the parse read badly, so "not
+    declared" is not taken at its word."""
+    member = parsed.degraded_names.get(name.split(" OF ")[0].split(" IN ")[0].strip())
+    if member is None:
+        return
+    answer["declared_in_degraded_copybook"] = member
+    answer.setdefault(
+        "hint",
+        f"{member} declares {name}, but the parse read that member badly "
+        "(see caveats): this answer does not see the declaration",
+    )
+
+
 def _listed(items: list[str], separator: str = ", ") -> str:
     shown = separator.join(items[:NOTES_SHOWN])
     if len(items) > NOTES_SHOWN:

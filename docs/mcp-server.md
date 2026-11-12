@@ -309,9 +309,12 @@ Every tool returns the same envelope:
   caveat is not a clean one.
 - **Truncated** lists every list that was cut to `limit` (default 50, at most
   500), with its true total. The server also keeps each result under a size
-  budget (`--max-answer-bytes`, default 24000, about 6k tokens): while a
-  result is over it, its longest list is halved from the end, and the cut is
-  listed here with `"reason": "answer budget"`.
+  budget (`--max-answer-bytes`, default 24000, about 6k tokens), measured as
+  sent: the structured result plus its compact text copy. While a result is
+  over it, its longest list is halved from the end, and the cut is listed
+  here with `"reason": "answer budget"`; once every list is down to one
+  item, its longest strings are halved too (with `shown_chars` and
+  `total_chars`). Caveats are never cut.
 - **Next** (`next`, when present) lists one or two ready-made calls that
   usually answer the follow-up question, such as
   `read_source(file="ORDEDIT.cbl", line=75)` after `explain_symbol`. They

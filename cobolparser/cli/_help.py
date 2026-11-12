@@ -163,6 +163,30 @@ class TopLevelParser(argparse.ArgumentParser):
         return formatter.format_help()
 
 
+#: Printed under every subcommand's own help: ``--config`` / ``--no-config``
+#: are declared on the top-level parser only (``main()`` takes them out of
+#: argv first), so a subcommand's option list never shows them.
+SUBCOMMAND_CONFIG_NOTE = """\
+Project config:
+  --config FILE   read cobol.yml defaults from FILE (anywhere on the line)
+  --no-config     ignore any cobol.yml; flags and built-in defaults only"""
+
+
+class SubcommandParser(argparse.ArgumentParser):
+    """One subcommand's parser: argparse's own help, plus the config flags.
+
+    ``add_subparsers`` makes each subparser an instance of the *top-level*
+    parser's class by default, so every ``cobol-parser X --help`` printed
+    the whole command overview in place of X's own epilog (its examples,
+    the MCP server's tool list).
+    """
+
+    def format_help(self) -> str:
+        return (
+            super().format_help().rstrip("\n") + "\n\n" + SUBCOMMAND_CONFIG_NOTE + "\n"
+        )
+
+
 def grouped_command_names() -> list[str]:
     """Every command named in :data:`COMMAND_GROUPS`, in display order."""
     return [name for _, commands in COMMAND_GROUPS for name, _ in commands]

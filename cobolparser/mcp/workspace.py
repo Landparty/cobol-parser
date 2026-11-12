@@ -182,6 +182,105 @@ def _unwrap_source_map(
     return unwrapped
 
 
+#: "line N" in a lexer or parser message: a line of the expanded text.
+_MESSAGE_LINE_RE = re.compile(r"\bline (\d+)\b")
+
+#: A data entry's level number and name, at the start of a line.
+_DECLARED_NAME_RE = re.compile(
+    r"^\s*(0?[1-9]|[1-4][0-9]|66|77|88)\s+([A-Za-z0-9][A-Za-z0-9-]*)"
+)
+
+
+def _cite_expanded_lines(
+    text: str,
+    source_map: dict[int, tuple[str, int]] | None,
+    display: Callable[[str], str],
+) -> str:
+    """*text* with each "line N" of the expanded text cited as the file and
+    line on disk: a member's error otherwise names a line past the end of
+    the program that COPYs it."""
+    if not source_map:
+        return text
+
+    def cite(match: re.Match[str]) -> str:
+        origin = source_map.get(int(match.group(1)))
+        if origin is None:
+            return match.group(0)
+        return f"{display(origin[0])}:{origin[1]}"
+
+    return _MESSAGE_LINE_RE.sub(cite, text)
+
+
+def _describe_error(
+    error: Any,
+    source_map: dict[int, tuple[str, int]] | None,
+    display: Callable[[str], str],
+) -> str:
+    """A parse error cited on disk (see :func:`_cite_expanded_lines`)."""
+    line = getattr(error, "line_number", None)
+    message = getattr(error, "message", None)
+    if source_map and isinstance(line, int) and message is not None:
+        origin = source_map.get(line)
+        if origin is not None:
+            return f"{display(origin[0])}:{origin[1]}: {message}"
+    return _cite_expanded_lines(str(error), source_map, display)
+
+
+def _member_diagnostics(
+    result: Any, source_map: dict[int, tuple[str, int]] | None, program: str
+) -> dict[str, list[int]]:
+    """The lines of each COPY member that a parse error or warning points
+    into, by member file: the members the parse read badly. A member read
+    in the wrong source format (comment lines taken for code) leaves no
+    error of its own on the program, only these, while its declarations
+    are gone."""
+    if not source_map:
+        return {}
+    lines: list[int] = []
+    for error in result.errors or []:
+        line = getattr(error, "line_number", None)
+        if isinstance(line, int):
+            lines.append(line)
+        else:
+            lines.extend(int(n) for n in _MESSAGE_LINE_RE.findall(str(error)))
+    for warning in result.warnings or []:
+        text = str(warning)
+        if "not expanded" in text:
+            continue
+        lines.extend(int(n) for n in _MESSAGE_LINE_RE.findall(text))
+    found: dict[str, list[int]] = {}
+    for line in lines:
+        origin = source_map.get(line)
+        if origin is not None and origin[0] != program:
+            found.setdefault(origin[0], []).append(origin[1])
+    return found
+
+
+#: A PICTURE clause, which makes an entry elementary.
+_PICTURE_RE = re.compile(r"\bPIC(?:TURE)?\b", re.IGNORECASE)
+
+
+def names_declared_in(text: str, *, pictured: bool = False) -> set[str]:
+    """Upper-cased data names a member's text declares, read line by line
+    in both source formats: what the member meant to declare, whatever the
+    parse made of it. *pictured*: only entries with a PICTURE on the same
+    line, the fields a record layout must place."""
+    names: set[str] = set()
+    for line in split_source_lines(text):
+        candidates = [line]
+        if len(line) > 6:
+            if line[6] in "*/":
+                continue
+            candidates.append(line[7:72])
+        for candidate in candidates:
+            match = _DECLARED_NAME_RE.match(candidate)
+            if pictured and not _PICTURE_RE.search(candidate):
+                continue
+            if match and match.group(2).upper() != "FILLER":
+                names.add(match.group(2).upper().rstrip("."))
+    return names
+
+
 @dataclass
 class ParsedProgram:
     """One parsed source file, with what it takes to cite it on disk."""
@@ -202,6 +301,10 @@ class ParsedProgram:
     _reports: dict[tuple[str, int], Any] = field(repr=False, default_factory=dict)
     #: The shared analysis context of each unit, by ``id(unit)``.
     _contexts: dict[int, ProgramContext] = field(repr=False, default_factory=dict)
+    #: Data names declared in a COPY member the parse read badly, each with
+    #: the member's display path: a lookup or an undefined-name finding
+    #: about one of them is not to be trusted.
+    degraded_names: dict[str, str] = field(default_factory=dict)
 
     def report(self, name: str, unit: CobolProgram, build: Callable[[], Any]) -> Any:
         """*build()*'s result for *unit*, computed once per parse.
@@ -915,8 +1018,13 @@ class Workspace:
             errors = "; ".join(str(e) for e in result.errors[:3])
             raise ToolError(f"{self.display(path)} could not be parsed: {errors}")
 
+        source_map = getattr(result, "expansion_source_map", None) or None
+        if head_lines:
+            source_map = _unwrap_source_map(
+                source_map, filename, head_lines, fragment_lines
+            )
         for warning in result.warnings or []:
-            text = str(warning)
+            text = _cite_expanded_lines(str(warning), source_map, self.display)
             if "COPY" in text.upper() and "not expanded" in text:
                 caveats.append(
                     Caveat(
@@ -941,8 +1049,31 @@ class Workspace:
                     "holding only copybooks instead",
                 )
             )
+        degraded_names: dict[str, str] = {}
+        for member, member_lines in sorted(
+            _member_diagnostics(result, source_map, filename).items()
+        ):
+            shown = self.display(member)
+            with contextlib.suppress(OSError, ToolError):
+                for name in names_declared_in(self.read_text(Path(member), [])):
+                    degraded_names.setdefault(name, shown)
+            cited = ", ".join(str(n) for n in sorted(set(member_lines))[:5])
+            caveats.append(
+                Caveat(
+                    "incomplete-analysis",
+                    f"copybook {shown} was read with "
+                    f"{len(member_lines)} lexer or parser problem(s) (lines "
+                    f"{cited}): most often a member read in the wrong source "
+                    "format, its comment lines taken for code",
+                    "declarations from that member may be missing: record "
+                    "layouts, symbol lookups and undefined-name findings for "
+                    "its names are unreliable",
+                )
+            )
         if result.errors:
-            first = "; ".join(str(e) for e in result.errors[:3])
+            first = "; ".join(
+                _describe_error(e, source_map, self.display) for e in result.errors[:3]
+            )
             caveats.append(
                 Caveat(
                     "partial-parse",
@@ -951,11 +1082,6 @@ class Workspace:
                 )
             )
 
-        source_map = getattr(result, "expansion_source_map", None) or None
-        if head_lines:
-            source_map = _unwrap_source_map(
-                source_map, filename, head_lines, fragment_lines
-            )
         files = {filename}
         if source_map:
             files.update(file for file, _ in source_map.values())
@@ -977,4 +1103,5 @@ class Workspace:
             caveats=caveats,
             stamps={name: _stamp(name) for name in files},
             _display=self.display,
+            degraded_names=degraded_names,
         )

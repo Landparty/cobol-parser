@@ -37,24 +37,43 @@ def _build_config_parser(subparsers: argparse._SubParsersAction) -> None:
     p.set_defaults(func=_cmd_config)
 
 
+def _mcp_tool_list() -> str:
+    """The server's tools by group, for ``mcp --help`` (no [mcp] needed)."""
+    import textwrap
+
+    from ...mcp.tool_groups import TOOL_GROUPS
+
+    return "\n".join(
+        textwrap.fill(
+            ", ".join(names),
+            width=78,
+            initial_indent=f"  {group}: ",
+            subsequent_indent="    ",
+        )
+        for group, names in TOOL_GROUPS.items()
+    )
+
+
 def _build_mcp_parser(subparsers: argparse._SubParsersAction) -> None:
     p = subparsers.add_parser(
         "mcp",
         help="Serve COBOL analysis tools to AI agents over MCP (stdio)",
         description=(
             "Run a Model Context Protocol server on stdin/stdout, answering "
-            "questions about the COBOL under --root: read_source, lint and "
-            "explain_symbol. Every location in an answer is a file and line "
-            "on disk, and every answer names what could not be checked. "
-            "cobol.yml is read from --root itself (never from a parent "
-            "directory). Under a copybook directory outside --root only "
-            "copybook members are readable, and /, the home directory, their "
-            "ancestors, hidden and system directories are refused as copybook "
-            "directories. Needs the [mcp] extra."
+            "questions about the COBOL under --root. Every location in an "
+            "answer is a file and line on disk, and every answer names what "
+            "could not be checked. cobol.yml is read from --root itself "
+            "(never from a parent directory); --config FILE reads another "
+            "and --no-config none. Under a copybook directory outside --root "
+            "only copybook members are readable, and /, the home directory, "
+            "their ancestors, hidden and system directories are refused as "
+            "copybook directories. Needs the [mcp] extra."
         ),
         epilog=(
-            "Examples:\n"
+            "Tools (--tools picks groups or names; auto is core, plus jcl when "
+            "the root holds JCL):\n" + _mcp_tool_list() + "\n\nExamples:\n"
             "  cobol-parser mcp --root /path/to/checkout\n"
+            "  cobol-parser mcp --root . --config ci/cobol.yml --tools all\n"
             "  claude mcp add cobol -- cobol-parser mcp --root /path/to/checkout"
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,

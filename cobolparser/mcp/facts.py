@@ -633,7 +633,12 @@ class FactsStore:
                         # facts go on meanwhile; one that does waits here.
                         self._busy.clear()
                         try:
-                            self._compute(stale, report=False)
+                            # Reported: a tool call waiting on these facts
+                            # holds Workspace.progress and passes it on, so
+                            # a client that resets its timeout on progress
+                            # keeps waiting. With no call waiting, nothing
+                            # listens and nothing is sent.
+                            self._compute(stale)
                         finally:
                             self._busy.set()
                         self._save()

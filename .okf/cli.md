@@ -68,7 +68,13 @@ argparse's flat `{parse,batch,...}` block), then a quick start, the exit
 codes and where defaults come from. Every registered subcommand must sit in
 exactly one group (`tests/unit/cli/test_cli_help_overview.py`), so a new one
 needs a line there too. `<name> --help` shows flags,
-defaults and runnable examples. **Adding a single-file analyzer:** add an
+defaults and runnable examples: subparsers are built with
+`parser_class=SubcommandParser` (`cli/_help.py`), a plain
+`argparse.ArgumentParser` whose `format_help()` adds the
+`SUBCOMMAND_CONFIG_NOTE` (`--config` / `--no-config`). They used to inherit
+`TopLevelParser`, so every `<name> --help` printed the top-level overview.
+`mcp --help` lists every tool by group (`_mcp_tool_list()`, from
+`mcp/tool_groups.py`, so it needs no `[mcp]` extra). **Adding a single-file analyzer:** add an
 `AnalyzerCommand(help=..., examples=..., profiling=...)` entry to
 `ANALYZERS` in `cli/commands/analyze.py` and an `_add_analyzer(subparsers,
 "name")` line at its place in `_build_parser()`. Both build through
@@ -193,7 +199,7 @@ Subcommands that take none of the COBOL parse flags (`--source-format`,
 | Code | Meaning |
 |------|---------|
 | `0` | Ran to completion; findings alone never change it. Analyzer subcommands exit 0 on a partial parse too, printing `warning: <file> parsed with N error(s); analysis may be incomplete` to stderr (`_parse_result_or_fail`) |
-| `1` | The CLI failed (`_fail()`): unreadable file, `ast is None`, unwritable output, a `cobol.yml` error, a missing extra, an invalid option value |
+| `1` | The CLI failed (`_fail()`): unreadable file, `ast is None`, unwritable output, a `cobol.yml` error, a missing extra, an invalid option value, a copybook expansion failure (`gen-fixtures` included) |
 | `2` | Argparse rejected the arguments; `parse` (incl. `--find-type`) got a recovered-but-errored parse — JSON still printed, summary on stderr (`_exit_if_partial_parse`; with `--errors` it says the errors are in the JSON instead of the re-run hint, #745); `batch` had a file with a `read_error` or `success=false`; `scan` had a file in `failures`, and `codebase-graph` / `copybook-impact` a file in the graph's `errors` (missing, unreadable or parsed with errors) -- output still written, a `warning:` on stderr, plus `error: no such file or directory: X` per missing path (`_exit_on_graph_errors`, #325, owner's option (a): any failed file, as `batch`); `gen-fixtures --strict` found unresolved items; a multi-file `lint` had a file in `failures` (as `scan`); `batch --strict-copybooks` had a file with a `copybook_error`; `call-check` had a missing file (before any parse) or a file that failed to parse (after the report) |
 | `3` | `lint --fail-on` (any file of a multi-file run; a file that could not be linted makes it 2 instead) / `call-check --fail-on` / `widen-check --fail-on` threshold hit; `jcl --strict` hit an unparseable card |
 | `141` | stdout closed (128 + SIGPIPE) |

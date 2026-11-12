@@ -64,7 +64,10 @@ _DIVISION_HEADER_RE = re.compile(
 #: ``DATE-COMPILED.`` followed by an indented ``COPY E1MDFRE1.`` copies the
 #: member rather than documenting it.
 _COMMENT_ENTRY_END_RE = re.compile(
-    r"(?:COPY|EJECT|SKIP[123]|TITLE)(?=[ \t.]|$)", re.IGNORECASE
+    # TITLE only with its literal after it: ``TITLE PAGE IS PRINTED FIRST.``
+    # is a line of prose in a REMARKS entry, not the listing directive.
+    r"(?:(?:COPY|EJECT|SKIP[123])(?=[ \t.]|$)|TITLE[ \t]+(?:N|X|NX|G|U)?['\"])",
+    re.IGNORECASE,
 )
 
 
