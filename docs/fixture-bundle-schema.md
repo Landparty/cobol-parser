@@ -6,7 +6,7 @@
 **Consumed by:** mockymock's `generate --with-data` (Phase 8 of the
 `gen-fixtures` program-scoped test-data initiative; see
 [`docs/plans/2026-08-02-program-data-generation-design.md`](plans/2026-08-02-program-data-generation-design.md)).
-**Current `bundle_version`:** `1`.
+**Current `bundle_version`:** `2` (since 2026-11-11: each distinct fixture is written once, in the top-level `fixtures` table, and a scenario lists fixture ids). `FixtureBundle.to_dict(bundle_version=1)`, `to_json(bundle_version=1)` and `gen-fixtures --bundle-version 1` still write the version 1 shape, and `expand_shared_fixtures(bundle_dict)` turns a version 2 dict into it.
 
 This is hand-written prose, not a JSON-Schema document — the repo has a
 zero-runtime-dependency rule for the core library, and a schema validator is
@@ -55,10 +55,11 @@ targetable arm therefore still yields one scenario, never zero.
 
 | Key | Type | Notes |
 |---|---|---|
-| `bundle_version` | `int` | Currently `1`. Bumped only on a breaking change to this shape — see "Versioning" below. |
+| `bundle_version` | `int` | Currently `2`. Bumped only on a breaking change to this shape — see "Versioning" below. |
 | `program_name` | `str \| null` | The `PROGRAM-ID`, or `null` if the program has none. |
 | `seed` | `int` | The RNG seed that produced this bundle. If you didn't pass one, this is the one that was drawn — replay with `seed=bundle["seed"]`. |
 | `scenarios` | `list[Scenario]` | One entry per scenario (see below). Always at least one. |
+| `fixtures` | `dict[str, BoundaryFixture]` | Version 2 only. Every distinct fixture once, by id: `CATEGORY:KEY`, or `CATEGORY:KEY#2`, `#3`, ... for a second, third variant of the same boundary (a READ whose rows a scenario pins differently). Ids are given in first-use order, so the same bundle always gets the same ids. A scenario's `fixtures` lists ids into this table. |
 | `layouts` | `dict[str, list[FieldSpec]]` | Record name → its resolved field layout, emitted **once per record** — scenarios reference a layout by name rather than repeating it inline. |
 | `coverage` | `CoverageSummary` | Boundary-level counts (Phase 3, present in every bundle). |
 | `unresolved` | `list[str]` | Program-level gaps not tied to one scenario/boundary — an unresolved COPY member, a dynamic CALL with no traceable target, etc. Merges Phase 1 (`ProgramLayoutIndex.unresolved`), Phase 2 (`Boundary.unresolved`), and Phase 3's own field-resolution gaps. |
@@ -71,7 +72,7 @@ targetable arm therefore still yields one scenario, never zero.
 | `name` | `str` | E.g. `"happy path"`, `"CHECK-QTY: IF@31 THEN"`, `"empty input"`, `"boundary values: minimum"`. Human-readable and unique within a bundle, not a stable identifier — don't parse it; `scenario_coverage.details[].arm_key` is the stable per-arm key. |
 | `intent` | `str` | One sentence: what this scenario is for. |
 | `entry` | `str \| null` | The program's first PROCEDURE DIVISION paragraph, if any. |
-| `fixtures` | `list[BoundaryFixture]` | Mock in-data for every boundary the scenario touches. |
+| `fixtures` | `list[str]` (version 2) / `list[BoundaryFixture]` (version 1) | Mock in-data for every boundary the scenario touches: in version 2 the ids of the entries in the top-level `fixtures` table, in order; in version 1 the fixtures themselves. A fixture two scenarios share unchanged is one table entry. |
 | `expectations` | `list[Expectation]` | Assert-on stubs (see below). |
 | `unconstrained` | `list[str]` | Reserved for a future phase; always `[]` today (a happy-path scenario doesn't attempt branch coverage, and Phase 5/6 record misses in `scenario_coverage` instead, not here). |
 | `verification` | `ScenarioVerification` | Present only for a `"branches"`/`"all"` scenario (absent in `mode="happy"`, which targets no branch). See below. |
@@ -394,7 +395,9 @@ seed=7)` it produces seven scenarios, in this order: `"happy path"`,
 `"error status: OPEN ORDER-FILE not found"` (the OPEN's `WS-ORDER-STATUS`
 pinned to `"35"`), `"boundary values: minimum"` and
 `"boundary values: maximum"`. Trimmed to the two branch scenarios plus the
-bundle-level keys:
+bundle-level keys, and shown in the version 1 shape (`--bundle-version 1`),
+where each scenario carries its fixtures inline; in version 2 each
+scenario's `fixtures` is a list of ids into the top-level `fixtures` table:
 
 ```json
 {
@@ -543,7 +546,7 @@ with `"1244"` computed from whatever value that scenario's own mocked
 
 ```
 <path>/
-  MANIFEST.json                       # the full bundle, minus row data
+  MANIFEST.json                       # the full bundle, minus row data, in the version 1 shape
   <scenario-slug>/
     <KEY>.csv                         # one per file-shaped fixture
 ```
@@ -606,6 +609,15 @@ checks `bundle_version` before consuming a bundle and fails closed on an
 unrecognized value rather than guessing at a schema that changed underneath
 it — this is the reason the field exists at all rather than being inferred
 from key presence.
+
+**Version 2 (2026-11-11).** A `branches`/`all` bundle repeated every
+fixture in full inside every scenario, so the same unchanged READ sequences
+appeared once per scenario and a bundle ran to megabytes. Version 2 writes
+each distinct fixture once in the top-level `fixtures` table and makes
+`Scenario.fixtures` a list of ids: a retyped key, so the version moved.
+Nothing else changed; `expand_shared_fixtures()` gives back the version 1
+dict exactly (`bundle_version` set to 1), and the writer still produces
+version 1 on request for a consumer that has not moved yet.
 
 ## Determinism
 

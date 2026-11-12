@@ -174,8 +174,19 @@ it).
 turns a program's `ProgramLayoutIndex` and `BoundaryReport` into a
 `FixtureBundle`: layout-valid random values for every boundary, assembled into
 one "happy path" `Scenario`. `bundle.py` holds `BUNDLE_VERSION` (currently
-`1`), `Expectation`, `BoundaryFixture`, `CoverageSummary`, `Scenario`,
-`FixtureBundle`.
+`2`), `SUPPORTED_BUNDLE_VERSIONS` (1, 2), `Expectation`, `BoundaryFixture`,
+`CoverageSummary`, `Scenario`, `FixtureBundle`, `expand_shared_fixtures()`.
+Version 2 (2026-11-11): `FixtureBundle.to_dict(bundle_version=None)` moves
+every distinct fixture (canonical-JSON equal) into a top-level `fixtures`
+table (`_share_fixtures()`, ids `CATEGORY:KEY`, then `#2`, `#3` for other
+variants, in first-use order) and each scenario's `fixtures` becomes its
+list of ids; `bundle_version=1` (and `to_json(bundle_version=1)`,
+`gen-fixtures --bundle-version 1`) writes the old inline shape, and
+`expand_shared_fixtures(d)` turns a version 2 dict back into it.
+`write_csv_dir`'s `MANIFEST.json` stays in the version 1 shape (each inline
+fixture carries its `csv_path`). The checked-in
+`examples/fixtures/FIXTUREDEMO.bundle.json` is version 2; mocky-mock's copy
+of it must be re-copied when mocky-mock moves to version 2.
 
 ```python
 from cobolparser.generators import ProgramFixtureGenerator

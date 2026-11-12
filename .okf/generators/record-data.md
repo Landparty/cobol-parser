@@ -55,7 +55,7 @@ dataset.write_csv("customers.csv")
 - **`views.py`** / **`decoding.py`** / **`compare.py`** — the read side; see [decode-compare.md](decode-compare.md).
 - **`dataset.py`** — `GeneratedDataset`: rows, fields, seed; `to_csv()` / `write_csv()` / `to_dicts()`, the record-image trio `to_records()` / `write_records()` / `to_hex_dump()`, and the length quartet `record_length()` / `minimum_record_length()` / `record_lengths(opts)` / `is_variable_length`.
 - **`copybook.py`** — `parse_copybook_records()` and `CopybookDataGenerator`; also `select_record()` and `fd_record_length()` (see [decode-compare.md](decode-compare.md)).
-- **`program_layout.py`** / **`bundle.py`** — `ProgramLayoutIndex` and the `FixtureBundle` shapes; see [fixtures.md](fixtures.md).
+- **`program_layout.py`** / **`bundle.py`** — `ProgramLayoutIndex` and the `FixtureBundle` shapes (`BUNDLE_VERSION` 2, `SUPPORTED_BUNDLE_VERSIONS`, `expand_shared_fixtures`, re-exported from `generators.data`); see [fixtures.md](fixtures.md).
 - **`__init__.py`** — eager package exports of the above (its own `__all__`).
 
 `ValueFactory` + `flatten_record` work against any `CobolDataItem`, not just a

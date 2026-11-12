@@ -28,6 +28,7 @@ _BUNDLE_KEYS = {
     "program_name",
     "seed",
     "scenarios",
+    "fixtures",
     "layouts",
     "coverage",
     "unresolved",
@@ -81,8 +82,14 @@ class TestExportedNames:
 
 
 class TestBundleVersion:
-    def test_current_version_is_1(self):
-        assert BUNDLE_VERSION == 1
+    def test_current_version_is_2(self):
+        assert BUNDLE_VERSION == 2
+
+    def test_version_1_is_still_written_on_request(self):
+        data = _bundle().to_dict(bundle_version=1)
+        assert data["bundle_version"] == 1
+        assert set(data) == _BUNDLE_KEYS - {"fixtures"}
+        assert all(isinstance(f, dict) for f in data["scenarios"][0]["fixtures"])
 
     def test_generated_bundle_carries_the_current_version(self):
         assert _bundle().bundle_version == BUNDLE_VERSION

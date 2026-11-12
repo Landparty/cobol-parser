@@ -97,7 +97,7 @@ tests/
     test_layer_dependencies.py  # imports point down the layers in index.md; no package cycle, no module-level import loop; KNOWN_UPWARD exceptions must still exist
     test_analyzer_protocol.py   # every class with analyze() is a ProgramAnalyzer or a named exception; context-aware ones agree on AST vs ProgramContext
     test_public_api_list.py     # docs/public-api.md's facade list == cobolparser.__all__
-    test_fixture_bundle_contract.py  # FixtureBundle: exported names, bundle_version, generator signatures, to_dict() key sets, reproducibility, scenario-mode contract (see docs/fixture-bundle-schema.md)
+    test_fixture_bundle_contract.py  # FixtureBundle: exported names, bundle_version (2, version 1 still written on request), generator signatures, to_dict() key sets, reproducibility, scenario-mode contract (see docs/fixture-bundle-schema.md)
     io_statements/             # 1 file (`io` too)
   regression/                  # 280 files: pinned bug fixes, typically named for the issue/finding, e.g.
                                #   test_swallow_sweep.py: one period-less snippet per registered statement

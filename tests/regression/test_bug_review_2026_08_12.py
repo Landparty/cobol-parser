@@ -161,7 +161,7 @@ class TestWideNumericPrecision:
         bundle = ProgramFixtureGenerator().generate_with_scenarios(
             result.ast, index, boundary_report, mode="branches", seed=7
         )
-        data = json.loads(bundle.to_json())
+        data = json.loads(bundle.to_json(bundle_version=1))
         then_scenarios = [s for s in data["scenarios"] if "THEN" in s["name"]]
         assert then_scenarios, [s["name"] for s in data["scenarios"]]
         read_fixtures = [

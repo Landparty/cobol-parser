@@ -11,8 +11,9 @@
   both paths say so.
 * A9 -- gen-fixtures bundles ran to 1.5 GB: ``--max-occurs`` had no
   default and the JSON was pretty-printed. It now defaults to 10 (``all``
-  lifts it), the bundle is compact unless ``--pretty``, and a bundle over
-  10 MB draws a warning.
+  lifts it), the bundle is compact unless ``--pretty``, a bundle over
+  10 MB draws a warning, and (bundle version 2) a fixture that several
+  scenarios use unchanged is written once.
 * A14 -- gen-data and decode defaulted to the first 01 even when it had
   no generatable field ("no generatable fields") though later 01s did.
 """
@@ -215,3 +216,42 @@ class TestA9BundleSize:
         ):
             _, err = self._run(tmp_path, capsys)
         assert "warning: the bundle is" in err
+
+
+class TestA9SharedFixtures:
+    """Bundle version 2: each distinct fixture once, scenarios list ids."""
+
+    def _bundle(self):  # type: ignore[no-untyped-def]
+        from cobolparser.generators import ProgramFixtureGenerator
+
+        demo = Path(__file__).parents[2] / "examples" / "fixtures" / "FIXTUREDEMO.cbl"
+        return ProgramFixtureGenerator().generate_with_scenarios_from_file(
+            str(demo), mode="all", seed=1
+        )
+
+    def test_unchanged_fixtures_are_written_once(self) -> None:
+        bundle = self._bundle()
+        v2 = bundle.to_dict()
+        assert v2["bundle_version"] == 2
+        used = [i for s in v2["scenarios"] for i in s["fixtures"]]
+        assert set(used) == set(v2["fixtures"])
+        assert len(used) > len(v2["fixtures"])  # some fixture is shared
+        assert len(json.dumps(v2)) < len(json.dumps(bundle.to_dict(bundle_version=1)))
+
+    def test_expanding_gives_back_version_1(self) -> None:
+        from cobolparser.generators import expand_shared_fixtures
+
+        bundle = self._bundle()
+        v1 = bundle.to_dict(bundle_version=1)
+        assert expand_shared_fixtures(bundle.to_dict()) == v1
+        assert expand_shared_fixtures(v1) == v1
+
+    def test_ids_are_stable_and_name_variants(self) -> None:
+        v2 = self._bundle().to_dict()
+        assert v2 == self._bundle().to_dict()
+        for fixture_id, fixture in v2["fixtures"].items():
+            assert fixture_id.split("#")[0] == f"{fixture['category']}:{fixture['key']}"
+
+    def test_unknown_version_is_refused(self) -> None:
+        with pytest.raises(ValueError, match="unsupported bundle_version 3"):
+            self._bundle().to_dict(bundle_version=3)

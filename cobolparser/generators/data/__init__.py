@@ -109,11 +109,13 @@ from ...layout.program import FileFacts, ProgramLayoutIndex, ResolvedField
 from ...layout.values import ValueFactory
 from .bundle import (
     BUNDLE_VERSION,
+    SUPPORTED_BUNDLE_VERSIONS,
     BoundaryFixture,
     CoverageSummary,
     Expectation,
     FixtureBundle,
     Scenario,
+    expand_shared_fixtures,
 )
 from .compare import (
     CompareError,
@@ -156,6 +158,8 @@ from .views import PlacedField, RecordView, RecordViews, build_record_views
 
 __all__ = [
     "BUNDLE_VERSION",
+    "SUPPORTED_BUNDLE_VERSIONS",
+    "expand_shared_fixtures",
     "BoundaryFixture",
     "Charset",
     "CompareError",

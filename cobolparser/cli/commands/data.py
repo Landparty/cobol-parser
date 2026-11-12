@@ -949,6 +949,17 @@ def _build_gen_fixtures_parser(
             "adds about a third"
         ),
     )
+    p.add_argument(
+        "--bundle-version",
+        type=int,
+        choices=(1, 2),
+        default=2,
+        help=(
+            "JSON bundle shape: 2 (default) writes each distinct fixture once "
+            "and has scenarios list fixture ids; 1 repeats every fixture in "
+            "every scenario, for a consumer not yet reading version 2"
+        ),
+    )
     _add_output_arg(p)
     _add_debug_lines_arg(p)
     p.set_defaults(func=_cmd_gen_fixtures)
@@ -1143,15 +1154,17 @@ def _cmd_gen_fixtures(args: argparse.Namespace) -> None:
         )
     pretty = bool(getattr(args, "pretty", False)) and not args.compact
     text = json.dumps(
-        {"source_file": args.file, **bundle.to_dict()},
+        {
+            "source_file": args.file,
+            **bundle.to_dict(bundle_version=getattr(args, "bundle_version", 2)),
+        },
         indent=2 if pretty else None,
     )
     if len(text) > GEN_FIXTURES_SIZE_WARNING_BYTES:
         print(
             f"warning: the bundle is {len(text) / (1024 * 1024):.1f} MB "
-            f"({len(bundle.scenarios)} scenario(s), each with its own "
-            "fixtures); --max-occurs, --rows and --scenarios happy make it "
-            "smaller",
+            f"({len(bundle.scenarios)} scenario(s)); --max-occurs, --rows "
+            "and --scenarios happy make it smaller",
             file=sys.stderr,
         )
     output_path = getattr(args, "output", None)

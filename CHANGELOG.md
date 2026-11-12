@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+### Changed
+
+* **gen-fixtures bundles are version 2: a fixture is written once.** A
+  `branches`/`all` bundle repeated every fixture in full inside every
+  scenario. Each distinct fixture now sits once in a top-level `fixtures`
+  table and a scenario's `fixtures` lists ids into it. **Breaking for
+  consumers gated on `bundle_version == 1`** (mocky-mock): until they read
+  version 2, use `gen-fixtures --bundle-version 1`,
+  `FixtureBundle.to_dict(bundle_version=1)` / `to_json(bundle_version=1)`, or
+  `cobolparser.generators.expand_shared_fixtures()` on a version 2 dict.
+  `--format csv-dir`'s `MANIFEST.json` keeps the version 1 shape.
+
 ### Fixed
 
 * **The same seed gives the same values in the CSV and the record image.**

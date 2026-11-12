@@ -317,7 +317,9 @@ class TestWriteCsvDir:
             assert os.path.isfile(manifest_path)
             with open(manifest_path) as handle:
                 manifest = json.load(handle)
-            assert manifest["bundle_version"] == BUNDLE_VERSION
+            # The manifest keeps the version 1 shape: each scenario's
+            # fixtures inline, each naming the CSV written for it.
+            assert manifest["bundle_version"] == 1
 
             scenario_dir = os.path.join(tmp, "happy-path")
             assert os.path.isdir(scenario_dir)

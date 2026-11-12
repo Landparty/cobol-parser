@@ -292,6 +292,7 @@ bundle = generator.generate_with_scenarios_from_file(
 
 bundle.to_dict()   # dict -- consumed by mockymock.generation.with_data.scaffold_cut_with_data
 bundle.to_json()   # str  -- printed verbatim as `mockymock fixtures`'s entire stdout output
+# Both take bundle_version=1 for the version 1 shape (the default is 2).
 ```
 
 | Symbol | mocky-mock use |
@@ -301,7 +302,8 @@ bundle.to_json()   # str  -- printed verbatim as `mockymock fixtures`'s entire s
 | `ProgramFixtureGenerator.generate_with_scenarios_from_file(path, *, copybook_paths=None, callee_paths=None, mode="happy", seed=None) -> FixtureBundle` | the single entry point both mocky-mock subcommands call; mocky-mock only ever passes `copybook_paths`, `mode`, `seed` — `callee_paths` exists for other callers and defaults to `None` |
 | `FixtureBundle.to_dict() -> dict` | input to `mockymock generate --with-data`'s bundle→surface join |
 | `FixtureBundle.to_json() -> str` | `mockymock fixtures`'s entire stdout output |
-| `dict["bundle_version"]` | **the gate**: mocky-mock raises its own `UnsupportedBundleVersionError` and refuses to consume the bundle (stderr + exit 1) the moment this isn't `1`, rather than guess at a schema that may have changed meaning underneath it |
+| `dict["bundle_version"]` | **the gate**: mocky-mock raises its own `UnsupportedBundleVersionError` and refuses to consume the bundle (stderr + exit 1) the moment this isn't a version it reads, rather than guess at a schema that may have changed meaning underneath it. **Now `2` by default (2026-11-11)**: a mocky-mock that reads only `1` refuses a default bundle until it is updated; until then it can call `to_dict(bundle_version=1)` / `to_json(bundle_version=1)`, or turn a version 2 dict back into version 1 with `cobolparser.generators.expand_shared_fixtures()` |
+| `dict["fixtures"]` (version 2) | every distinct `BoundaryFixture` once, by id (`CATEGORY:KEY`, `CATEGORY:KEY#2`, ...); each scenario's `"fixtures"` is the list of ids it uses, in order. The fixture dicts themselves are unchanged from version 1 |
 | `BoundaryFixture` keys `"category"`, `"key"`, `"direction"`, `"layout"`, `"sequence"`, `"terminal"`, `"status"` (also carries `"line"`, `"paragraph"`, `"provenance"`, `"unresolved"`, which mocky-mock's loader reads into memory but does not join on) | joined against mocky-mock's own `mock_surface.BoundarySite`s uniformly by `(category, key)`, including SQL/CICS/DLI — for those, `key` holds a normalized shortest-unique-prefix of the EXEC statement's text (mocky-mock's surface records no stable identifier-style key for those sites), computed independently by the same prefix rule on both sides so they land on the same string. See `docs/fixture-bundle-schema.md`'s `BoundaryFixture` table for every key's full type and meaning. |
 
 | `FieldSpec` keys `"odo_controls"`, `"odo_counter_bounds"` (2026-09-05) | additive, inside every `"layout"`. `odo_controls` is one `{depending_on, subscript_index, min_times, max_times}` per `OCCURS ... DEPENDING ON` dimension the field sits inside (`[]` for most fields); `odo_counter_bounds` is `[min, max]` on a field that is itself such a counter, else `null`. mocky-mock does not read either — they exist so a consumer that writes *record images* can decide which occurrences a given record contains. A bundle produced before these keys existed is still a valid v1 bundle. |

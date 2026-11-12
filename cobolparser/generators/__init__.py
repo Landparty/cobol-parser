@@ -38,6 +38,8 @@ def __getattr__(name: str) -> object:
         return _map[name]
     if name in (
         "BUNDLE_VERSION",
+        "SUPPORTED_BUNDLE_VERSIONS",
+        "expand_shared_fixtures",
         "BoundaryFixture",
         "Charset",
         "DecodeResult",
@@ -78,6 +80,7 @@ def __getattr__(name: str) -> object:
             BUNDLE_VERSION,
             MAX_VARIABLE_RECORD,
             RDW_SIZE,
+            SUPPORTED_BUNDLE_VERSIONS,
             BoundaryFixture,
             Charset,
             CoverageSummary,
@@ -106,6 +109,7 @@ def __getattr__(name: str) -> object:
             decoded_hex_dump,
             encode_rdw,
             encoding_caveats,
+            expand_shared_fixtures,
             minimum_record_length,
             present_indexes,
             record_length,
@@ -115,6 +119,8 @@ def __getattr__(name: str) -> object:
 
         _map = {
             "BUNDLE_VERSION": BUNDLE_VERSION,
+            "SUPPORTED_BUNDLE_VERSIONS": SUPPORTED_BUNDLE_VERSIONS,
+            "expand_shared_fixtures": expand_shared_fixtures,
             "BoundaryFixture": BoundaryFixture,
             "Charset": Charset,
             "DecodeResult": DecodeResult,
@@ -189,6 +195,8 @@ def __getattr__(name: str) -> object:
 
 __all__ = [
     "BUNDLE_VERSION",
+    "SUPPORTED_BUNDLE_VERSIONS",
+    "expand_shared_fixtures",
     "BoundaryFixture",
     "Charset",
     "CompareError",
