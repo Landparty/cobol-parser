@@ -126,7 +126,10 @@ def _build_parser() -> argparse.ArgumentParser:
         help=_project_config.NO_CONFIG_FLAG_HELP,
     )
     subparsers = parser.add_subparsers(
-        dest="command", metavar="<command>", prog="cobol-parser"
+        dest="command",
+        metavar="<command>",
+        prog="cobol-parser",
+        parser_class=_help.SubcommandParser,
     )
 
     _build_parse_parser(subparsers)

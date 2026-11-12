@@ -583,7 +583,15 @@ def _flows_to(tools: CobolTools, claim: dict[str, Any]) -> _Verdict:
         return {node, node.split(".")[-1], node.split(":")[-1].split("@")[0]}
 
     def names(hit: dict[str, Any]) -> set[str]:
-        return node_names(hit.get("field") or "")
+        field = hit.get("field") or ""
+        found = node_names(field)
+        if hit.get("node_kind") == "item":
+            # ``WS010-DATE.WS010-AA``: the path from the record root. A group
+            # counts as reached when any item under it is -- a group MOVE
+            # reaches the group's children in the lineage, never the group
+            # node itself, so the claim used to be contradicted.
+            found |= set(_norm(field).split(":")[-1].split("."))
+        return found
 
     def path_names(hit: dict[str, Any]) -> set[str]:
         found: set[str] = set()

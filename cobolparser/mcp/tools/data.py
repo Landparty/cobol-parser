@@ -91,6 +91,7 @@ class DataTools(BaseTools):
                 "the layout is short by that member's fields: every record "
                 "after the first is framed at the wrong offset",
             )
+        _missing_fields_caveat(source, decoder.views, copybook, response)
         try:
             chosen = decoder.resolve_view(view)
         except RecordDecodingError as exc:
@@ -509,3 +510,42 @@ def _arm_coverage(
         "missed": coverage.get("missed"),
         "missed_arms": rows,
     }
+
+
+def _missing_fields_caveat(
+    source: str, views: Any, copybook: str, response: Response
+) -> None:
+    """A caveat when the layout lacks fields the member's text declares
+    with a PICTURE: the member was read badly (most often in the wrong
+    source format), so every offset after the first missing field is
+    wrong although the decode itself succeeds."""
+    from ..._lines import split_source_lines
+    from ..workspace import names_declared_in
+
+    placed = {
+        str(getattr(placed.spec, "name", "") or "").upper()
+        for found in views.views
+        for placed in found.fields
+    }
+    # Only the record decoded: a member holding several level-01 records
+    # declares the others' fields too.
+    lines = split_source_lines(source)
+    records: dict[str, list[str]] = {}
+    current: list[str] = []
+    for line in lines:
+        names = names_declared_in(line)
+        head = re.match(r"^\s*(?:0?1|77)\s", line[7:72] if len(line) > 6 else line)
+        if names and head:
+            current = records.setdefault(next(iter(names)), [])
+        current.append(line)
+    text = "\n".join(records.get(views.record_name.upper(), lines))
+    missing = sorted(names_declared_in(text, pictured=True) - placed)
+    if missing:
+        response.caveat(
+            "incomplete-analysis",
+            f"{copybook} declares {len(missing)} field(s) the layout does not "
+            f"hold ({', '.join(missing[:5])}"
+            f"{', ...' if len(missing) > 5 else ''}): the member was read "
+            "badly, most often in the wrong source format",
+            "offsets and lengths after the first missing field are wrong",
+        )

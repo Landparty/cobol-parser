@@ -20,15 +20,18 @@ from collections.abc import Callable
 from typing import Annotated, Any
 
 import anyio.from_thread
+import anyio.lowlevel
 import anyio.to_thread
 from mcp.server.fastmcp import Context, FastMCP
 from mcp.server.fastmcp.prompts import Prompt
-from mcp.types import ToolAnnotations
+from mcp.types import CallToolResult, TextContent, ToolAnnotations
 from pydantic import Field
 
-from .envelope import DEFAULT_ANSWER_BYTES, fit_budget
+from .._version import __version__
+from .envelope import DEFAULT_ANSWER_BYTES, fit_budget, wire_text
 from .hints import add_hints
 from .prompts import PROMPTS
+from .tool_groups import ALL_TOOLS, TOOL_GROUPS
 from .tools import CobolTools
 from .workspace import Workspace
 
@@ -179,31 +182,6 @@ Depth = Annotated[
 ]
 
 
-#: The tools by group. ``--tools`` takes a profile, group or tool names.
-TOOL_GROUPS: dict[str, tuple[str, ...]] = {
-    "core": (
-        "codebase_overview",
-        "program_brief",
-        "explain_symbol",
-        "callers_of",
-        "impact_of_change",
-        "where_from",
-        "record_layout",
-        "lint",
-        "business_rules",
-        "read_source",
-        "read_procedure",
-        "find_statements",
-        "slice",
-        "check_claims",
-    ),
-    "data": ("decode_record", "gen_fixtures", "diff_programs"),
-    "jcl": ("jcl_job", "jobs_running", "dataset_users"),
-}
-
-ALL_TOOLS: tuple[str, ...] = tuple(t for g in TOOL_GROUPS.values() for t in g)
-
-
 def select_tools(spec: str | None, workspace: Workspace) -> set[str]:
     """The tool names *spec* enables over *workspace*.
 
@@ -268,6 +246,24 @@ def compact_schema(schema: dict[str, Any]) -> dict[str, Any]:
     return result
 
 
+def _on_the_wire(
+    tool: Callable[..., Any],
+) -> Callable[..., Any]:
+    """*tool* answering with the result :func:`~.envelope.fit_budget`
+    measured: the structured copy plus a compact text copy. Left to itself,
+    FastMCP pretty-prints the text copy, which made an answer cost about
+    three times the budget it had been cut to."""
+
+    async def wired(**kwargs: Any) -> CallToolResult:
+        result: dict[str, Any] = await tool(**kwargs)
+        return CallToolResult(
+            content=[TextContent(type="text", text=wire_text(result))],
+            structuredContent=result,
+        )
+
+    return wired
+
+
 def build_server(
     workspace: Workspace,
     tools_spec: str | None = "all",
@@ -282,16 +278,26 @@ def build_server(
     server = FastMCP(
         "cobol-parser", instructions=instructions_for(enabled), log_level="WARNING"
     )
+    # serverInfo.version: FastMCP takes no version and the low-level server
+    # then reports the MCP SDK's own (1.30.0), not this package's.
+    server._mcp_server.version = __version__
 
     async def off_loop(
         name: str,
         call: Callable[[], dict[str, Any]],
         ctx: MCPContext | None = None,
     ) -> dict[str, Any]:
+        # Taken here, on the event loop: the reporter is called from the
+        # worker thread *and* from the warm-up thread, which anyio did not
+        # start and so cannot reach the loop without the token.
+        reporter = (
+            _progress_reporter(ctx, anyio.lowlevel.current_token()) if ctx else None
+        )
+
         def locked() -> dict[str, Any]:
             # The parse cache and the stdout redirect are process-wide.
             with workspace.lock:
-                workspace.progress = _progress_reporter(ctx) if ctx else None
+                workspace.progress = reporter
                 try:
                     result = call()
                 finally:
@@ -824,6 +830,7 @@ def build_server(
         registered = server._tool_manager.get_tool(tool.__name__)
         if registered is not None:
             registered.parameters = compact_schema(registered.parameters)
+            registered.fn = _on_the_wire(registered.fn)
     for spec in PROMPTS:
         server.add_prompt(
             Prompt.from_function(
@@ -839,10 +846,11 @@ PROGRESS_INTERVAL = 1.0
 
 def _progress_reporter(
     ctx: MCPContext,
+    token: Any = None,
 ) -> Callable[[float, float | None, str], None]:
-    """A reporter the worker thread calls, forwarding to *ctx* on the event
-    loop at most once a :data:`PROGRESS_INTERVAL`. Without a progress token
-    from the client, ``report_progress`` sends nothing."""
+    """A reporter any thread may call, forwarding to *ctx* on the event loop
+    *token* names at most once a :data:`PROGRESS_INTERVAL`. Without a
+    progress token from the client, ``report_progress`` sends nothing."""
     last = [0.0]
 
     def report(done: float, total: float | None, message: str) -> None:
@@ -850,7 +858,7 @@ def _progress_reporter(
         if now - last[0] < PROGRESS_INTERVAL:
             return
         last[0] = now
-        anyio.from_thread.run(ctx.report_progress, done, total, message)
+        anyio.from_thread.run(ctx.report_progress, done, total, message, token=token)
 
     return report
 
