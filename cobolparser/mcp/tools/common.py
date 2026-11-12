@@ -6,6 +6,7 @@ helpers more than one tool calls (:func:`_attempt`, :func:`_notes`,
 from __future__ import annotations
 
 import functools
+import inspect
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -73,7 +74,9 @@ class BaseTools:
     def __init_subclass__(cls, **kwargs: Any) -> None:
         super().__init_subclass__(**kwargs)
         for name, value in list(vars(cls).items()):
-            if not name.startswith("_") and callable(value):
+            # Plain functions only: a staticmethod or classmethod wrapped
+            # as an instance method would be handed the wrong first argument.
+            if not name.startswith("_") and inspect.isfunction(value):
                 setattr(cls, name, _with_site_settings(value))
 
     # -- PL/I and assembler ---------------------------------------------------
