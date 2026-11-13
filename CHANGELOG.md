@@ -35,6 +35,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 * **A copybook that opens with the tail of a statement is refused as a
   record.** A member starting `USING WS-A WS-B.` (or `END-IF`, `GIVING`,
   `INTO`, ...) is PROCEDURE DIVISION code, no longer a 0-byte record.
+* **`line-length` treats IDENTIFICATION DIVISION comment-entries as
+  comments.** Text after `AUTHOR.`, `INSTALLATION.`, `DATE-WRITTEN.`,
+  `DATE-COMPILED.`, `SECURITY.` or `REMARKS.` (and its Area B continuation
+  lines) is a comment to the compiler, so a word cut at column 72 or text
+  past column 80 there is no longer reported, as for comment lines and `*>`.
 * **Stray text after a column-72 period is an info, not "a cut word".**
   The line-length warning said the word was cut short when column 72 held
   the statement's period.

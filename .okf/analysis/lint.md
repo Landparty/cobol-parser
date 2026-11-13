@@ -308,13 +308,15 @@ parse judged it (program: `preprocess_fixed`, else the detector; copybook:
 FREE`, has no limit. `line_length_findings(path, text, free_lines)` per file:
 
 * `LINE_PAST_COLUMN_80` at column 81: **error**; not reported at all when the
-  text past column 80 is all comment (a comment line, or an inline `*>` outside
-  a literal that starts before column 81; `_comment_start`): nothing the
-  compiler reads is lost (sweep O3). The record is 80 columns on the mainframe.
+  text past column 80 is all comment (a comment line, an inline `*>` outside
+  a literal that starts before column 81, `_comment_start`; or the
+  comment-entry of `AUTHOR.`, `INSTALLATION.`, `DATE-WRITTEN.`,
+  `DATE-COMPILED.`, `SECURITY.` or `REMARKS.`, `_comment_entry_columns`):
+  nothing the compiler reads is lost (sweep O3). The record is 80 columns on the mainframe.
 * `TEXT_PAST_COLUMN_72` at column 73, **warning**: a word runs across the
   72/73 edge (both columns non-blank), so the compiler keeps a cut word.
-  Judged as `normalize_fixed_format`'s own warning: not on a comment line or
-  inside `*>`, not a lone `.`, not a numeric stamp filling 73-80 (or a shorter
+  Judged as `normalize_fixed_format`'s own warning: not on a comment line,
+  inside `*>` or inside a comment-entry, not a lone `.`, not a numeric stamp filling 73-80 (or a shorter
   one under `_has_identification_stamp_convention`), and not a tail with the
   shape of the file's own stamps (`_identification_shapes`: digits `9`,
   letters `A`, seen on at least `MIN_ID_STAMP_EVIDENCE_LINES` lines whose
@@ -323,6 +325,13 @@ FREE`, has no limit. `line_length_findings(path, text, free_lines)` per file:
   text after it is stray (root-cause table 2026-11-13, O3). Not when the `.`
 is inside a literal still open at column 72 (`_literal_open_before_col_72`,
 #908): the literal is cut, so it stays a warning.
+
+Comment-entries are found by the lexer's own `_comment_entry_starts`, run
+over each fixed-format line's columns 8-72 with comment lines blanked, so the
+rule and the parse agree on where an entry starts and ends (an Area B line
+continues it; the next Area A line, or a COPY/EJECT/SKIP/TITLE, ends it).
+Program text before the entry on the same line, and every line after it,
+is still checked; `AUTHOR.` outside the IDENTIFICATION DIVISION is code.
 
 On `examples/cobol/` + `tests/samples/` (566 programs): 0 errors; the 86
 warnings this rule once gave were all comment lines past column 80, which are

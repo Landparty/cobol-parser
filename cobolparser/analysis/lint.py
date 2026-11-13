@@ -915,6 +915,42 @@ def _comment_start(line: str, indicators: Iterable[str]) -> int | None:
     return None
 
 
+def _comment_entry_columns(
+    lines: list[str], indicators: Iterable[str], free_lines: list[bool] | None
+) -> dict[int, int]:
+    """Line index -> 0-based column where a comment-entry's text starts.
+
+    ``AUTHOR.``, ``INSTALLATION.``, ``DATE-WRITTEN.``, ``DATE-COMPILED.``,
+    ``SECURITY.`` and ``REMARKS.`` take a comment-entry: free text the
+    compiler treats as a comment, up to the next Area A line. Found exactly
+    as the lexer finds it (:func:`~cobolparser.lexer._comment_entry_starts`),
+    over each fixed-format line's columns 8-72 (comment lines blanked, so
+    they neither end an entry nor start one); a line after ``>>SOURCE FORMAT
+    FREE`` is passed whole and its offset is its own column.
+    """
+    from .._source_text.normalize import TEXT_END_COL
+    from ..lexer import _COMMENT_ENTRY_ANY_RE, _comment_entry_starts
+
+    marks = frozenset(indicators)
+    area: list[str] = []
+    for index, raw in enumerate(lines):
+        line = raw.rstrip("\r\n").expandtabs(8)
+        if free_lines is not None and index < len(free_lines) and free_lines[index]:
+            area.append(line)
+        elif len(line) > 6 and line[6] in marks:
+            area.append("")
+        else:
+            area.append(line[7:TEXT_END_COL])
+    source = "\n".join(area)
+    if not _COMMENT_ENTRY_ANY_RE.search(source):
+        return {}
+    columns: dict[int, int] = {}
+    for index, start in _comment_entry_starts(source, area).items():
+        free = free_lines is not None and index < len(free_lines) and free_lines[index]
+        columns[index] = start if free else start + 7
+    return columns
+
+
 def _id_shape(tail: str) -> str:
     """The shape of an identification-area tail: digits as ``9``, letters as
     ``A``, anything else as itself (``IX2094.2`` -> ``AA9999.9``)."""
@@ -965,9 +1001,11 @@ def line_length_findings(
       fixed-format record is 80 columns. Anything after column 80 is lost
       when the member goes to a mainframe library (an RECFM=FB LRECL=80
       dataset), and was never program text anyway. A line whose text past
-      column 80 is all comment (a comment line, or an inline ``*>`` comment
-      that starts before column 81) is not reported: the transfer truncates
-      it, but nothing the compiler reads is lost.
+      column 80 is all comment (a comment line, an inline ``*>`` comment
+      that starts before column 81, or the comment-entry of an ``AUTHOR.``,
+      ``REMARKS.`` or other IDENTIFICATION DIVISION comment paragraph) is not
+      reported: the transfer truncates it, but nothing the compiler reads is
+      lost.
     * **Text cut at column 72** (warning, ``kind`` ``TEXT_PAST_COLUMN_72``):
       columns 73-80 are the identification area, which the compiler ignores.
       When a word runs across the 72/73 boundary, the part in 73+ is dropped
@@ -976,8 +1014,10 @@ def line_length_findings(
       ``normalize_fixed_format`` judges it for its own warning: a numeric
       identification stamp (the full 73-80 field, or a shorter one when the
       file shows that convention) and a lone terminating period are not
-      flagged, and neither is a comment line or a cut inside an inline
-      ``*>`` comment. Neither is a tail with the
+      flagged, and neither is a comment line, a cut inside an inline
+      ``*>`` comment or a cut inside a comment-entry (the compiler reads a
+      comment-entry as a comment, so a word cut there changes nothing).
+      Neither is a tail with the
       shape of the file's own identification stamps (NIST's ``IX2094.2``,
       see :func:`_identification_shapes`).
 
@@ -998,6 +1038,7 @@ def line_length_findings(
     lines = split_source_lines(text)
     stamps: bool | None = None
     shapes: set[str] | None = None
+    entries: dict[int, int] | None = None
     findings: list[LintFinding] = []
 
     def found(
@@ -1025,8 +1066,14 @@ def line_length_findings(
             continue
         line_no = index + 1
         comment_at = _comment_start(line, ALL_COMMENT_INDICATORS)
-        # Past column 80 only inside a comment (a comment line, or an inline
-        # ``*>`` comment that starts before column 81) loses nothing the
+        if entries is None:
+            entries = _comment_entry_columns(lines, ALL_COMMENT_INDICATORS, free_lines)
+        entry_at = entries.get(index)
+        if entry_at is not None and (comment_at is None or entry_at < comment_at):
+            comment_at = entry_at
+        # Past column 80 only inside a comment (a comment line, an inline
+        # ``*>`` comment that starts before column 81, or a comment-entry
+        # such as ``AUTHOR.``'s text) loses nothing the
         # compiler reads, and editors that wrap at 80 make such lines
         # common: not reported at all.
         in_comment = comment_at is not None and comment_at < IDENTIFICATION_END_COL
