@@ -331,7 +331,11 @@ elementary fields (`_fields_for_names`), one row from a
 `_sub_seed(seed, "ENTRY", program)` `ValueFactory`, witnesses
 pinned through `_value_for` like any fixture; and a `stub` expectation per
 field whose path includes a LINKAGE name xref gives role `write`, plus the
-RETURNING item. `generate_with_scenarios` passes the names to
+RETURNING item. A field written only through a REDEFINES of it (an
+elementary `LK-RC-X REDEFINES LK-RC`, or `01 LK-ALIAS REDEFINES LK-TOTAL`)
+counts too: `_names_written_through_overlays` maps each written item's byte
+range onto the USING record's elementary items (#907); an ambiguous offset
+is left out. `generate_with_scenarios` passes the names to
 `ConstraintExtractor.extract(..., extra_fed_names=...)`, so branches on the
 parameters are planned; `verify_scenario` and `_single_row_seeds` read the
 row too. Off by default: no `entry_parameters` key, identical values.

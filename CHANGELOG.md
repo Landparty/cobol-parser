@@ -17,6 +17,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+* **A column-72 period inside a literal is a warning again.** lint's
+  `TEXT_PAST_COLUMN_72` reported it as an info saying nothing is cut, though
+  the literal loses its tail (#908).
+* **Entry-parameter stubs for fields written through a REDEFINES.**
+  `gen-fixtures` with entry parameters now asserts a USING field the
+  program writes only through a REDEFINES of it, or through an 01-level
+  REDEFINES of the USING record (#907).
 * **No false PERFORM/GO TO cycle for a PERFORM of the next paragraph.**
   `21500. PERFORM 21510.` just above 21510, falling on to a paragraph that
   PERFORMs 21500, is no longer reported by recursion-check (or lint): a
