@@ -7,4 +7,4 @@ package; this module has no imports, so anything may read it. release-please
 rewrites the line marked ``x-release-please-version``.
 """
 
-__version__ = "4.0.0"  # x-release-please-version
+__version__ = "4.0.1"  # x-release-please-version

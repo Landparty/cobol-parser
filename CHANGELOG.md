@@ -1048,6 +1048,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   section's `min_severity` and `fail_on` also reach `call-check` and
   `widen-check`). A tracked 1.4 MB `coverage.json` is removed and ignored.
 
+## [4.0.1](https://github.com/Landparty/cobol-parser/compare/v4.0.0...v4.0.1) (2026-11-13)
+
+
+### Bug Fixes
+
+* column-72 period inside a literal; entry stubs written through REDEFINES ([842c7e4](https://github.com/Landparty/cobol-parser/commit/842c7e4f45dc96b41fa545f33b41bb9ed7d4686e))
+* column-72 period inside a literal; entry stubs written through REDEFINES ([a821ab2](https://github.com/Landparty/cobol-parser/commit/a821ab201a777986916b216490d5398aa3dcbe2c))
+* **lint:** line-length treats comment-entries as comments ([a6abdaa](https://github.com/Landparty/cobol-parser/commit/a6abdaa1d3f9a08f1ac46e2d420e252ef353f544))
+* **lint:** line-length treats comment-entries as comments ([f5cd9ed](https://github.com/Landparty/cobol-parser/commit/f5cd9edb57f7b091ca4ada9002ffe003a49dae94))
+
 ## [4.0.0](https://github.com/Landparty/cobol-parser/compare/v3.6.0...v4.0.0) (2026-11-13)
 
 
