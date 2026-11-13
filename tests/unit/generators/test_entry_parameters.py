@@ -107,3 +107,51 @@ def test_extractor_treats_extra_fed_names_as_boundary_fed():
         ast, index, report, extra_fed_names=["LK-PARMS"]
     )
     assert set(fed.branches[0].arms) == {"THEN", "ELSE"}
+
+
+REDEFINED_RC = """\
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. SUBR.
+       DATA DIVISION.
+       LINKAGE SECTION.
+       01  LK-AREA.
+           05  LK-IN         PIC X(4).
+           05  LK-RC         PIC 9(4).
+           05  LK-RC-X REDEFINES LK-RC PIC X(4).
+       PROCEDURE DIVISION USING LK-AREA.
+       MAIN-PARA.
+           IF LK-IN = 'ABCD'
+              MOVE '0000' TO LK-RC-X
+           END-IF
+           GOBACK.
+"""
+
+RECORD_ALIAS = """\
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. SUBR4.
+       DATA DIVISION.
+       LINKAGE SECTION.
+       01  LK-TOTAL.
+           05  LK-T1         PIC 9(4).
+           05  LK-T2         PIC 9(4).
+       01  LK-ALIAS REDEFINES LK-TOTAL PIC X(4).
+       PROCEDURE DIVISION USING LK-TOTAL.
+       MAIN-PARA.
+           MOVE SPACES TO LK-ALIAS
+           GOBACK.
+"""
+
+
+def _stub_refs(source: str) -> list[str]:
+    bundle = _bundle(source, mode="happy")
+    return [e.ref for e in bundle.scenarios[0].expectations if e.kind == "stub"]
+
+
+def test_a_field_written_through_its_redefines_is_a_stub():
+    # #907: the program writes LK-RC's storage through LK-RC-X.
+    assert _stub_refs(REDEFINED_RC) == ["LK-AREA.LK-RC"]
+
+
+def test_a_record_written_through_an_01_redefines_marks_the_overlapped_bytes():
+    # LK-ALIAS covers LK-TOTAL's first 4 bytes only: LK-T2 is not written.
+    assert _stub_refs(RECORD_ALIAS) == ["LK-TOTAL.LK-T1"]

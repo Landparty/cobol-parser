@@ -320,7 +320,9 @@ FREE`, has no limit. `line_length_findings(path, text, free_lines)` per file:
   letters `A`, seen on at least `MIN_ID_STAMP_EVIDENCE_LINES` lines whose
   column 72 is blank; NIST's `IX2094.2`). When column 72 is the
   statement's period, nothing is cut: the finding is **info** and says the
-  text after it is stray (root-cause table 2026-11-13, O3).
+  text after it is stray (root-cause table 2026-11-13, O3). Not when the `.`
+is inside a literal still open at column 72 (`_literal_open_before_col_72`,
+#908): the literal is cut, so it stays a warning.
 
 On `examples/cobol/` + `tests/samples/` (566 programs): 0 errors; the 86
 warnings this rule once gave were all comment lines past column 80, which are

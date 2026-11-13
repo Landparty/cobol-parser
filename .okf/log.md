@@ -14,6 +14,13 @@ deliberate. Anything else appended to the bottom is a mistake: five
 entries, including both 2026-09-15 sections, were found there on
 2026-09-15 and moved back up.
 
+## 2026-11-13 -- column-72 period in a literal, REDEFINES entry outputs
+
+- `analysis/lint.md`: a column-72 `.` inside an open literal keeps the
+  `TEXT_PAST_COLUMN_72` warning (#908).
+- `generators/fixtures.md`: entry-parameter stubs cover USING fields written
+  through a REDEFINES (#907).
+
 ## 2026-11-10 -- public API list, analyzer protocol, upward imports
 
 - New user guide `docs/public-api.md` (tiers; the facade list is checked

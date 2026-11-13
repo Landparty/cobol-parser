@@ -1061,7 +1061,7 @@ def line_length_findings(
             # The file's own identification-area convention (NIST's
             # ``IX2094.2``): the stamp abuts column 72, nothing is cut.
             continue
-        if before == ".":
+        if before == "." and not _literal_open_before_col_72(line):
             # The statement ends at column 72 with its period: nothing the
             # compiler reads is cut, the text after it is stray (2026-11-13
             # root-cause table, O3).
@@ -1086,6 +1086,23 @@ def line_length_findings(
             "so the word it ends is cut short",
         )
     return findings
+
+
+def _literal_open_before_col_72(line: str) -> bool:
+    """True when an alphanumeric literal opened in columns 8-71 of *line* is
+    still open at column 72, so a ``.`` there is literal text, not the
+    statement's period (#908). A doubled quote toggles twice and stays
+    balanced, which is what the compiler reads too."""
+    from .._source_text.normalize import TEXT_END_COL
+
+    quote: str | None = None
+    for ch in line[7 : TEXT_END_COL - 1]:
+        if quote is None:
+            if ch in "'\"":
+                quote = ch
+        elif ch == quote:
+            quote = None
+    return quote is not None
 
 
 def add_line_length_findings(

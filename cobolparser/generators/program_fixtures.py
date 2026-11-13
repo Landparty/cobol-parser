@@ -36,6 +36,7 @@ from ..analysis.invocation_counts import (
 from ..analysis.xref import ROLE_WRITE
 from ..layout.errors import ProgramLayoutError
 from ..layout.fields import FieldSpec, assign_columns, flatten_record
+from ..layout.offsets import compute_record_layout
 from ..layout.options import DataGeneratorOptions
 from ..layout.program import ProgramLayoutIndex
 from ..layout.values import ValueFactory
@@ -1246,6 +1247,7 @@ class ProgramFixtureGenerator:
             )
             layouts.setdefault(f"ENTRY:{program}", fields)
         written = self._written_linkage_names(ctx)
+        written |= self._names_written_through_overlays(index, names, written)
         outputs = [
             spec
             for spec in fields
@@ -1273,6 +1275,49 @@ class ProgramFixtureGenerator:
             if entry.section == "LINKAGE"
             and any(ref.role == ROLE_WRITE for ref in entry.references)
         }
+
+    @staticmethod
+    def _names_written_through_overlays(
+        index: ProgramLayoutIndex, names: list[str], written: set[str]
+    ) -> set[str]:
+        """Names of USING fields whose storage the program writes through a
+        REDEFINES (#907): ``MOVE '0000' TO LK-RC-X`` where ``LK-RC-X
+        REDEFINES LK-RC``, or a move to ``01 LK-ALIAS REDEFINES LK-TOTAL``.
+
+        A written item's byte range marks every elementary item of the same
+        record that overlaps it. An item whose offset is ambiguous (inside
+        a variable-length table) is left out: absent rather than guessed."""
+        linkage = index.linkage_records()
+        found: set[str] = set()
+        for name in names:
+            record = index.record_named(name)
+            if record is None:
+                continue
+            base = record.name.upper()
+            views = [record] + [
+                other
+                for other in linkage
+                if other is not record and (other.redefines or "").upper() == base
+            ]
+            ranges = [
+                (item.byte_offset, item.byte_offset + item.byte_length)
+                for view in views
+                for item in compute_record_layout(view)
+                if item.byte_offset is not None
+                and not item.offset_ambiguous
+                and item.name.upper() in written
+            ]
+            if not ranges:
+                continue
+            for item in compute_record_layout(record):
+                if item.is_group or item.byte_offset is None:
+                    continue
+                if item.offset_ambiguous or item.byte_length <= 0:
+                    continue
+                start, end = item.byte_offset, item.byte_offset + item.byte_length
+                if any(lo < end and start < hi for lo, hi in ranges):
+                    found.add(item.name.upper())
+        return found
 
     @staticmethod
     def _entry_paragraph(ast: CobolProgram) -> str | None:

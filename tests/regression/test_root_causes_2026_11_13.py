@@ -158,6 +158,20 @@ class TestO3StrayTextAfterPeriod:
         assert finding.severity == "warning"
         assert "cut short" in finding.message
 
+    def test_period_in_column_72_inside_a_literal_is_a_warning(self) -> None:
+        # #908: the column-72 ``.`` is literal text, so ``50 USD'.`` is cut.
+        (finding,) = self._findings(
+            self._line("           DISPLAY 'AMOUNT IS 12." + "X" * 37, ".50 USD'.")
+        )
+        assert finding.severity == "warning"
+        assert "cut short" in finding.message
+
+    def test_closed_literal_before_period_in_column_72_is_info(self) -> None:
+        (finding,) = self._findings(
+            self._line("           DISPLAY 'IT''S' 'OK'", ".ATE")
+        )
+        assert finding.severity == "info"
+
 
 class TestO5StrictBudget:
     def _result(self) -> dict[str, Any]:
