@@ -193,6 +193,22 @@ def explain_condition(condition: str) -> str | None:
     return "; ".join(words)
 
 
+def add_condition(row: dict[str, Any], step: JobStep) -> None:
+    """*step*'s ``condition`` (and what a ``COND=`` means) on *row*, plus
+    ``if_condition`` when the step also sits inside an ``IF``/``ELSE``:
+    ``condition`` is then the ``COND=`` alone, and the step runs only when
+    both allow it (#896)."""
+    if not step.condition:
+        return
+    row["condition"] = step.condition
+    meaning = explain_condition(step.condition)
+    if meaning:
+        row["condition_means"] = meaning
+    if_condition = getattr(step, "if_condition", None)
+    if getattr(step, "cond", None) and if_condition:
+        row["if_condition"] = if_condition
+
+
 def _step_row(
     step: JobStep, locator: _Locator, *, instream: bool = False
 ) -> dict[str, Any]:
@@ -208,11 +224,7 @@ def _step_row(
         row[key] = step.procedure
     if step.parm is not None:
         row["parm"] = step.parm
-    if step.condition:
-        row["condition"] = step.condition
-        meaning = explain_condition(step.condition)
-        if meaning:
-            row["condition_means"] = meaning
+    add_condition(row, step)
     row["dds"] = [
         _dd_row(dd, step, locator, instream=instream) for dd in step.dd_statements
     ]
@@ -423,6 +435,13 @@ def run_order(steps: list[JobStep]) -> str:
         when = explain_condition(step.condition) if step.condition else None
         if when:
             when = when.split("so it ", 1)[-1]
+        if_condition = getattr(step, "if_condition", None)
+        if if_condition and getattr(step, "cond", None):
+            # Inside an IF as well as COND=: both must allow it (#896).
+            gate = f"only if IF {if_condition} holds"
+            rest = when.removeprefix("runs ").removeprefix("only if ") if when else ""
+            when = f"{gate} and {rest}" if rest else gate
+        if when:
             parts.append(f"{step.name} ({what}, {when})")
         else:
             parts.append(f"{step.name} ({what})")

@@ -593,6 +593,17 @@ class Workspace:
         self._cache.clear()
         self._indexes.clear()
 
+    @contextlib.contextmanager
+    def site_settings(self) -> Iterator[None]:
+        """The config's process-wide analysis settings, for this thread and
+        the ``with`` block: ``project.abend_programs``, the site routines a
+        static CALL of which never returns (as the CLI applies it per file).
+        Every tool call and every facts computation runs inside it."""
+        from ..analysis._abend import using_site_abend_programs
+
+        with using_site_abend_programs(self.config.abend_programs):
+            yield
+
     def callee_directories(self, response: Response) -> list[str]:
         """``cobol.yml``'s ``callee_path`` directories that are under the
         root. A callee is a whole program, not a copybook member, so a

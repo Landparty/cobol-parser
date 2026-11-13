@@ -306,6 +306,30 @@ def detect_fixed_format(source: str) -> bool:
 #: followed by blanks up to column 7 (``10     01  REC.``) does not match.
 _FREE_FORM_LEVEL_RE = re.compile(r"^ {0,5}\d{1,2}[ .]")
 
+#: A level number ending exactly in column 6, a blank column 7 and a data
+#: name from column 8 (``    05 WS-A PIC X(3).``): a free-form entry
+#: indented four spaces (#898). Read as fixed format, columns 1-6 go and
+#: ``WS-A`` is left in Area A with no level number, which no data entry
+#: is; a sequence number (``000100``) or a level number at column 8 after a
+#: short one (``    10 01 REC.``) does not match.
+_FREE_FORM_LEVEL_AT_COL6_RE = re.compile(
+    r"^(?: {4}\d\d| {5}\d) (?!\d+(?:[ .]|$))[A-Za-z0-9]"
+)
+
+
+def _level_in_sequence_area(line: str) -> bool:
+    """Whether *line* holds a level number in columns 1-6 whose data name a
+    fixed-format reader would cut off or leave without its level."""
+    match = _FREE_FORM_LEVEL_RE.match(line)
+    if match and line[match.end() : INDICATOR_COL].strip():
+        return True
+    level = _FREE_FORM_LEVEL_AT_COL6_RE.match(line)
+    return bool(level) and _is_level_number(line[: INDICATOR_COL - 1].strip())
+
+
+def _is_level_number(text: str) -> bool:
+    return text.isdigit() and (1 <= int(text) <= 49 or int(text) in (66, 77, 88))
+
 
 def _member_line_vote(line: str) -> int:
     """+1 for a fixed-format line, -1 for a free-format one, 0 for neither.
@@ -315,8 +339,9 @@ def _member_line_vote(line: str) -> int:
     change tag (``CGOGP1``, ``CR 12``), a banner typed one column early, a
     stray quote. Only a positive free-form signal votes the other way: a
     ``*>`` comment opening before column 7, a level number whose data name
-    starts in the sequence area, code shorter than the sequence area, or a
-    character that is no indicator in column 7.
+    starts in the sequence area (or that ends in column 6 with the name
+    from column 8), code shorter than the sequence area, or a character
+    that is no indicator in column 7.
     """
     if _is_numbered_blank_line(line):
         return 1
@@ -325,8 +350,7 @@ def _member_line_vote(line: str) -> int:
         return 0
     if stripped.startswith("*>") and len(line) - len(stripped) < INDICATOR_COL - 1:
         return -1
-    match = _FREE_FORM_LEVEL_RE.match(line)
-    if match and line[match.end() : INDICATOR_COL].strip():
+    if _level_in_sequence_area(line):
         return -1
     if len(line) < INDICATOR_COL:
         return -1
@@ -390,10 +414,7 @@ def member_format_votes(source: str) -> tuple[int, int, bool, bool]:
             fixed_only = fixed_only or _is_fixed_only_line(line)
         elif vote < 0:
             free += 1
-            match = _FREE_FORM_LEVEL_RE.match(line)
-            level_signal = level_signal or bool(
-                match and line[match.end() : INDICATOR_COL].strip()
-            )
+            level_signal = level_signal or _level_in_sequence_area(line)
     return fixed, free, fixed_only, level_signal
 
 

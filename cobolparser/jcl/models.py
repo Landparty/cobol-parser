@@ -164,6 +164,11 @@ class JobStep:
     ``condition`` carries ``COND=`` when coded, otherwise the text of the
     enclosing ``IF``/``ELSE`` (``NOT (...)`` inside an ``ELSE``, several
     nested conditions joined with ``AND``), otherwise ``None``.
+
+    A step inside an ``IF`` that also codes ``COND=`` runs only when both
+    allow it, and ``condition`` holds only the ``COND=``. ``if_condition``
+    (the enclosing ``IF``/``ELSE`` text, as above) and ``cond`` (the raw
+    ``COND=``) keep the two apart; each is ``None`` when absent (#896).
     """
 
     name: str
@@ -174,6 +179,8 @@ class JobStep:
     condition: str | None = None
     line: int = 0
     parameters: list[JclParameter] = field(default_factory=list)
+    if_condition: str | None = None
+    cond: str | None = None
 
     def effective_programs(self) -> list[str]:
         """The programs this step runs: ``PGM=``, or, for a launcher, what it
@@ -214,6 +221,8 @@ class JobStep:
             "procedure": self.procedure,
             "parm": self.parm,
             "condition": self.condition,
+            "if_condition": self.if_condition,
+            "cond": self.cond,
             "parameters": [p.to_dict() for p in self.parameters],
             "dd_statements": [d.to_dict() for d in self.dd_statements],
             "line": self.line,

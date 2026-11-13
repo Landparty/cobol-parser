@@ -283,9 +283,16 @@ def _cmd_health(args: argparse.Namespace) -> None:
     result, prof = _parse_result_or_fail(args)
     ast = result.ast
 
+    from ...scan import unexpanded_members
+
     # A partial AST is a quiet one: a file that mostly failed to parse used
-    # to grade "A". With the error count the grade is withheld (#397).
-    report = TechnicalDebtAnalyzer().analyze(ast, parse_error_count=len(result.errors))
+    # to grade "A". With the error count the grade is withheld (#397); a
+    # COPY member not found keeps the grade with a caveat naming it (#897).
+    report = TechnicalDebtAnalyzer().analyze(
+        ast,
+        parse_error_count=len(result.errors),
+        unexpanded_copybooks=unexpanded_members(result),
+    )
 
     _emit_report(report.to_dict(), args, prof, ast)
 

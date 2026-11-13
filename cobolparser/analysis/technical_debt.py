@@ -17,6 +17,7 @@ so a caller who disagrees with the house default can say so explicitly.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -184,6 +185,7 @@ class TechnicalDebtAnalyzer:
         top_n: int = 5,
         parse_error_count: int = 0,
         copybook_error: str | None = None,
+        unexpanded_copybooks: Sequence[str] = (),
     ) -> TechnicalDebtReport:
         """Analyze a COBOL program and compute its technical-debt score.
 
@@ -200,7 +202,10 @@ class TechnicalDebtAnalyzer:
         when the caller fell back to an unexpanded parse (``scan``'s
         ``copybook_error``): that parse is usually error-free, but it graded
         a program without the declarations its members hold, so it withholds
-        the grade the same way.
+        the grade the same way. *unexpanded_copybooks* are the COPY members
+        the parse left as written (not found): the grade is kept, but a
+        caveat names them, since the score covers the program without
+        whatever code or data they hold (#897).
         """
         ctx = ProgramContext.of(ast, flow=flow_report)
         ast = ctx.ast
@@ -253,6 +258,13 @@ class TechnicalDebtAnalyzer:
             caveats.append(
                 f"copybook expansion failed ({copybook_error}): the score "
                 "covers the program without its copybooks, so no grade is given"
+            )
+        if unexpanded_copybooks and not copybook_error:
+            names = list(dict.fromkeys(unexpanded_copybooks))
+            caveats.append(
+                f"{len(names)} copybook member(s) were not expanded "
+                f"({', '.join(names)}): the score covers the program without "
+                "whatever code or data they hold"
             )
         graded = parse_error_count <= 0 and not copybook_error
 
