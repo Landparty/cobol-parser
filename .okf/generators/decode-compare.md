@@ -85,7 +85,8 @@ size model.
 [record-data.md](record-data.md#parsing-a-copybook); `data-items` and the
 MCP server wrap the same way through `wrap_copybook_fragment`, #536; the
 fragment's format comes from the same detector copybook expansion uses. A
-member of PROCEDURE DIVISION code is refused rather than wrapped, see
+member of PROCEDURE DIVISION code -- including one that opens with the tail
+of a statement, `USING WS-A WS-B.` -- is refused rather than wrapped, see
 `procedure_code_start` there.)
 
 `RecordDecoder(views, opts=None, *, record_length=None, varying=None,

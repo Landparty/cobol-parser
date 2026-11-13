@@ -555,6 +555,7 @@ class ConstraintExtractor:
         }
 
         status_guard = _StatusGuards(boundary_report, index)
+        derived = _DerivedFlags(procedure, index, fed_names)
         for paragraph_name, statement, enclosing in _walk_statements(
             procedure, guards=True, transparent=status_guard.passes_on_success
         ):
@@ -568,6 +569,7 @@ class ConstraintExtractor:
                     report,
                     enclosing,
                     carriers,
+                    derived,
                 )
             elif isinstance(statement, EvaluateStatement):
                 self._extract_evaluate(
@@ -612,12 +614,19 @@ class ConstraintExtractor:
         report: ConstraintReport,
         enclosing: tuple[tuple[str, str], ...] = (),
         carriers: _Carriers | None = None,
+        derived: _DerivedFlags | None = None,
     ) -> None:
         branch_id = _branch_id(paragraph_name, statement.location)
         line = statement.location.line if statement.location else None
         column = statement.location.column if statement.location else None
         arms: dict[str, list[FieldConstraint]] = {}
         correlations: dict[str, list[CorrelationConstraint]] = {}
+        condition: Any = statement.condition
+        negated = False
+        rewritten = derived.rewrite(condition) if derived is not None else None
+        if rewritten is not None:
+            # A guard on a program flag: the condition that sets the flag.
+            condition, negated = rewritten
         unsupported: list[str] = []
         site = (
             _CarrierSite(carriers, paragraph_name, line or 0, enclosing)
@@ -626,8 +635,8 @@ class ConstraintExtractor:
         )
 
         then_variants = _extract_expr(
-            statement.condition,
-            False,
+            condition,
+            negated,
             index,
             fed_names,
             f"IF@{line}",
@@ -640,8 +649,8 @@ class ConstraintExtractor:
         _register_variants(arms, "THEN", then_variants, correlations)
 
         else_variants = _extract_expr(
-            statement.condition,
-            True,
+            condition,
+            not negated,
             index,
             fed_names,
             f"IF@{line}/ELSE",
@@ -3020,6 +3029,166 @@ class _StatusGuards:
             "GREATER_OR_EQUAL": ordering >= 0,
             "LESS_OR_EQUAL": ordering <= 0,
         }.get(expr.operator)
+
+
+class _DerivedFlags:
+    """Program flags whose value a guard tests, rewritten as the condition
+    that sets them (2026-11-13 root-cause table, O6).
+
+    ``PERFORM 1000-CHECK`` with ``IF IN-CODE = SPACES MOVE 'Y' TO WS-ERR``,
+    then ``IF WS-ERR = 'Y' GOBACK``: no fixture row feeds WS-ERR, so the
+    guard's staying arm had no constraint and every scenario below it was
+    unverified. When the flag is set in exactly one place, that place is
+    one arm of one IF (nothing else enclosing it), and the flag otherwise
+    keeps its VALUE, the flag holds the set value exactly when that IF's
+    condition picked the arm -- so the guard is extracted as that condition
+    (``IN-CODE = SPACES``), which the rows do feed.
+
+    "Exact by construction, or absent": a flag is used only when all of
+    these hold, otherwise the guard stays as before --
+
+    * it is not boundary-fed, has a VALUE, and does not REDEFINE;
+    * the only statement writing it (or one of its level-88 names, or a
+      group above it) is one ``MOVE literal TO it`` or ``SET name-88 TO
+      TRUE`` whose value differs from the VALUE;
+    * that statement's only enclosing arm is the THEN or ELSE of an IF;
+    * the guard's condition tests nothing but the flag.
+
+    Assumed, not checked: the setting IF runs before the guard, on the same
+    record (the check paragraph is PERFORMed first, as in the usual shape).
+    """
+
+    def __init__(
+        self,
+        procedure: CobolDivision,
+        index: ProgramLayoutIndex,
+        fed_names: set[str],
+    ) -> None:
+        self._index = index
+        #: qualified flag name -> (VALUE, set value, setting IF's condition,
+        #: set in its ELSE).
+        self.flags: dict[str, tuple[str, str, Any, bool]] = {}
+        ifs: dict[str, IfStatement] = {}
+        writes: dict[str, list[tuple[Any, str, tuple[tuple[str, str], ...]]]] = {}
+        unresolved: set[str] = set()
+        for paragraph, statement, enclosing in _walk_statements(procedure):
+            if isinstance(statement, IfStatement):
+                ifs[_branch_id(paragraph, statement.location)] = statement
+            for target in _write_targets(statement):
+                resolved = index.resolve(str(target))
+                if resolved is None:
+                    unresolved.add(bare_item_name(str(target)).upper())
+                    continue
+                writes.setdefault(resolved.spec.qualified_name.upper(), []).append(
+                    (statement, str(target), tuple(enclosing))
+                )
+        for qualified, sites in writes.items():
+            if len(sites) != 1:
+                continue
+            statement, target, enclosing = sites[0]
+            if len(enclosing) != 1 or enclosing[0][1] not in ("THEN", "ELSE"):
+                continue
+            setting_if = ifs.get(enclosing[0][0])
+            resolved = index.resolve(target)
+            if setting_if is None or resolved is None:
+                continue
+            spec = resolved.spec
+            if (
+                _is_boundary_fed(resolved, fed_names)
+                or spec.redefines
+                or {part.upper() for part in spec.path[:-1]} & unresolved
+            ):
+                continue
+            initial = _flag_literal(spec.value_clause)
+            value = self._written_value(statement, target)
+            if initial is None or value is None or _same_value(initial, value):
+                continue
+            self.flags[qualified] = (
+                initial,
+                value,
+                setting_if.condition,
+                enclosing[0][1] == "ELSE",
+            )
+
+    def _written_value(self, statement: Any, target: str) -> str | None:
+        if isinstance(statement, MoveStatement):
+            if len(statement.targets) != 1 or statement.is_corresponding:
+                return None
+            return _flag_literal(statement.source)
+        if isinstance(statement, SetStatement) and statement.set_type == "TRUE":
+            values = self._index.condition_values(target)
+            if values is not None and len(values) == 1:
+                return str(values[0])
+        return None
+
+    def rewrite(self, condition: Any) -> tuple[Any, bool] | None:
+        """``(condition, negate)`` to extract in place of *condition* when it
+        tests a derived flag, else None."""
+        flag = self._flag_of(condition)
+        if flag is None:
+            return None
+        initial, value, setting, in_else = self.flags[flag]
+        when_set = self._evaluate(condition, value)
+        when_initial = self._evaluate(condition, initial)
+        if when_set is None or when_initial is None or when_set == when_initial:
+            return None
+        # True when the flag was set: the setting arm's condition.
+        return setting, in_else if when_set else not in_else
+
+    def _flag_of(self, expr: Any) -> str | None:
+        while isinstance(expr, LogicalExpression) and expr.operator == "NOT":
+            expr = expr.left_condition
+        if not isinstance(expr, ConditionalExpression) or not isinstance(
+            expr.left_operand, str
+        ):
+            return None
+        resolved = self._index.resolve(expr.left_operand)
+        if resolved is None:
+            return None
+        qualified = resolved.spec.qualified_name.upper()
+        return qualified if qualified in self.flags else None
+
+    def _evaluate(self, expr: Any, value: str) -> bool | None:
+        if isinstance(expr, LogicalExpression):
+            if expr.operator != "NOT":
+                return None
+            inner = self._evaluate(expr.left_condition, value)
+            return None if inner is None else not inner
+        if not isinstance(expr, ConditionalExpression):
+            return None
+        if expr.operator == "CONDITION_NAME":
+            values = self._index.condition_values(str(expr.left_operand))
+            if values is None:
+                return None
+            return any(_same_value(value, str(v)) for v in values)
+        literal = _flag_literal(expr.right_operand)
+        if literal is None:
+            return None
+        if expr.operator == "EQUAL":
+            return _same_value(value, literal)
+        if expr.operator == "NOT_EQUAL":
+            return not _same_value(value, literal)
+        return None
+
+
+def _flag_literal(text: Any) -> str | None:
+    """The value of a quoted or integer literal, else None."""
+    if not isinstance(text, str):
+        return None
+    literal = text.strip()
+    if is_quoted_literal(literal):
+        return unquote_literal(literal)
+    if re.fullmatch(r"[+-]?\d+", literal):
+        return literal
+    return None
+
+
+def _same_value(a: str, b: str) -> bool:
+    """Whether two flag values are equal as COBOL compares them: numerically
+    when both are integers, else with trailing spaces ignored."""
+    if re.fullmatch(r"[+-]?\d+", a) and re.fullmatch(r"[+-]?\d+", b):
+        return int(a) == int(b)
+    return a.rstrip() == b.rstrip()
 
 
 def _leaves_list(statement: Any) -> bool:

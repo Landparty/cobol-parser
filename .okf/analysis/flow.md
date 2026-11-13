@@ -538,13 +538,21 @@ Finds recursion-driven infinite-loop risks. Two mechanisms, both surfaced as
   drops the priming-read false positive) ends a SECTION's range at its last
   paragraph (`_perform_range`), not at the header node -- the header's
   fall-through into its first paragraph is not "leaving the range", so
-  `S. S1. PERFORM S.` is reported.
+  `S. S1. PERFORM S.` is reported. A hop that is both a PERFORM and the
+  fall-through into the next paragraph (`21500. PERFORM 21510.` just above
+  21510) is tried both ways: the cycle is dropped only when no choice of
+  ways can run it (at most `_MAX_EITHER_HOPS` such hops; beyond that they
+  are left out, as before). Taken by PERFORM, 21510 returns at its end, so
+  its fall-through into 22203 (which PERFORMs 21500) cannot follow; on NIST
+  this dropped ~2,950 of 3,543 reported cycles, the `WRITE-LINE. PERFORM
+  WRT-LN.` support code among them (root-cause table 2026-11-13, O2).
 - **Cost is linear per cycle** (#373). `cycle_details` holds one cycle per
   back edge with its full path, so the "GO TO restart" idiom (every
   paragraph may `GO TO 0000-START`) yields N cycles of length ~N. The edge
   maps, node map and PERFORM ranges are built once per report
   (`_FlowIndex`); `_closed_by_perform_range_end` collects the PERFORM-only
-  hops' range ends then tests each fall-through-only hop by set lookup;
+  hops' range ends then tests each fall-through-only hop by set lookup (each
+  PERFORM-and-fall-through hop doubles the ways tried, capped);
   `_reenters_own_perform_range` needs exactly one non-fall-through hop; the
   escape test is cached per strongly connected component. 800 paragraphs:
   17 s -> 0.4 s, output unchanged. One risk per cycle is still reported (N

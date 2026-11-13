@@ -203,7 +203,10 @@ Anything else — procedure text, `SELECT` clauses, an empty file — raises
 `CopybookLayoutError`. A member holding PROCEDURE DIVISION code is caught
 before it is wrapped (`procedure_code_start`: the first code line, after
 comments, listing directives, `COPY` / `REPLACE` and `EXEC ... END-EXEC`, is
-a paragraph or section header or a statement verb): wrapped as data,
+a paragraph or section header, a statement verb, an `END-` word, or a phrase
+that continues a statement such as `USING` / `GIVING` / `INTO` / `VARYING`,
+`_STATEMENT_CONTINUATIONS`: a member holding the tail of a `CALL` the program
+starts, root-cause table 2026-11-13 N4): wrapped as data,
 `MOVE 8 TO RETURN-CODE` became a level-08 item with no PICTURE and the member
 a zero-byte record with a "no PICTURE" warning. `wrap_copybook_fragment`
 returns `None` for one, so data-items treats it as a program too.
@@ -834,10 +837,13 @@ Three pieces, none of which re-flattens the layout:
    row to the maximum. A declared `VALUE`/level-88 still wins when it names a
    count the table can hold, and is overridden when it does not.
    `flatten_record` also passes the declared ranges of the ODO tables in the
-   *other* level-01 records beside it (`_sibling_odo_bounds`, the record's
-   parent section's children): a counter in a header 01 whose table sits in
-   another 01 got any value its PICTURE held (640 against a table of at most
-   15, sweep N3). Not covered: a counter declared under a `REDEFINES` the
+   record itself and in the other level-01 records beside it
+   (`_sibling_odo_bounds`, the record's parent section's children): a counter
+   in a header 01 whose table sits in another 01 got any value its PICTURE
+   held (640 against a table of at most 15, sweep N3), and so did the counter
+   of a table whose only child is FILLER, which the CSV layout (FILLER left
+   out) flattens to no field (888 against `OCCURS 15`; the record image kept
+   it; root-cause table 2026-11-13 N3). Not covered: a counter declared under a `REDEFINES` the
    flattening excludes -- it has no spec, and the redefined field's bytes are
    generated as that field.
 3. **`layout.present_indexes(specs, row)`** — the positions whose bytes that

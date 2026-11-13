@@ -370,6 +370,19 @@ those registers, so the arm had no constraint and every scenario below
 success unless a scenario injects a failure. Anything it cannot decide (an
 EVALUATE, EIBCALEN, an IMS PCB status, a guard that exits on success) stays
 in the chain, as before.
+**A guard on a program flag is extracted as the condition that sets it**
+(`_DerivedFlags`, root-cause table 2026-11-13 O6): `PERFORM 1000-CHECK`
+with `IF IN-CODE = SPACES MOVE 'Y' TO WS-ERR`, then `IF WS-ERR = 'Y'
+GOBACK`. When the flag is not fed, has a VALUE, does not REDEFINE, its only
+writer (it, an 88 of it, or a group above it) is one `MOVE literal` / `SET
+88 TO TRUE` to a value other than the VALUE, that writer's only enclosing
+arm is an IF's THEN or ELSE, and the guard tests only the flag (`=` /
+`NOT =` a literal, an 88, NOT of those), `_extract_if` extracts the setting
+IF's condition (negated as the arm and guard require) in place of the
+guard's. Assumed: the setting IF runs before the guard on the same record.
+Anything else stays unmodeled, and a scenario below it names the field in
+its gap: "(it tests WS-ERR, which no fixture row feeds: a value the program
+sets itself)" (`_path_options`' `unfed`).
 The other `_walk_statements` callers (correlation carriers' "unconditional
 MOVE", literal-table scans) walk without guards; `_statement_sites` keeps its
 own walk. `TransferSite.enclosing` gets the guards, so a paragraph PERFORMed

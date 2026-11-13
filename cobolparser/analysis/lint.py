@@ -1061,6 +1061,21 @@ def line_length_findings(
             # The file's own identification-area convention (NIST's
             # ``IX2094.2``): the stamp abuts column 72, nothing is cut.
             continue
+        if before == ".":
+            # The statement ends at column 72 with its period: nothing the
+            # compiler reads is cut, the text after it is stray (2026-11-13
+            # root-cause table, O3).
+            found(
+                line_no,
+                TEXT_END_COL + 1,
+                "info",
+                "TEXT_PAST_COLUMN_72",
+                f"text runs past column {TEXT_END_COL}: {dropped!r} is in the "
+                "identification area (columns 73-80), which the compiler "
+                "ignores; the statement's period is in column 72, so nothing "
+                "is cut, but the stray text may be a misplaced edit",
+            )
+            continue
         found(
             line_no,
             TEXT_END_COL + 1,
