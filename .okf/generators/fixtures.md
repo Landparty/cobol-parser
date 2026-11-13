@@ -421,7 +421,10 @@ before solving. Consequences:
 * An enclosing arm the constraint report never modeled contributes a
   `PlannedScenario.path_gaps` entry instead of silence, and that alone makes
   the scenario `unverified` — the arm may still not be reached, and saying so
-  beats an optimistic label.
+  beats an optimistic label. When that arm's branch tests a field no row
+  feeds (its `unsupported` holds `field not boundary-fed: X`), the gap names
+  it: "(it tests X, which no fixture row feeds: a value the program sets
+  itself)" (`_path_options`' `unfed`, 2026-11-13 root-cause table O6).
 * **An OR-split enclosing arm is a disjunction, and is folded as
   alternatives** (`_path_options` + `_solve_with_path`). `_register_variants`
   registers `THEN#1`/`THEN#2`/... and NO bare `THEN` for a condition

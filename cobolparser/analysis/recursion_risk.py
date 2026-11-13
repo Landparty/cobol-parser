@@ -101,6 +101,10 @@ class RecursionRiskReport:
         }
 
 
+#: Hops that are both a PERFORM and a fall-through tried both ways, at most.
+_MAX_EITHER_HOPS = 10
+
+
 def _perform_range(target: str, flow_report: ProgramFlowReport) -> list[str]:
     """The procedures ``PERFORM target`` executes, in source order.
 
@@ -391,30 +395,57 @@ class RecursionRiskAnalyzer:
         PERFORM-only) keeps its fall-through exit, and a range left by a
         ``GO TO`` rather than by running off its end is still a loop.
 
-        Linear in the cycle: the range ends of its PERFORM-only hops are
-        collected first, then each fall-through-only hop is one set lookup
-        (a hop cannot be both, so "some *other* hop" needs no check).
+        Linear in the cycle when no hop is both a PERFORM and a
+        fall-through; each such hop doubles the ways tried, up to
+        ``_MAX_EITHER_HOPS`` of them (beyond that they are left out, as
+        before the 2026-11-13 root-cause table, O2).
         """
         n = len(cycle)
         hops = [(cycle[i], cycle[(i + 1) % n]) for i in range(n)]
-        range_ends: set[str] = set()
+        # Each hop is taken one way: by PERFORM (adds the range's end), by
+        # falling through (impossible out of a range end), or by anything
+        # else (GO TO: no constraint). A hop that is both a PERFORM and the
+        # fall-through into the next paragraph (``21500. PERFORM 21510.``
+        # just above 21510) is tried both ways: the cycle is closed only if
+        # no choice of ways can run it (2026-11-13 root-cause table, O2).
+        fixed_ends: set[str] = set()
+        falls: list[str] = []
+        either: list[tuple[str, set[str]]] = []
         for hop in hops:
             types = index.types(hop)
-            if not types or not types <= PERFORM_EDGE_TYPES:
+            if not types or types - PERFORM_EDGE_TYPES - {FlowEdgeType.FALL_THROUGH}:
                 continue
-            for edge in index.pair_edges[hop]:
+            ends = {
                 # ``PERFORM A`` returns from the end of A; ``PERFORM A THRU
                 # C`` (and its ``*_THRU`` edge, whose target is C) from C;
                 # ``PERFORM S`` of a SECTION from S's last paragraph -- the
                 # header's fall-through into its first paragraph is the
                 # range executing, not leaving.
-                range_ends.add(index.perform_range(edge.thru_target or edge.target)[-1])
-        if not range_ends:
+                index.perform_range(edge.thru_target or edge.target)[-1]
+                for edge in index.pair_edges[hop]
+                if edge.edge_type in PERFORM_EDGE_TYPES
+            }
+            if FlowEdgeType.FALL_THROUGH not in types:
+                fixed_ends |= ends
+            elif ends:
+                either.append((hop[0], ends))
+            else:
+                falls.append(hop[0])
+        if not fixed_ends and not either:
             return False
-        return any(
-            src in range_ends and index.types((src, tgt)) == {FlowEdgeType.FALL_THROUGH}
-            for src, tgt in hops
-        )
+        if len(either) > _MAX_EITHER_HOPS:
+            either = []  # too many to try: judge on the single-way hops alone
+        for choice in range(1 << len(either)):
+            ends = set(fixed_ends)
+            sources = list(falls)
+            for bit, (src, hop_ends) in enumerate(either):
+                if choice >> bit & 1:
+                    ends |= hop_ends
+                else:
+                    sources.append(src)
+            if not any(src in ends for src in sources):
+                return False  # this way round the cycle can run
+        return True
 
     @staticmethod
     def _reenters_own_perform_range(cycle: list[str], index: _FlowIndex) -> bool:

@@ -17,6 +17,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+* **No false PERFORM/GO TO cycle for a PERFORM of the next paragraph.**
+  `21500. PERFORM 21510.` just above 21510, falling on to a paragraph that
+  PERFORMs 21500, is no longer reported by recursion-check (or lint): a
+  PERFORMed paragraph returns, it does not fall on. On the NIST suite this
+  drops about 2,950 of 3,543 reported cycles.
+* **gen-data keeps an ODO counter in range when the table holds only
+  FILLER.** The CSV layout leaves FILLER out, so such a table had no column
+  and its counter got any value (888 against `OCCURS 15`).
+* **A copybook that opens with the tail of a statement is refused as a
+  record.** A member starting `USING WS-A WS-B.` (or `END-IF`, `GIVING`,
+  `INTO`, ...) is PROCEDURE DIVISION code, no longer a 0-byte record.
+* **Stray text after a column-72 period is an info, not "a cut word".**
+  The line-length warning said the word was cut short when column 72 held
+  the statement's period.
+* **The MCP answer budget is met whenever the bare answer fits.** One-item
+  lists are emptied one at a time, then the last caveat and the names of the
+  cut fields go; before, lists were emptied only when emptying all of them
+  fit, so 2,000 bytes asked could answer 2,184.
+* **gen-fixtures verifies scenarios below a guard on a program flag.** `IF
+  WS-ERR = 'Y' GOBACK` after a PERFORMed check that sets WS-ERR in one IF
+  arm is read as that IF's condition, so the scenarios below it are
+  verified. A flag it cannot follow now names itself in the scenario's gap.
 * **No false "file left open" after an AT END that closes and leaves.**
   `READ f AT END CLOSE f GO TO P9` (or `IF ... CLOSE f GO TO P9`) with
   `STOP RUN` in P9, and `AT END CLOSE f MOVE 'Y' TO EOF-SW` in a

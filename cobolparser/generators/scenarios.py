@@ -282,6 +282,14 @@ class ScenarioPlanner:
             for b in constraint_report.branches
             for arm_id, constraints in b.arms.items()
         }
+        # The field a branch tests that no row feeds (a WORKING-STORAGE flag
+        # the program sets), named in the gap of a scenario below it.
+        unfed: dict[str, str] = {}
+        for b in constraint_report.branches:
+            for reason in b.unsupported:
+                _, marker, name = reason.partition("field not boundary-fed: ")
+                if marker:
+                    unfed.setdefault(b.branch_id, name.strip())
         correlations_by_key: dict[tuple[str, str], list[CorrelationConstraint]] = {
             (b.branch_id, arm_id): linked
             for b in constraint_report.branches
@@ -351,7 +359,7 @@ class ScenarioPlanner:
                 # run at all (#310), then the ones inside it.
                 outer, reach_gaps = reach.path_to(branch.parent_proc)
                 enclosing = outer + branch.enclosing
-                options, path_gaps = _path_options(enclosing, arms_by_key)
+                options, path_gaps = _path_options(enclosing, arms_by_key, unfed)
                 path_correlations, correlation_gaps = _path_correlations(
                     enclosing, correlations_by_key
                 )
@@ -500,6 +508,7 @@ class ScenarioPlanner:
 def _path_options(
     enclosing: tuple[tuple[str, str], ...],
     arms_by_key: dict[tuple[str, str], list[FieldConstraint]],
+    unfed: dict[str, str] | None = None,
 ) -> tuple[list[list[list[FieldConstraint]]], list[str]]:
     """Per enclosing arm, the alternative conjunct sets that reach it, plus
     a reason for each enclosing arm that offers none.
@@ -574,6 +583,12 @@ def _path_options(
                 "was modeled with no conjuncts"
                 if exact is not None
                 else "has no modeled constraints"
+            )
+            + (
+                f" (it tests {unfed[branch_id]}, which no fixture row feeds:"
+                " a value the program sets itself)"
+                if unfed and branch_id in unfed
+                else ""
             )
             + ", so reaching this arm is not pinned by the generated data"
         )

@@ -318,7 +318,9 @@ FREE`, has no limit. `line_length_findings(path, text, free_lines)` per file:
   one under `_has_identification_stamp_convention`), and not a tail with the
   shape of the file's own stamps (`_identification_shapes`: digits `9`,
   letters `A`, seen on at least `MIN_ID_STAMP_EVIDENCE_LINES` lines whose
-  column 72 is blank; NIST's `IX2094.2`).
+  column 72 is blank; NIST's `IX2094.2`). When column 72 is the
+  statement's period, nothing is cut: the finding is **info** and says the
+  text after it is stray (root-cause table 2026-11-13, O3).
 
 On `examples/cobol/` + `tests/samples/` (566 programs): 0 errors; the 86
 warnings this rule once gave were all comment lines past column 80, which are

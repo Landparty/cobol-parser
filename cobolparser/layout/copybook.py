@@ -95,11 +95,23 @@ _PROCEDURE_VERBS = frozenset(
         "STOP", "STRING", "SUBTRACT", "UNSTRING", "WHEN", "WRITE",
     }
 )  # fmt: skip
+#: Phrases that continue a statement: a member can hold the tail of a
+#: statement the program starts (``CALL 'P1CKBADR'`` in the program,
+#: ``USING WS-A WS-B.`` in the member). No data description entry starts
+#: with one, nor does any word beginning ``END-``.
+_STATEMENT_CONTINUATIONS = frozenset(
+    {
+        "USING", "GIVING", "RETURNING", "INTO", "UNTIL", "VARYING", "THRU",
+        "THROUGH", "DELIMITED", "INVALID", "TALLYING", "REPLACING",
+        "CORRESPONDING", "CORR",
+    }
+)  # fmt: skip
 
 
 def procedure_code_start(source: str) -> str | None:
     """The first code line of a member that holds PROCEDURE DIVISION code
-    (a paragraph or section header, or a statement), else ``None``.
+    (a paragraph or section header, a statement, or the tail of one such as
+    ``USING WS-A WS-B.``), else ``None``.
 
     Judged on the first line of code alone, after comments, listing
     directives, ``COPY`` / ``REPLACE`` lines and ``EXEC ... END-EXEC``
@@ -141,7 +153,12 @@ def procedure_code_start(source: str) -> str | None:
         section = _SECTION_HEADER_RE.match(code)
         if section is not None:
             return None if section.group(1).upper() in _DATA_SECTIONS else code
-        if word in _PROCEDURE_VERBS or _PARAGRAPH_HEADER_RE.match(code):
+        if (
+            word in _PROCEDURE_VERBS
+            or word in _STATEMENT_CONTINUATIONS
+            or word.startswith("END-")
+            or _PARAGRAPH_HEADER_RE.match(code)
+        ):
             return code
         return None
     return None

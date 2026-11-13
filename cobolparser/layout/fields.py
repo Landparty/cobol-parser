@@ -1119,7 +1119,7 @@ def _sibling_odo_bounds(
     record: CobolDataItem,
 ) -> list[tuple[str, tuple[str, ...], int, int]]:
     """``(counter, qualifiers, min, max)`` of every ``OCCURS ... DEPENDING
-    ON`` table in the *other* level-01 records beside *record*.
+    ON`` table in *record* and in the other level-01 records beside it.
 
     A counter is often declared in a header record and the table it sizes in
     another 01 of the same copybook (or section): flattening the header
@@ -1127,12 +1127,18 @@ def _sibling_odo_bounds(
     against a table of at most 15). The declared range is used, not the
     occurrences a generation of that record would expand: the counter has to
     be valid for the table as the program sees it.
+
+    *record*'s own tables are included because the walk does not see every
+    one of them: a table whose only child is FILLER flattens to no field
+    when FILLER is left out (the CSV layout), so its counter got any value
+    (888 against ``OCCURS 15``) while the record image, which keeps FILLER,
+    wrote 015.
     """
     parent = getattr(record, "parent", None)
     siblings = getattr(parent, "children", None) or []
     out: list[tuple[str, tuple[str, ...], int, int]] = []
-    for sibling in siblings:
-        if sibling is record or not isinstance(sibling, CobolDataItem):
+    for sibling in (record, *(s for s in siblings if s is not record)):
+        if not isinstance(sibling, CobolDataItem):
             continue
         for item in (sibling, *sibling.get_all_children()):
             occurs = item.occurs_clause

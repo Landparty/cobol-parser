@@ -259,11 +259,15 @@ def _trim_envelope(
     hints go (they only suggest calls); the caveats are halved from the end,
     never below one, with a ``caveats`` entry in ``truncated``; the ``answer
     budget`` entries are folded into one that names every cut field
-    (``field``, comma-separated) and counts them (``fields``); and the
-    answer's one-item lists are emptied, largest first, each named in that
-    folded entry -- only when emptying them all would fit, else they keep
-    their one item. Scalars and short strings are never dropped, so a budget
-    below them still cannot be met."""
+    (``field``, comma-separated) and counts them (``fields``); the answer's
+    one-item lists are emptied, largest first, each named in that folded
+    entry; the last caveat goes; and the folded entry drops its field names,
+    keeping the count. The record of the cuts goes last, so a reader learns
+    the answer was cut for as long as anything can say so. The dropping steps
+    are only taken when they reach the budget: scalars and short strings are
+    never dropped, and below them the one-item lists are kept (2026-11-13
+    root-cause table, O5: the old rule emptied lists only if emptying all of
+    them fit, so a 2,000-byte budget got 2,184 bytes)."""
     if result.get("next"):
         result.pop("next")
     caveats = result.get("caveats")
@@ -294,11 +298,27 @@ def _trim_envelope(
         folded["fields"] = len(fields)
 
     refold()
+    trial = copy.deepcopy(result)
+    _drop_to_fit(trial, max_bytes, list(fields))
+    if wire_size(trial) <= max_bytes:
+        result.clear()
+        result.update(trial)
+    # Else not even the bare answer fits: keep the one item each rather than
+    # lose them for nothing.
+
+
+def _drop_to_fit(result: dict[str, Any], max_bytes: int, fields: list[str]) -> None:
+    """The steps of :func:`_trim_envelope` that drop content, on a result
+    whose cut records (*fields*) are already folded into its last
+    ``truncated`` entry."""
+    folded: dict[str, Any] = result["truncated"][-1]
+    caveats = result.get("caveats")
+
+    def refold() -> None:
+        folded["field"] = ", ".join(fields)
+        folded["fields"] = len(fields)
+
     answer = result.get("answer")
-    if not _fits_without_lists(result, max_bytes):
-        # Emptying every list still would not fit: keep the one item each
-        # rather than lose them for nothing.
-        return
     while wire_size(result) > max_bytes:
         candidates = [
             (_size(items), path, items, parent, key)
@@ -312,11 +332,10 @@ def _trim_envelope(
         if path not in fields:
             fields.append(path)
             refold()
-
-
-def _fits_without_lists(result: dict[str, Any], max_bytes: int) -> bool:
-    """Whether *result* would fit with every list in its answer emptied."""
-    trial = copy.deepcopy(result)
-    for _path, _items, parent, key in list(_lists(trial.get("answer"), "")):
-        parent[key] = []
-    return wire_size(trial) <= max_bytes
+    if wire_size(result) > max_bytes and isinstance(caveats, list) and caveats:
+        caveats.clear()
+        if "caveats" not in fields:
+            fields.append("caveats")
+            refold()
+    if wire_size(result) > max_bytes:
+        folded.pop("field", None)
