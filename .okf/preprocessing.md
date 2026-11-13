@@ -394,7 +394,9 @@ typed from column 6); a `*>` opening before column 7, a level number whose
 data name starts in columns 1-7 (`01 REC.`) or that ends in column 6 with
 the name from column 8 (`    05 WS-A`, `_FREE_FORM_LEVEL_AT_COL6_RE`: a
 four-space free-form indent, which the fixed reading left as a level-less
-name in Area A and every field `ANONYMOUS-n-7`, #898), a line shorter than 7 or a
+name in Area A and every field `ANONYMOUS-n-7`, #898; not when the column-8
+word is one of `_NOT_DATA_NAMES` -- EJECT, SKIPn, TITLE, COPY, FD ... -- since
+`    30 EJECT` is a short sequence number before a fixed-format directive), a line shorter than 7 or a
 non-indicator in column 7 count as free. A line holding only a six-character
 tag that opens some other line of the member with a valid indicator
 (`_sequence_tags`: `P1CKBA` and nothing after it) does not vote: it is a

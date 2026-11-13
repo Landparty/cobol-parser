@@ -46,10 +46,34 @@ def test_level_at_column_8_stays_fixed():
         "000100 05 WS-A PIC X.\n000200 05 WS-B PIC X.\n",
         # A short sequence number, then a level number in Area A.
         "    10 01 REC.\n    20     05 A PIC X.\n",
+        # Short unpadded sequence numbers before an EJECT / SKIP / COPY in
+        # Area A: no level-30 entry (bug hunt after #902).
+        "    10 01  REC.\n    20     05  A PIC X.\n    30 EJECT\n"
+        "    40     05  B PIC X.\n",
+        "    10 01  REC.\n    20 SKIP2\n    30     05  A PIC X.\n",
+        "    10 01  REC.\n    20 COPY OTHER.\n    30     05  A PIC X.\n",
     ],
 )
 def test_sequence_numbers_keep_fixed(member):
     assert detect_member_fixed_format(member, default=False) is True
+
+
+def test_short_sequence_numbers_with_eject_keep_fields(tmp_path):
+    books = tmp_path / "cb"
+    books.mkdir()
+    (books / "SEQCPY.cpy").write_text(
+        "    10 01  REC.\n    20     05  A PIC X.\n    30 EJECT\n"
+        "    40     05  B PIC X.\n"
+    )
+    program = (
+        "       IDENTIFICATION DIVISION.\n       PROGRAM-ID. M.\n"
+        "       DATA DIVISION.\n       WORKING-STORAGE SECTION.\n"
+        "       COPY SEQCPY.\n       PROCEDURE DIVISION.\n"
+        "           DISPLAY A B.\n           STOP RUN.\n"
+    )
+    result = parse_cobol_with_expansion(program, "m.cbl", copybook_paths=[str(books)])
+    items = [(d.level, d.name) for d in result.ast.find_all_by_type("DataItem")]
+    assert items == [(1, "REC"), (5, "A"), (5, "B")]
 
 
 def test_fields_keep_their_names_and_levels(tmp_path):
