@@ -111,11 +111,17 @@ Fixed-format source is 80 columns, and the compiler reads only columns 8-72.
 `line-length` reports what silently goes wrong at both edges, in programs and
 in every copybook they read:
 
-* **past column 80**: error (warning when it is only comment text). The
-  columns are lost when the member goes to an 80-column library.
+* **past column 80**: error. The columns are lost when the member goes to an
+  80-column library.
 * **a word cut at column 72**: warning. The rest of the word is in the
   identification area, which the compiler ignores. Sequence numbers and the
   file's own identification stamps in columns 73-80 are not flagged.
+
+Text the compiler reads as a comment is not reported at either edge: comment
+lines (`*` or `/` in column 7), inline `*>` comments, and the comment-entries
+of `AUTHOR.`, `INSTALLATION.`, `DATE-WRITTEN.`, `DATE-COMPILED.`, `SECURITY.`
+and `REMARKS.`. Program text on the same line before the comment is still
+checked.
 
 Free-format source has no column limit and is skipped. Select only this rule
 with `--rule line-length`.
