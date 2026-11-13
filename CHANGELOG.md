@@ -23,6 +23,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `PERFORM UNTIL EOF-SW = 'Y'` loop, no longer report FILE_LEFT_OPEN: a GO
   TO carries its own state to its target, and an UNTIL loop is left in the
   state of the branch that ends it.
+* **No false DOUBLE_OPEN after a `PERFORM ... THRU` loop that closes and
+  jumps to its exit.** `READ f AT END CLOSE f GO TO LOAD-EXIT` (or `IF ...
+  CLOSE f GO TO LOAD-EXIT`) inside `PERFORM LOAD THRU LOAD-EXIT` or a SORT
+  input procedure left f open at the caller, so a later `OPEN OUTPUT f` and
+  `WRITE` were flagged. Such ranges no longer leak their GO TOs into the
+  main walk either, and a closed loop resumes at its own exit. On the NIST
+  suite this removes 55 false io-sequence findings and restores 5 real
+  ones (a regression from the previous fix).
 * **A JCL step inside `IF` that also codes `COND=` keeps the IF.**
   `JobStep` gains `if_condition` (the enclosing IF/ELSE) and `cond` (the
   raw `COND=`) beside `condition`, which is unchanged; the MCP job tools

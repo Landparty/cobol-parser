@@ -684,9 +684,12 @@ class IOSequenceAnalyzer:
             idx += 1
 
     def _next_pending(self, visited: set[int]) -> int | None:
-        """The next conditional GO TO target the chain has not run yet."""
+        """The next conditional GO TO target the chain has not run yet,
+        newest first: the walk just closed a loop, and the GO TO queued last
+        is that loop's own exit. Taking the oldest one instead jumped to an
+        earlier far target and skipped the paragraphs after the loop."""
         while self._pending_gotos:
-            name = self._pending_gotos.pop(0)
+            name = self._pending_gotos.pop()
             idx = self._name_first.get(name)
             if idx is not None and idx not in visited:
                 saved = self._pending_states.pop(name, None)
@@ -791,6 +794,10 @@ class IOSequenceAnalyzer:
                 self._status = self._merge([self._status, saved])
                 if name in self._pending_gotos:
                     self._pending_gotos.remove(name)
+                if self._recordings:
+                    # Taken up inside the range being recorded: a replay
+                    # of the range must not queue it again.
+                    self._recordings[-1].gotos.pop(name, None)
 
     @staticmethod
     def _drive(step: _Step) -> Any:
@@ -1144,10 +1151,23 @@ class IOSequenceAnalyzer:
         )
 
     def _walk_range(self, start: int, end: int) -> _Step:
-        """Run paragraphs *start*..*end*, following GO TOs inside the range."""
+        """Run paragraphs *start*..*end*, following GO TOs inside the range.
+
+        A conditional GO TO to a paragraph of the range (the ``GO TO
+        LOAD-EXIT`` that leaves a ``READ ... AT END`` loop) is queued, not
+        merged into the fall-through state; when the walk cycles or leaves
+        the range it resumes there (``_next_in_range``) from the state at
+        the GO TO. The range returns in the merge of every state it left
+        in (fell past *end*, or jumped out); with none (it only cycled),
+        in the state the walk ended in."""
         visited: set[int] = set()
-        i = start
-        while i <= end and not self._terminated and i not in visited:
+        exits: list[_Status] = []
+        i: int | None = start
+        while not self._terminated:
+            if i is None or i in visited:
+                i = self._next_in_range(start, end, visited)
+                if i is None:
+                    break
             visited.add(i)
             self._arrive(i)
             outcome, gtarget = yield self._run_paragraph(i)
@@ -1155,13 +1175,37 @@ class IOSequenceAnalyzer:
                 return
             if outcome == "goto":
                 t = self._name_first.get(gtarget or "")
-                # Follow a GO TO only within the performed range; a jump
-                # out of the range ends the PERFORM conservatively.
                 if t is not None and start <= t <= end:
                     i = t
                     continue
-                return
+                # A jump out of the range ends the PERFORM conservatively.
+                exits.append(dict(self._status))
+                i = None
+                continue
             i += 1
+            if i > end:
+                exits.append(dict(self._status))
+                i = None
+        if exits and not self._terminated:
+            self._status = self._merge(exits)
+
+    def _next_in_range(self, start: int, end: int, visited: set[int]) -> int | None:
+        """The next queued GO TO target in paragraphs *start*..*end* the
+        range walk has not run, entered in the state(s) at its GO TO(s).
+        The target is taken off the queue and out of the recording, so a
+        later replay of the range does not queue it again."""
+        for name in list(self._pending_gotos):
+            idx = self._name_first.get(name)
+            if idx is None or not start <= idx <= end or idx in visited:
+                continue
+            self._pending_gotos.remove(name)
+            saved = self._pending_states.pop(name, None)
+            if self._recordings:
+                self._recordings[-1].gotos.pop(name, None)
+            if saved is not None:
+                self._status = dict(saved)
+            return idx
+        return None
 
     def _replay(self, summary: _RangeSummary) -> None:
         """Apply a recorded range's effects at another call site."""
@@ -1193,8 +1237,9 @@ class IOSequenceAnalyzer:
         if self._recordings:
             _merge_into(self._recordings[-1].gotos, name, state)
         _merge_into(self._pending_states, name, state)
-        if name not in self._pending_gotos:
-            self._pending_gotos.append(name)
+        if name in self._pending_gotos:
+            self._pending_gotos.remove(name)
+        self._pending_gotos.append(name)
 
     def _dispatch(self, node: ASTNode) -> None:
         """Handle a single node if it is an IO-relevant statement."""

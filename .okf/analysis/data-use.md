@@ -854,6 +854,19 @@ TO (`PERFORM A THRU A-EXIT` with `IF .. OPEN f GO TO A-EXIT`, NIST DB104A's
 `IF .. CLOSE f GO TO ..` guards). Merging it into the fall-through put `READ
 f AT END CLOSE f GO TO P9`'s closed state on the path that read a record,
 and P9's STOP RUN reported f left open (bug hunt after #901).
+**Inside a PERFORMed range the walk resumes at queued GO TOs too**
+(`_walk_range`, `_next_in_range`): when it cycles or leaves the range it
+continues at an unvisited queued target inside the range, from the state(s)
+at its GO TO(s), and the range returns in the merge of every state it left
+in (fell past the end, jumped out); with none, the state it cycled in.
+A target taken up inside the range (by `_next_in_range` or `_arrive`) is
+dropped from the range's recording, so a replay does not queue it again.
+Without it, `PERFORM LOAD THRU LOAD-EXIT` with `READ f AT END CLOSE f GO TO
+LOAD-EXIT` (and a SORT input procedure) returned with f open: false
+DOUBLE_OPEN / WRITE_WRONG_MODE at the caller, and the leaked targets let the
+main walk fall into ranges out of context (NIST IX215A's READ_BEFORE_OPEN;
+bug hunt after #903). Pinned by
+`tests/regression/test_perform_thru_goto_2026_11_13.py`.
 **A `PERFORM ... UNTIL` (no VARYING) is left by the arm that ends it**
 (`_walk_loop`, `_LoopFrame`): the body is walked once, and the states at the
 end of every fork arm that writes a name the UNTIL tests (MOVE / SET /
@@ -914,8 +927,9 @@ current volume (`close_options[f]["reel"/"unit"]`).
 **Conditional GO TO targets are walked once the chain loops.** In the textbook
 sequential loop (`READ IN-F AT END GO TO END-P` / `GO TO LOOP-P`), GO TO
 targets met inside a branch or handler are queued (`_pending_gotos`) and the
-chain resumes at the next unvisited one when it loops back, so END-P's CLOSE
-is seen. The file states at the GO TO(s) that queued a target
+chain resumes at the newest unvisited one when it loops back (the loop's own
+exit; the oldest skipped the paragraphs after the loop, NIST SQ114A), so
+END-P's CLOSE is seen. The file states at the GO TO(s) that queued a target
 (`_pending_states`, carried through PERFORM summaries as well) are merged
 into the walk's state there: by the time the walk resumes, a later paragraph
 may have reopened the file in another mode (NIST IX103A's DELETE, #548). If it still ends on a loop without reaching STOP RUN/GOBACK, no
