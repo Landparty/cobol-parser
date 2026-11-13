@@ -317,6 +317,36 @@ _FREE_FORM_LEVEL_AT_COL6_RE = re.compile(
 )
 
 
+#: Words that open a fixed-format statement from column 8 and so can follow
+#: a short sequence number there (``    30 EJECT``), but never name a data
+#: entry: what keeps :data:`_FREE_FORM_LEVEL_AT_COL6_RE` from voting such a
+#: line free-form.
+_NOT_DATA_NAMES = frozenset(
+    {
+        "EJECT",
+        "SKIP1",
+        "SKIP2",
+        "SKIP3",
+        "TITLE",
+        "COPY",
+        "REPLACE",
+        "FD",
+        "SD",
+        "RD",
+        "CD",
+        "BASIS",
+        "INSERT",
+        "DELETE",
+        "CBL",
+        "PROCESS",
+        "READY",
+        "RESET",
+        "SERVICE",
+        "EXEC",
+    }
+)
+
+
 def _level_in_sequence_area(line: str) -> bool:
     """Whether *line* holds a level number in columns 1-6 whose data name a
     fixed-format reader would cut off or leave without its level."""
@@ -324,7 +354,13 @@ def _level_in_sequence_area(line: str) -> bool:
     if match and line[match.end() : INDICATOR_COL].strip():
         return True
     level = _FREE_FORM_LEVEL_AT_COL6_RE.match(line)
-    return bool(level) and _is_level_number(line[: INDICATOR_COL - 1].strip())
+    if not level or not _is_level_number(line[: INDICATOR_COL - 1].strip()):
+        return False
+    # ``    30 EJECT`` is a short sequence number before a compiler-directing
+    # statement in a fixed-format member, not a level-30 entry: a listing
+    # directive, COPY or file description is never a data name.
+    words = line[INDICATOR_COL:].split(None, 1)
+    return words[0].rstrip(".").upper() not in _NOT_DATA_NAMES
 
 
 def _is_level_number(text: str) -> bool:

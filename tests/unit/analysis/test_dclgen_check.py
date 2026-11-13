@@ -389,3 +389,55 @@ def test_the_issue_259_program_reports_no_violation():
     report = _check(source)
     assert sorted(report.checked) == ["CNT", "CUST-ID"]
     assert report.violations == [], [v.message for v in report.violations]
+
+
+# #863: two DCLGEN structures that both declare CUST-NAME.
+TWO_STRUCTURES = HEAD + """           EXEC SQL DECLARE CUST TABLE
+             ( CUST_NAME   CHAR(30) NOT NULL )
+           END-EXEC.
+           EXEC SQL DECLARE EMP TABLE
+             ( CUST_NAME   INTEGER NOT NULL )
+           END-EXEC.
+       01  DCLCUST.
+           05  CUST-NAME   PIC X(30).
+       01  DCLEMP.
+           05  CUST-NAME   PIC S9(9) COMP.
+       PROCEDURE DIVISION.
+       MAIN-PARA.
+{statements}
+           GOBACK.
+"""
+
+QUALIFIED_SELECTS = """           EXEC SQL
+             SELECT CUST_NAME INTO :DCLEMP.CUST-NAME FROM EMP
+           END-EXEC
+           EXEC SQL
+             SELECT CUST_NAME INTO :DCLCUST.CUST-NAME FROM CUST
+           END-EXEC"""
+
+
+class TestQualifiedHostVariables:
+    def test_each_qualified_item_is_resolved_on_its_own(self):
+        from cobolparser.analysis.host_var_resolver import HostVariableResolver
+
+        source = TWO_STRUCTURES.format(statements=QUALIFIED_SELECTS)
+        ast = parse_cobol(source, filename="DCLTEST.cbl").ast
+        resolved = HostVariableResolver().resolve(ast).resolved
+        pictures = sorted(
+            (info.picture, info.usage.upper()) for info in resolved.values()
+        )
+        assert pictures == [("S9(9)", "COMP"), ("X(30)", "DISPLAY")]
+        assert all(len(info.sql_statements) == 1 for info in resolved.values())
+
+    def test_two_correct_qualified_bindings_raise_no_violation(self):
+        report = _check(TWO_STRUCTURES.format(statements=QUALIFIED_SELECTS))
+        assert report.violations == []
+        assert len(report.checked) == 2
+
+    def test_unqualified_use_of_a_twice_declared_name_is_unchecked(self):
+        source = TWO_STRUCTURES.format(statements="""           EXEC SQL
+             SELECT CUST_NAME INTO :CUST-NAME FROM CUST
+           END-EXEC""")
+        report = _check(source)
+        assert report.violations == []
+        assert "ambiguous" in report.unchecked["CUST-NAME"]

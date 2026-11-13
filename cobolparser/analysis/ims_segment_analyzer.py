@@ -247,38 +247,63 @@ class IMSSegmentAnalyzer:
     # ── Pass 2: track MOVE statements ───────────────────────────────────────
 
     def _track_move_statements(self, node: ASTNode) -> None:
-        if isinstance(node, MoveStatement) and node.source and node.targets:
-            src_key = node.source.upper()
-            values: set[str] = set()
-            if src_key in self._variable_values:
-                # Propagate known values from source variable to targets
-                values = set(self._variable_values[src_key])
-            else:
-                # Only propagate when source is a genuine literal (quoted string,
-                # numeric, or figurative constant).  Bare identifiers that are not
-                # yet in _variable_values are unresolved variable references whose
-                # value is unknown; recording their name as a value would cause
-                # false segment-name resolution (e.g. "WS-SEG" → segment "WS-SEG").
-                literal = _extract_literal(node.source)
-                if literal is not None:
-                    values = {literal}
-            if values:
-                for tgt in node.targets:
-                    self._variable_values.setdefault(tgt.upper(), set()).update(values)
-                    qualifiers = frozenset(
-                        q.upper() for q in _QUALIFIER_RE.findall(tgt)
-                    )
-                    if qualifiers:
-                        base = base_data_name(tgt).upper()
-                        self._qualified_moves.setdefault(base, []).append(
-                            (qualifiers, values)
-                        )
-                    else:
-                        self._moved_values.setdefault(tgt.upper(), set()).update(values)
+        """Propagate values through every ``MOVE`` as a fixpoint (#865).
 
+        A single pass in source order misses a MOVE into the source variable
+        that is written further down but runs first (an init paragraph placed
+        below the paragraph that PERFORMs it). So every MOVE is collected
+        first and the propagation repeats until no value set grows; the sets
+        only grow and are bounded by the program's literals, so it ends.
+        """
+        moves: list[tuple[str, list[str]]] = []
+        self._collect_moves(node, moves)
+
+        changed = True
+        while changed:
+            changed = False
+            for source, targets in moves:
+                values = self._move_source_values(source)
+                if not values:
+                    continue
+                for tgt in targets:
+                    known = self._variable_values.setdefault(tgt.upper(), set())
+                    if not values <= known:
+                        known.update(values)
+                        changed = True
+
+        for source, targets in moves:
+            values = self._move_source_values(source)
+            if not values:
+                continue
+            for tgt in targets:
+                qualifiers = frozenset(q.upper() for q in _QUALIFIER_RE.findall(tgt))
+                if qualifiers:
+                    base = base_data_name(tgt).upper()
+                    self._qualified_moves.setdefault(base, []).append(
+                        (qualifiers, set(values))
+                    )
+                else:
+                    self._moved_values.setdefault(tgt.upper(), set()).update(values)
+
+    def _collect_moves(self, node: ASTNode, moves: list[tuple[str, list[str]]]) -> None:
+        if isinstance(node, MoveStatement) and node.source and node.targets:
+            moves.append((node.source, list(node.targets)))
         if hasattr(node, "children"):
             for child in node.children:
-                self._track_move_statements(child)
+                self._collect_moves(child, moves)
+
+    def _move_source_values(self, source: str) -> set[str]:
+        src_key = source.upper()
+        if src_key in self._variable_values:
+            # Propagate known values from source variable to targets
+            return set(self._variable_values[src_key])
+        # Only propagate when source is a genuine literal (quoted string,
+        # numeric, or figurative constant).  Bare identifiers with no known
+        # value are unresolved variable references; recording their name as a
+        # value would cause false segment-name resolution (e.g. "WS-SEG" ->
+        # segment "WS-SEG").
+        literal = _extract_literal(source)
+        return {literal} if literal is not None else set()
 
     # ── Pass 3: build IMSDLICall results ─────────────────────────────────────
 
