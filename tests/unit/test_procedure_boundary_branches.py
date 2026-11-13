@@ -9,7 +9,6 @@ verb, a numeric or decimal token or the end of the source; numeric
 paragraph names; and ``EXIT SECTION`` straight after a section header.
 """
 
-
 from cobolparser import CobolParser, ErrorRecoveryMode
 
 PRE = """\

@@ -409,7 +409,7 @@ docs-only change runs no CI. A new push to a PR cancels the run in flight
 (`concurrency`); runs on `main` are never cancelled.
 
 1. **lint** -- `ruff check .` + `black --check .` (Python 3.13, `ruff==0.15.0`
-   / `black==26.3.0`, pinned to match `.pre-commit-config.yaml`)
+   / `black==26.10.1`, pinned to match `.pre-commit-config.yaml`)
 2. **typecheck** -- `mypy cobolparser/` (Python 3.13, `mypy==1.20.0`)
 3. **test** -- `pip install -e ".[dev]"` +
    `python -m pytest tests/ -q -p no:randomly -n auto` on matrix Python 3.11,
