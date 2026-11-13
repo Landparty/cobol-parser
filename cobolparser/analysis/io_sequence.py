@@ -513,6 +513,8 @@ class IOSequenceAnalyzer:
         self._pending_states = {}
         self._ended_in_cycle = False
         self._loops: list[_LoopFrame] = []
+        # Paragraph index -> its procedure keys, built on first use.
+        self._names_at: dict[int, list[str]] | None = None
         self._condition_parents = _condition_parents(ast)
         self._record_to_file = record_to_file_map(ast)
         self._report_to_file = report_to_file_map(ast)
@@ -779,7 +781,11 @@ class IOSequenceAnalyzer:
         TO): it is entered from both, so its state is the merge."""
         if not self._pending_states:
             return
-        for name in [n for n, i in self._name_first.items() if i == idx]:
+        if self._names_at is None:
+            self._names_at = {}
+            for key, at in self._name_first.items():
+                self._names_at.setdefault(at, []).append(key)
+        for name in self._names_at.get(idx, ()):
             saved = self._pending_states.pop(name, None)
             if saved is not None:
                 self._status = self._merge([self._status, saved])
