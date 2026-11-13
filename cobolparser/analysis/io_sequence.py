@@ -30,6 +30,7 @@ from ..models.statements import (
     GobackStatement,
     GoStatement,
     IfStatement,
+    InitializeStatement,
     IOCloseStatement,
     IODeleteStatement,
     IOOpenStatement,
@@ -38,8 +39,10 @@ from ..models.statements import (
     IOStartStatement,
     IOWriteStatement,
     MergeStatement,
+    MoveStatement,
     PerformStatement,
     SelectStatement,
+    SetStatement,
     SortStatement,
     StopStatement,
 )
@@ -288,6 +291,29 @@ def _violation_key(v: IOSequenceViolation) -> _ViolationKey:
 
 
 @dataclass
+class _LoopFrame:
+    """A ``PERFORM ... UNTIL`` being walked (``_walk_loop``).
+
+    The walk runs a loop body once. The loop is left on the iteration that
+    makes its UNTIL condition true, and in the commonest shape only one
+    branch does that (``READ f AT END CLOSE f MOVE 'Y' TO EOF-SW``): the
+    states at the end of the arms that write a name the condition tests
+    (*exits*) are the states after the loop, not the merge of every arm.
+    """
+
+    #: Upper-cased names the UNTIL condition tests, with the parents of its
+    #: level-88 names.
+    names: set[str]
+    exits: list[_Status] = field(default_factory=list)
+    #: Writes to *names* seen so far (an arm wrote one when it moved).
+    writes: int = 0
+    #: A fork has captured an exit: I/O on a file after it makes that
+    #: file's post-loop state the body's end state instead.
+    armed: bool = False
+    touched_after: set[str] = field(default_factory=set)
+
+
+@dataclass
 class _Recording:
     """Effects of one PERFORM range while it runs (see ``_run_perform``).
 
@@ -318,6 +344,30 @@ class _RangeSummary:
     gotos: tuple[tuple[str, _FrozenStatus], ...]
     entered: frozenset[_PerformKey]
     guarded: frozenset[_PerformKey]
+
+
+def _written_names(node: ASTNode) -> list[str]:
+    """Upper-cased bare names a MOVE / SET / INITIALIZE writes."""
+    if not isinstance(node, (MoveStatement, SetStatement, InitializeStatement)):
+        return []
+    targets = getattr(node, "targets", None) or []
+    return [
+        str(target).split()[0].split("(")[0].upper()
+        for target in targets
+        if isinstance(target, str) and target.strip()
+    ]
+
+
+def _condition_parents(ast: ASTNode) -> dict[str, str]:
+    """Upper-cased level-88 name -> its parent data item's name."""
+    out: dict[str, str] = {}
+    for item in ast.find_all_by_type("ConditionNameItem"):
+        parent = getattr(item, "parent", None)
+        name = getattr(item, "name", None) or getattr(item, "condition_name", None)
+        parent_name = getattr(parent, "name", None)
+        if isinstance(name, str) and isinstance(parent_name, str):
+            out.setdefault(name.upper(), parent_name.upper())
+    return out
 
 
 def _handler_arms(node: ASTNode) -> list[list[list[ASTNode]]]:
@@ -353,8 +403,11 @@ class IOSequenceAnalyzer:
     level (or a PERFORMed paragraph's) never reaches the statement after the
     branch and is left out of the merge -- the ``IF bad-status CLOSE f STOP
     RUN`` error exit -- and no FILE_LEFT_OPEN is claimed at that STOP RUN.
-    An arm that ends in a GO TO is kept in the merge: its state is where the
-    walk will meet the GO TO target, whether by fall-through or later.
+    An arm that ends in a GO TO is left out of the merge when another arm
+    falls through: its state travels with the queued GO TO and is taken up
+    at the target, whether the walk resumes there or reaches it by
+    fall-through. A ``PERFORM ... UNTIL`` is left in the states of the arms
+    that write a name its condition tests (``_walk_loop``).
     A violation is reported only when it holds on *every* merged path
     (READ of a file open on no path, OPEN of a file open on every path, ...),
     except FILE_LEFT_OPEN, which a file open on any path still earns.
@@ -459,6 +512,10 @@ class IOSequenceAnalyzer:
         self._pending_gotos = []
         self._pending_states = {}
         self._ended_in_cycle = False
+        self._loops: list[_LoopFrame] = []
+        # Paragraph index -> its procedure keys, built on first use.
+        self._names_at: dict[int, list[str]] | None = None
+        self._condition_parents = _condition_parents(ast)
         self._record_to_file = record_to_file_map(ast)
         self._report_to_file = report_to_file_map(ast)
         self._organization = {
@@ -617,6 +674,7 @@ class IOSequenceAnalyzer:
             if idx is None or not 0 <= idx < len(self._linear):
                 return
             visited.add(idx)
+            self._arrive(idx)
             outcome, target = self._drive(self._run_paragraph(idx))
             if self._terminated or outcome == "stop":
                 return
@@ -631,11 +689,108 @@ class IOSequenceAnalyzer:
             name = self._pending_gotos.pop(0)
             idx = self._name_first.get(name)
             if idx is not None and idx not in visited:
-                saved = self._pending_states.get(name)
+                saved = self._pending_states.pop(name, None)
                 if saved is not None:
-                    self._status = self._merge([self._status, saved])
+                    # Reached only through the GO TO(s) that queued it: the
+                    # states at those GO TOs are the states it starts from,
+                    # not wherever the loop the walk just left happened to be.
+                    self._status = dict(saved)
                 return idx
         return None
+
+    def _walk_loop(
+        self, node: PerformStatement, visit: Callable[[ASTNode], _Step]
+    ) -> _Step:
+        """Run a ``PERFORM ... UNTIL`` body once (inline or out of line)
+        and leave it in the states of the arms that end it (``_LoopFrame``).
+        With no such arm, the body's end state, as for any statement."""
+        frame = _LoopFrame(names=self._condition_names(node.until_condition))
+        self._loops.append(frame)
+        try:
+            if node.target_paragraph and not node.inline_statements:
+                yield self._run_perform(
+                    node.target_paragraph,
+                    node.thru_paragraph,
+                    statement_qualifier(node, "target_qualifier"),
+                    statement_qualifier(node, "thru_qualifier"),
+                )
+            else:
+                for child in getattr(node, "children", None) or []:
+                    yield visit(child)
+        finally:
+            self._loops.pop()
+        if frame.exits and not self._terminated:
+            exit_state = self._merge(frame.exits)
+            for key in frame.touched_after:
+                if key in self._status:
+                    exit_state[key] = self._status[key]
+            self._status = exit_state
+        return None
+
+    def _condition_names(self, condition: Any) -> set[str]:
+        """Upper-cased data names *condition* tests, plus the parent of
+        each level-88 name among them."""
+        names: set[str] = set()
+        stack = [condition]
+        while stack:
+            node = stack.pop()
+            if node is None:
+                continue
+            for attr in ("left_operand", "right_operand"):
+                value = getattr(node, attr, None)
+                if isinstance(value, str) and value.strip():
+                    word = value.split()[0].upper()
+                    names.add(word)
+                    parent = self._condition_parents.get(word)
+                    if parent:
+                        names.add(parent)
+            stack.extend(
+                child
+                for child in (
+                    getattr(node, "left_condition", None),
+                    getattr(node, "right_condition", None),
+                    *(getattr(node, "children", None) or []),
+                )
+                if child is not None
+            )
+        return names
+
+    def _note_loop_effects(self, node: ASTNode, before: _Status) -> None:
+        """Count *node*'s writes to a loop's condition names and the files
+        whose state it changed, for every loop being walked."""
+        changed = {
+            key
+            for key in {*before, *self._status}
+            if before.get(key) != self._status.get(key)
+        }
+        written = {
+            name
+            for target in _written_names(node)
+            for name in (target, self._condition_parents.get(target))
+            if name
+        }
+        for frame in self._loops:
+            if written & frame.names:
+                frame.writes += 1
+            if frame.armed:
+                frame.touched_after |= changed
+
+    def _arrive(self, idx: int) -> None:
+        """Take up the states of queued GO TOs to paragraph *idx* when the
+        walk reaches it some other way (fall-through, an unconditional GO
+        TO): it is entered from both, so its state is the merge."""
+        if not self._pending_states:
+            return
+        if self._names_at is None:
+            self._names_at = {}
+            for key, at in self._name_first.items():
+                self._names_at.setdefault(at, []).append(key)
+        for name in self._names_at.get(idx, ()):
+            saved = self._pending_states.pop(name, None)
+            if saved is not None:
+                self._status = self._merge([self._status, saved])
+                if name in self._pending_gotos:
+                    self._pending_gotos.remove(name)
 
     @staticmethod
     def _drive(step: _Step) -> Any:
@@ -717,7 +872,16 @@ class IOSequenceAnalyzer:
             visited.add(id(node))
             if isinstance(node, (IfStatement, EvaluateStatement)):
                 return (yield self._fork(node, _visit))
+            if (
+                isinstance(node, PerformStatement)
+                and getattr(node, "until_condition", None) is not None
+                and not getattr(node, "varying_clause", None)
+            ):
+                return (yield self._walk_loop(node, _visit))
+            before = dict(self._status) if self._loops else None
             self._dispatch(node)
+            if before is not None:
+                self._note_loop_effects(node, before)
             handler_pairs = _handler_arms(node)
             if isinstance(node, GoStatement):
                 # Reached through _visit, so nested in a branch or handler
@@ -797,21 +961,32 @@ class IOSequenceAnalyzer:
         """Run each arm of *node* from the state at the branch, then merge.
 
         An arm that ends the program (see ``_run_arm``) is left out of the
-        merge. An arm that jumps away with a GO TO is kept: the walk meets
-        its target later (by fall-through in a ``THRU ...-EXIT`` range, or as
-        a queued GO TO target), and the state it carries there is the
-        merged one. Returns ``_ENDS`` when every arm ends the program,
+        merge, and so is an arm that jumps away with a GO TO: its state
+        travels to the target with the queued GO TO (``_add_pending_goto``)
+        and is taken up there, whether the walk resumes at the target or
+        reaches it by fall-through (``_arrive``). Merging it into the
+        statement after the branch put ``READ f AT END CLOSE f GO TO EOJ``'s
+        closed state on the path that read a record. Returns ``_ENDS`` when every arm ends the program,
         ``_JUMPS`` when none falls out but some jump, else ``_FALLS``.
         """
         entry = dict(self._status)
+        captured: list[_LoopFrame] = []
         kept: list[_Status] = []
+        jumped: list[_Status] = []
         every: list[_Status] = []
         endings: set[str] = set()
         self._fork_depth += 1
         try:
             for arm in arms if arms is not None else self._arms(node):  # type: ignore[arg-type]
                 self._status = dict(entry)
+                writes = [frame.writes for frame in self._loops]
                 ending = yield self._run_arm(arm, visit)
+                for frame, count in zip(self._loops, writes, strict=False):
+                    if frame.writes != count and ending == _FALLS:
+                        # This arm sets the loop's condition: the loop is
+                        # left after it (see _LoopFrame).
+                        frame.exits.append(dict(self._status))
+                        captured.append(frame)
                 if self._terminated:
                     # A PERFORMed paragraph ran a top-level STOP RUN /
                     # GOBACK: that ends this arm's path, not every path
@@ -820,14 +995,18 @@ class IOSequenceAnalyzer:
                     ending = _ENDS
                 endings.add(ending)
                 every.append(self._status)
-                if ending != _ENDS:
+                if ending == _FALLS:
                     kept.append(self._status)
+                elif ending == _JUMPS:
+                    jumped.append(self._status)
         finally:
             self._fork_depth -= 1
         # Every arm ends the program: whatever follows is dead from here.
         # Merge every arm anyway, so the walk carries on from a state it
         # could be in.
-        self._status = self._merge(kept or every)
+        self._status = self._merge(kept or jumped or every)
+        for frame in captured:
+            frame.armed = True
         if _FALLS in endings:
             return _FALLS
         return _JUMPS if _JUMPS in endings else _ENDS
@@ -970,6 +1149,7 @@ class IOSequenceAnalyzer:
         i = start
         while i <= end and not self._terminated and i not in visited:
             visited.add(i)
+            self._arrive(i)
             outcome, gtarget = yield self._run_paragraph(i)
             if outcome == "stop":
                 return

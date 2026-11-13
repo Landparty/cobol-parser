@@ -17,6 +17,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+* **No false "file left open" after an AT END that closes and leaves.**
+  `READ f AT END CLOSE f GO TO P9` (or `IF ... CLOSE f GO TO P9`) with
+  `STOP RUN` in P9, and `AT END CLOSE f MOVE 'Y' TO EOF-SW` in a
+  `PERFORM UNTIL EOF-SW = 'Y'` loop, no longer report FILE_LEFT_OPEN: a GO
+  TO carries its own state to its target, and an UNTIL loop is left in the
+  state of the branch that ends it.
 * **A JCL step inside `IF` that also codes `COND=` keeps the IF.**
   `JobStep` gains `if_condition` (the enclosing IF/ELSE) and `cond` (the
   raw `COND=`) beside `condition`, which is unchanged; the MCP job tools

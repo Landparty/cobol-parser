@@ -844,9 +844,24 @@ arm whose own top level hits STOP RUN / GOBACK / EXIT PROGRAM, or that
 PERFORMs a paragraph that does, is left out of the merge, and no
 FILE_LEFT_OPEN is claimed at that STOP RUN (a `_fork_depth` check in
 `_terminate_program`, also part of the PERFORM-summary key). An arm ending in
-an unconditional GO TO stays *in* the merge: dropping it loses its state at
-the target (`PERFORM A THRU A-EXIT` with `IF .. OPEN f GO TO A-EXIT`, NIST
-DB104A's `IF .. CLOSE f GO TO ..` guards). A top-level IF whose arms all end
+an unconditional GO TO is left *out* of the merge when another arm falls
+through (it stays in only when none does): its state goes to the target with
+the queued GO TO (`_add_pending_goto`) and is taken up there --
+`_next_pending` starts a target reached only by GO TO from those states
+alone (not the loop's state at the point the walk resumed), and `_arrive`
+merges them in when the walk reaches the target by fall-through or a plain GO
+TO (`PERFORM A THRU A-EXIT` with `IF .. OPEN f GO TO A-EXIT`, NIST DB104A's
+`IF .. CLOSE f GO TO ..` guards). Merging it into the fall-through put `READ
+f AT END CLOSE f GO TO P9`'s closed state on the path that read a record,
+and P9's STOP RUN reported f left open (bug hunt after #901).
+**A `PERFORM ... UNTIL` (no VARYING) is left by the arm that ends it**
+(`_walk_loop`, `_LoopFrame`): the body is walked once, and the states at the
+end of every fork arm that writes a name the UNTIL tests (MOVE / SET /
+INITIALIZE, a level-88's parent counting as its name) are the states after
+the loop; a file whose state changes after that fork keeps the body's end
+state. With no such arm, the body's end state as before. So `READ f AT END
+CLOSE f MOVE 'Y' TO EOF-SW` in `PERFORM UNTIL EOF-SW = 'Y'` leaves f closed.
+A loop that runs zero times is not modeled. A top-level IF whose arms all end
 the program ends the paragraph walk (`_ENDS`). Violations need to hold on
 every merged path (READ of a file open on no path, OPEN of a file open on
 every path); FILE_LEFT_OPEN is the exception and fires for a file open on any
